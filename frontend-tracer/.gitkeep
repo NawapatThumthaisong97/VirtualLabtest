@@ -1,0 +1,46 @@
+
+Set-Content frontend-tracer/src/app/.gitkeep 
+Set-Content frontend-tracer/src/components/.gitkeep 
+Set-Content frontend-tracer/src/lib/.gitkeep 
+Set-Content frontend-tracer/public/.gitkeep 
+
+# 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴
+# BACKEND-FASTAPI (FastAPI)
+# 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴
+New-Item -ItemType Directory -Force -Path backend-fastapi/app/routers
+New-Item -ItemType Directory -Force -Path backend-fastapi/app/models
+New-Item -ItemType Directory -Force -Path backend-fastapi/app/schemas
+New-Item -ItemType Directory -Force -Path backend-fastapi/app/services
+New-Item -ItemType Directory -Force -Path backend-fastapi/app/db
+New-Item -ItemType Directory -Force -Path backend-fastapi/sky_tasks
+Set-Content backend-fastapi/app/.gitkeep 
+Set-Content backend-fastapi/sky_tasks/.gitkeep 
+
+# 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴
+# K8S-HELM (Helm Chart)
+# 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/fastapi
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/frontend
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/postgresql
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/nginx-ingress
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/oauth2-proxy
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/tailscale-router
+Set-Content k8s-helm/.gitkeep 
+Set-Content k8s-helm/templates/fastapi/.gitkeep 
+Set-Content k8s-helm/templates/frontend/.gitkeep 
+Set-Content k8s-helm/templates/postgresql/.gitkeep 
+Set-Content k8s-helm/templates/nginx-ingress/.gitkeep 
+Set-Content k8s-helm/templates/oauth2-proxy/.gitkeep 
+Set-Content k8s-helm/templates/tailscale-router/.gitkeep 
+
+# 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴
+# INFRASTRUCTURE (AWS Terraform + Scripts)
+# 컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴
+New-Item -ItemType Directory -Force -Path infrastructure/aws
+New-Item -ItemType Directory -Force -Path infrastructure/cloudflare
+New-Item -ItemType Directory -Force -Path infrastructure/scripts
+Set-Content infrastructure/aws/.gitkeep 
+Set-Content infrastructure/cloudflare/.gitkeep 
+Set-Content infrastructure/scripts/.gitkeep 
+
+Write-Host ? Scaffold complete.

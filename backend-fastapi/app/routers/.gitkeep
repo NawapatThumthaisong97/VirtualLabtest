@@ -1,0 +1,30 @@
+
+Set-Content -Path backend-fastapi/app/models/.gitkeep -Value 
+Set-Content -Path backend-fastapi/app/schemas/.gitkeep -Value 
+Set-Content -Path backend-fastapi/app/services/.gitkeep -Value 
+Set-Content -Path backend-fastapi/app/db/.gitkeep -Value 
+Set-Content -Path backend-fastapi/sky_tasks/.gitkeep -Value 
+
+# k8s-helm inner directories
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/fastapi
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/frontend
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/postgresql
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/nginx-ingress
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/oauth2-proxy
+New-Item -ItemType Directory -Force -Path k8s-helm/templates/tailscale-router
+Set-Content -Path k8s-helm/templates/fastapi/.gitkeep -Value 
+Set-Content -Path k8s-helm/templates/frontend/.gitkeep -Value 
+Set-Content -Path k8s-helm/templates/postgresql/.gitkeep -Value 
+Set-Content -Path k8s-helm/templates/nginx-ingress/.gitkeep -Value 
+Set-Content -Path k8s-helm/templates/oauth2-proxy/.gitkeep -Value 
+Set-Content -Path k8s-helm/templates/tailscale-router/.gitkeep -Value 
+
+# infrastructure inner directories
+New-Item -ItemType Directory -Force -Path infrastructure/aws
+New-Item -ItemType Directory -Force -Path infrastructure/cloudflare
+New-Item -ItemType Directory -Force -Path infrastructure/scripts
+Set-Content -Path infrastructure/aws/.gitkeep -Value 
+Set-Content -Path infrastructure/cloudflare/.gitkeep -Value 
+Set-Content -Path infrastructure/scripts/.gitkeep -Value 
+
+Write-Host ? All sub-directories created.
