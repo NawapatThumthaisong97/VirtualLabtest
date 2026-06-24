@@ -9,43 +9,43 @@
 
 # ── VPC ───────────────────────────────────────────────────────────────────────
 
-resource "aws_vpc" "ailab" {
+resource "aws_vpc" "virtuallab" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = { Name = "ailab-vpc" }
+  tags = { Name = "virtuallab-vpc" }
 }
 
 # ── Internet Gateway (attached to VPC, used by Public Subnet) ─────────────────
 
-resource "aws_internet_gateway" "ailab" {
-  vpc_id = aws_vpc.ailab.id
+resource "aws_internet_gateway" "virtuallab" {
+  vpc_id = aws_vpc.virtuallab.id
 
-  tags = { Name = "ailab-igw" }
+  tags = { Name = "virtuallab-igw" }
 }
 
 # ── Public Subnet ─────────────────────────────────────────────────────────────
 
 resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.ailab.id
+  vpc_id                  = aws_vpc.virtuallab.id
   cidr_block              = var.public_subnet_cidr
   availability_zone       = var.availability_zone
   map_public_ip_on_launch = true   # t4g.nano needs a public IP for Tailscale
 
-  tags = { Name = "ailab-subnet-public" }
+  tags = { Name = "virtuallab-subnet-public" }
 }
 
 # ── Private Subnet ────────────────────────────────────────────────────────────
 # CONSTRAINT 4: map_public_ip_on_launch = false — no worker ever gets a public IP
 
 resource "aws_subnet" "private" {
-  vpc_id                  = aws_vpc.ailab.id
+  vpc_id                  = aws_vpc.virtuallab.id
   cidr_block              = var.private_subnet_cidr
   availability_zone       = var.availability_zone
   map_public_ip_on_launch = false   # ENFORCES Constraint #4
 
-  tags = { Name = "ailab-subnet-private" }
+  tags = { Name = "virtuallab-subnet-private" }
 }
 
 # ── Elastic IP for NAT Gateway ────────────────────────────────────────────────
@@ -53,33 +53,33 @@ resource "aws_subnet" "private" {
 resource "aws_eip" "nat" {
   domain = "vpc"
 
-  tags = { Name = "ailab-nat-eip" }
+  tags = { Name = "virtuallab-nat-eip" }
 
-  depends_on = [aws_internet_gateway.ailab]
+  depends_on = [aws_internet_gateway.virtuallab]
 }
 
 # ── NAT Gateway (sits in Public Subnet, gives Private Subnet outbound internet) ─
 
-resource "aws_nat_gateway" "ailab" {
+resource "aws_nat_gateway" "virtuallab" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public.id
 
-  tags = { Name = "ailab-nat-gw" }
+  tags = { Name = "virtuallab-nat-gw" }
 
-  depends_on = [aws_internet_gateway.ailab]
+  depends_on = [aws_internet_gateway.virtuallab]
 }
 
 # ── Route Table: Public Subnet → Internet Gateway ─────────────────────────────
 
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.ailab.id
+  vpc_id = aws_vpc.virtuallab.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.ailab.id
+    gateway_id = aws_internet_gateway.virtuallab.id
   }
 
-  tags = { Name = "ailab-rt-public" }
+  tags = { Name = "virtuallab-rt-public" }
 }
 
 resource "aws_route_table_association" "public" {
@@ -91,14 +91,14 @@ resource "aws_route_table_association" "public" {
 # CONSTRAINT 7: Private workers reach Docker Hub / internet via NAT, not VPN
 
 resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.ailab.id
+  vpc_id = aws_vpc.virtuallab.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.ailab.id
+    nat_gateway_id = aws_nat_gateway.virtuallab.id
   }
 
-  tags = { Name = "ailab-rt-private" }
+  tags = { Name = "virtuallab-rt-private" }
 }
 
 resource "aws_route_table_association" "private" {
@@ -113,9 +113,9 @@ resource "aws_route_table_association" "private" {
 #   - All outbound
 
 resource "aws_security_group" "tailscale_gateway" {
-  name        = "ailab-sg-tailscale-gateway"
+  name        = "virtuallab-sg-tailscale-gateway"
   description = "SG for the always-on Tailscale Subnet Router (t4g.nano)"
-  vpc_id      = aws_vpc.ailab.id
+  vpc_id      = aws_vpc.virtuallab.id
 
   ingress {
     description = "Tailscale WireGuard"
@@ -140,7 +140,7 @@ resource "aws_security_group" "tailscale_gateway" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "ailab-sg-tailscale-gateway" }
+  tags = { Name = "virtuallab-sg-tailscale-gateway" }
 }
 
 # ── Security Group: EC2 Spot ML Workers ───────────────────────────────────────
@@ -150,9 +150,9 @@ resource "aws_security_group" "tailscale_gateway" {
 # CONSTRAINT 1: NO inbound from 0.0.0.0/0
 
 resource "aws_security_group" "spot_workers" {
-  name        = "ailab-sg-spot-workers"
+  name        = "virtuallab-sg-spot-workers"
   description = "SG for ephemeral EC2 Spot ML workers. No public inbound."
-  vpc_id      = aws_vpc.ailab.id
+  vpc_id      = aws_vpc.virtuallab.id
 
   ingress {
     description     = "SSH from Tailscale Gateway only"
@@ -169,5 +169,5 @@ resource "aws_security_group" "spot_workers" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "ailab-sg-spot-workers" }
+  tags = { Name = "virtuallab-sg-spot-workers" }
 }

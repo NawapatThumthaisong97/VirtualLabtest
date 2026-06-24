@@ -1,4 +1,4 @@
-################################################################################
+﻿################################################################################
 # templates/postgresql/statefulset.yaml
 #
 # Dynamic values (from credentials.env via helm --set):
@@ -23,7 +23,7 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     app: postgresql
-    project: ailab
+    project: virtuallab
 spec:
   serviceName: postgresql
   replicas: 1

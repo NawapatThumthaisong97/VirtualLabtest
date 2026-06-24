@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 ################################################################################
 # deploy.sh — Deploy entire AI Learner Lab stack from credentials.env
 #
@@ -21,7 +21,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRED_FILE="$REPO_ROOT/credentials.env"
 TF_DIR="$REPO_ROOT/infrastructure/terraform"
 HELM_DIR="$REPO_ROOT/k8s-helm"
-NAMESPACE="ailab"
+NAMESPACE="virtuallab"
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 DRY_RUN=false
@@ -62,6 +62,7 @@ REQUIRED_VARS=(
     "AWS_DEFAULT_REGION"
     "TAILSCALE_AUTH_KEY"
     "CLOUDFLARE_TUNNEL_TOKEN"
+    "CLOUDFLARE_TUNNEL_DOMAIN"
     "GOOGLE_CLIENT_ID"
     "GOOGLE_CLIENT_SECRET"
     "OAUTH2_COOKIE_SECRET"
@@ -151,11 +152,12 @@ if [ "$TF_ONLY" = false ]; then
     echo "--- [3/3] Helm Deploy ---"
 
     HELM_CMD=(
-        helm upgrade --install ailab "$HELM_DIR"
+        helm upgrade --install virtuallab "$HELM_DIR"
         --namespace "$NAMESPACE"
         --create-namespace
         # ── From credentials.env ──
         --set global.cloudflare.tunnelToken="$CLOUDFLARE_TUNNEL_TOKEN"
+        --set global.domain="$CLOUDFLARE_TUNNEL_DOMAIN"
         --set global.aws.region="$AWS_DEFAULT_REGION"
         --set global.aws.mlBucketName="$ML_BUCKET_NAME"
         --set global.oauth2.clientId="$GOOGLE_CLIENT_ID"

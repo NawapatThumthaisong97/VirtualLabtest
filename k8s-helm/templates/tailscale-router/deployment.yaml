@@ -1,4 +1,4 @@
-################################################################################
+﻿################################################################################
 # templates/tailscale-router/deployment.yaml
 #
 # On-Prem Tailscale Subnet Router pod.
@@ -26,7 +26,7 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     app: tailscale-router
-    project: ailab
+    project: virtuallab
 spec:
   replicas: 1
   selector:
@@ -56,11 +56,11 @@ spec:
             - name: TS_ROUTES
               value: {{ .Values.tailscale.onPremCidr | quote }}
             - name: TS_HOSTNAME
-              value: "ailab-onprem-router"
+              value: "virtuallab-onprem-router"
             - name: TS_ACCEPT_ROUTES
               value: "true"
             - name: TS_EXTRA_ARGS
-              value: "--advertise-tags=tag:ailab-router"
+              value: "--advertise-tags=tag:virtuallab-router"
           resources:
             requests:
               cpu: "50m"

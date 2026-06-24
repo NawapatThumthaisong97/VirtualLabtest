@@ -1,4 +1,4 @@
-# infrastructure
+﻿# infrastructure
 
 Cloud & Network Infrastructure as Code + Day-0 Bootstrap Scripts
 
@@ -43,9 +43,9 @@ scripts/
    └─► Verifies: On-Prem → 10.0.x.x (private IP) reachable via Tailscale
 
 4. bash scripts/create-k8s-secrets.sh
-   └─► Creates: kubectl secret aws-credentials in ailab namespace
+   └─► Creates: kubectl secret aws-credentials in virtuallab namespace
 
-5. helm upgrade --install ailab ../../k8s-helm -f ../../k8s-helm/values.yaml -n ailab
+5. helm upgrade --install virtuallab ../../k8s-helm -f ../../k8s-helm/values.yaml -n virtuallab
    └─► Deploys: All Control Plane pods (requires Step 4 to be complete first)
 ```
 

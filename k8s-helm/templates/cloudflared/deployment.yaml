@@ -1,4 +1,4 @@
-################################################################################
+﻿################################################################################
 # templates/cloudflared/deployment.yaml
 #
 # CONSTRAINT #1: Cloudflare Tunnel initiates OUTBOUND connection — zero inbound ports.
@@ -24,7 +24,7 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     app: cloudflared
-    project: ailab
+    project: virtuallab
 spec:
   replicas: 1
   selector:
@@ -37,7 +37,7 @@ spec:
     spec:
       containers:
         - name: cloudflared
-          image: cloudflare/cloudflared:latest
+          image: cloudflare/cloudflared:2024.6.1  # Pinned — update intentionally
           args:
             - tunnel
             - --no-autoupdate

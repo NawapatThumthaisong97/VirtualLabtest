@@ -1,4 +1,4 @@
-"""
+﻿"""
 services/skypilot_service.py
 ─────────────────────────────────────────────────────────────────────────────
 SkyPilot SDK wrapper — AI Learner Lab Control Plane
@@ -61,7 +61,7 @@ def _build_task(job_id: str, job_type: str, config: dict) -> sky.Task:
     # Inject runtime environment variables into the task
     task.update_envs({
         "JOB_ID": job_id,
-        "S3_BUCKET": os.getenv("S3_BUCKET", "ailab-ml-artifacts"),
+        "S3_BUCKET": os.getenv("S3_BUCKET", "virtuallab-ml-artifacts"),
         **{k: str(v) for k, v in config.items()},  # pass extra config as env vars
     })
 
@@ -85,7 +85,7 @@ async def launch_job(job_id: str, job_type: str, config: dict) -> str:
         SkyPilot cluster name (used for log retrieval and autostop).
     """
     task = _build_task(job_id, job_type, config)
-    cluster_name = f"ailab-{job_id[:8]}"
+    cluster_name = f"virtuallab-{job_id[:8]}"
 
     logger.info(
         "Launching SkyPilot job | job_id=%s job_type=%s cluster=%s",
@@ -118,7 +118,7 @@ async def get_job_logs(cluster_name: str) -> str:
     Used by the /api/logs/{job_id} SSE endpoint to stream logs to the UI.
 
     Args:
-        cluster_name: The SkyPilot cluster name (e.g., "ailab-abc12345").
+        cluster_name: The SkyPilot cluster name (e.g., "virtuallab-abc12345").
 
     Returns:
         Log output as a string.

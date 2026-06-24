@@ -1,4 +1,4 @@
-# AI Learner Lab — PoC Tracer Platform
+﻿# AI Learner Lab — PoC Tracer Platform
 
 > **Type:** Proof of Concept · Tracer Bullet  
 > **Strategy:** 🏠 Local K3s First → ☁️ AWS Spot Burst Second  
@@ -65,7 +65,7 @@ Job Submitted
       ▼
 SkyPilot evaluates K3s capacity
       │
-      ├── K3s nodes available? ─── YES ──► 🏠 BRANCH A: Run on local K3s worker
+      ├── K3s nodes avvirtuallable? ─── YES ──► 🏠 BRANCH A: Run on local K3s worker
       │                                          - Fast, no cloud cost
       │                                          - Docker pull via on-prem ISP
       │                                          - S3 access via AWS credentials in env
@@ -93,14 +93,14 @@ Two Kubernetes-native mechanisms handle all sensitive access:
 kubectl create secret generic aws-credentials \
   --from-literal=AWS_ACCESS_KEY_ID=AKIA... \
   --from-literal=AWS_SECRET_ACCESS_KEY=... \
-  -n ailab
+  -n virtuallab
 ```
 
 The FastAPI `Deployment` mounts this as environment variables via `envFrom.secretRef`. The credentials are **never on disk, never in any image, never in git**.
 
 ### 2. K3s Access → Kubernetes ServiceAccount + RBAC
 
-The FastAPI pod is assigned `ailab-fastapi-sa` — a ServiceAccount bound to a ClusterRole that grants SkyPilot the permissions it needs to manage local K3s workers (list nodes, create/delete pods, watch jobs). No kubeconfig file, no static tokens.
+The FastAPI pod is assigned `virtuallab-fastapi-sa` — a ServiceAccount bound to a ClusterRole that grants SkyPilot the permissions it needs to manage local K3s workers (list nodes, create/delete pods, watch jobs). No kubeconfig file, no static tokens.
 
 ---
 
@@ -307,8 +307,8 @@ bash infrastructure/scripts/create-k8s-secrets.sh
 
 ```bash
 source credentials.env
-helm upgrade --install ailab ./k8s-helm \
-  --namespace ailab --create-namespace \
+helm upgrade --install virtuallab ./k8s-helm \
+  --namespace virtuallab --create-namespace \
   --set global.cloudflare.tunnelToken="$CLOUDFLARE_TUNNEL_TOKEN" \
   --set global.aws.region="$AWS_DEFAULT_REGION" \
   --set postgresql.password="$POSTGRES_PASSWORD"

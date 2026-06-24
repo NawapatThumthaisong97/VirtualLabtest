@@ -66,11 +66,11 @@ variable "gateway_key_pair_name" {
 variable "ml_bucket_name" {
   description = "Name of the S3 bucket used for ML dataset input and model weight output."
   type        = string
-  default     = "ailab-ml-artifacts"
+  default     = "virtuallab-ml-artifacts"
 }
 
 variable "iam_user_name" {
   description = "IAM user created for SkyPilot / FastAPI to provision EC2 Spot workers and access S3."
   type        = string
-  default     = "ailab-skypilot"
+  default     = "virtuallab-skypilot"
 }

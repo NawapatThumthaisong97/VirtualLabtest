@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 ###############################################################################
 # bootstrap-gateway.sh.tftpl
 # UserData for the t4g.nano Tailscale Subnet Router (ARM64, Amazon Linux 2023)
@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-LOG_FILE="/var/log/ailab-gateway-bootstrap.log"
+LOG_FILE="/var/log/virtuallab-gateway-bootstrap.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=== AI Learner Lab: Tailscale Gateway Bootstrap ==="
@@ -48,8 +48,8 @@ tailscale up \
   --advertise-routes="${vpc_cidr}" \
   --accept-routes \
   --ssh \
-  --hostname="ailab-aws-gateway" \
-  --advertise-tags="tag:ailab-gateway"
+  --hostname="virtuallab-aws-gateway" \
+  --advertise-tags="tag:virtuallab-gateway"
 
 echo "[OK] Tailscale up — advertising ${vpc_cidr} to Tailnet"
 

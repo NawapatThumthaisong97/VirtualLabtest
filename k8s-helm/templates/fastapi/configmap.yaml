@@ -1,4 +1,4 @@
-################################################################################
+﻿################################################################################
 # templates/fastapi/configmap.yaml
 #
 # Non-sensitive configuration for the FastAPI pod.
@@ -44,7 +44,7 @@ metadata:
 data:
   config.yaml: |
     aws:
-      vpc_name: ailab-vpc
+      vpc_name: virtuallab-vpc
       # CONSTRAINT #4: Workers land in private subnet (no public IP)
       # Value: from `terraform output -raw private_subnet_id` → --set global.aws.privateSubnetId
       subnets:

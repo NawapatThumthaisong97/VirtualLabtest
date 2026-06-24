@@ -1,7 +1,7 @@
-###############################################################################
+﻿###############################################################################
 # main.tf — AI Learner Lab PoC
 # Provider: AWS (ap-southeast-1)
-# All resources tagged with Project = "ailab"
+# All resources tagged with Project = "virtuallab"
 ###############################################################################
 
 terraform {
@@ -16,7 +16,7 @@ terraform {
 
   # ── Optional: Remote state in S3 (uncomment after bucket exists) ────────────
   # backend "s3" {
-  #   bucket = "ailab-tfstate"
+  #   bucket = "virtuallab-tfstate"
   #   key    = "poc/terraform.tfstate"
   #   region = "ap-southeast-1"
   # }
@@ -27,7 +27,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "ailab"
+      Project     = "virtuallab"
       Environment = var.environment
       ManagedBy   = "terraform"
     }

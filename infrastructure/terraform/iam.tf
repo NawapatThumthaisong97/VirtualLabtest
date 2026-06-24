@@ -27,7 +27,7 @@ resource "aws_iam_access_key" "skypilot" {
 # ── Minimum-Permission Policy ─────────────────────────────────────────────────
 
 resource "aws_iam_policy" "skypilot" {
-  name        = "ailab-skypilot-policy"
+  name        = "virtuallab-skypilot-policy"
   description = "Minimum permissions for SkyPilot to provision EC2 Spot workers and access S3."
 
   policy = jsonencode({
@@ -61,7 +61,7 @@ resource "aws_iam_policy" "skypilot" {
         # Optional: Restrict to specific VPC (tighten later)
         # Condition = {
         #   StringEquals = {
-        #     "ec2:Vpc" = aws_vpc.ailab.arn
+        #     "ec2:Vpc" = aws_vpc.virtuallab.arn
         #   }
         # }
       },

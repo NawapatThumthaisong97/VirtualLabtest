@@ -1,4 +1,4 @@
-###############################################################################
+﻿###############################################################################
 # outputs.tf — Key values to use in subsequent Day-0 steps
 #
 # ⚠️  SENSITIVE outputs (IAM access keys) are marked sensitive = true.
@@ -11,12 +11,12 @@
 
 output "vpc_id" {
   description = "VPC ID. Needed for SkyPilot sky_config.yaml vpc_id field."
-  value       = aws_vpc.ailab.id
+  value       = aws_vpc.virtuallab.id
 }
 
 output "vpc_cidr" {
   description = "VPC CIDR block. Used by Tailscale gateway --advertise-routes."
-  value       = aws_vpc.ailab.cidr_block
+  value       = aws_vpc.virtuallab.cidr_block
 }
 
 # ── Subnets ───────────────────────────────────────────────────────────────────
@@ -55,13 +55,13 @@ output "ml_bucket_arn" {
 # Run: terraform output -json | jq '{key: .iam_access_key_id.value, secret: .iam_secret_access_key.value}'
 
 output "iam_access_key_id" {
-  description = "AWS_ACCESS_KEY_ID for the ailab-skypilot IAM user."
+  description = "AWS_ACCESS_KEY_ID for the virtuallab-skypilot IAM user."
   value       = aws_iam_access_key.skypilot.id
   sensitive   = true
 }
 
 output "iam_secret_access_key" {
-  description = "AWS_SECRET_ACCESS_KEY for the ailab-skypilot IAM user. Use in: create-k8s-secrets.sh"
+  description = "AWS_SECRET_ACCESS_KEY for the virtuallab-skypilot IAM user. Use in: create-k8s-secrets.sh"
   value       = aws_iam_access_key.skypilot.secret
   sensitive   = true
 }

@@ -1,4 +1,4 @@
-###############################################################################
+﻿###############################################################################
 # s3_endpoint.tf — VPC S3 Gateway Endpoint
 #
 # CONSTRAINT 7: S3 traffic from Private Subnet workers must NOT leave through
@@ -10,7 +10,7 @@
 # ── S3 VPC Gateway Endpoint ───────────────────────────────────────────────────
 
 resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = aws_vpc.ailab.id
+  vpc_id            = aws_vpc.virtuallab.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
   vpc_endpoint_type = "Gateway"
 
@@ -20,7 +20,7 @@ resource "aws_vpc_endpoint" "s3" {
     aws_route_table.private.id,
   ]
 
-  tags = { Name = "ailab-s3-vpc-endpoint" }
+  tags = { Name = "virtuallab-s3-vpc-endpoint" }
 }
 
 # ── S3 Bucket for ML Artifacts ────────────────────────────────────────────────

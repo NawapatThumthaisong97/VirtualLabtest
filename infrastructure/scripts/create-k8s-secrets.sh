@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 ###############################################################################
 # create-k8s-secrets.sh
 #
@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-NAMESPACE="ailab"
+NAMESPACE="virtuallab"
 
 echo "=== AI Learner Lab: Create K8s AWS Credentials Secret ==="
 

@@ -1,4 +1,4 @@
-# sky_tasks/burst_test.yaml
+﻿# sky_tasks/burst_test.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 # SkyPilot FORCE-AWS Task — Bullet 3B Validation Only
 #
@@ -13,7 +13,7 @@
 #   POST /api/launch  {"job_type": "burst", "config": {"force_cloud": true}}
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: ailab-burst-test
+name: virtuallab-burst-test
 
 envs:
   JOB_ID: ""

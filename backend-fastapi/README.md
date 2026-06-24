@@ -1,4 +1,4 @@
-# backend-fastapi
+﻿# backend-fastapi
 
 FastAPI (async) — Control Plane API + SkyPilot Orchestration
 
@@ -56,7 +56,7 @@ resources:
 
 ### Credentials (Constraint #8)
 - **AWS creds:** Injected via `envFrom.secretRef` in Helm deployment — NEVER in `.env` or code
-- **K3s access:** Via `ailab-fastapi-sa` ServiceAccount — auto-mounted by Kubernetes
+- **K3s access:** Via `virtuallab-fastapi-sa` ServiceAccount — auto-mounted by Kubernetes
 
 ## Constraint Reminders
 - ✅ All endpoints are `async def` — zero blocking I/O

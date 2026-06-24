@@ -1,4 +1,4 @@
-###############################################################################
+﻿###############################################################################
 # tailscale_gateway.tf — Always-On t4g.nano Tailscale Subnet Router
 #
 # CONSTRAINTS ENFORCED:
@@ -30,7 +30,7 @@ data "aws_ami" "amazon_linux_2023_arm64" {
 # ── IAM Role for t4g.nano (SSM access, no SSH required in prod) ───────────────
 
 resource "aws_iam_role" "tailscale_gateway" {
-  name = "ailab-tailscale-gateway-role"
+  name = "virtuallab-tailscale-gateway-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -48,14 +48,14 @@ resource "aws_iam_role_policy_attachment" "tailscale_gateway_ssm" {
 }
 
 resource "aws_iam_instance_profile" "tailscale_gateway" {
-  name = "ailab-tailscale-gateway-profile"
+  name = "virtuallab-tailscale-gateway-profile"
   role = aws_iam_role.tailscale_gateway.name
 }
 
 # ── Launch Template ───────────────────────────────────────────────────────────
 
 resource "aws_launch_template" "tailscale_gateway" {
-  name_prefix   = "ailab-tailscale-gw-"
+  name_prefix   = "virtuallab-tailscale-gw-"
   image_id      = data.aws_ami.amazon_linux_2023_arm64.id
   instance_type = "t4g.nano"
 
@@ -88,9 +88,9 @@ resource "aws_launch_template" "tailscale_gateway" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name        = "ailab-tailscale-gateway"
+      Name        = "virtuallab-tailscale-gateway"
       Role        = "tailscale-subnet-router"
-      Project     = "ailab"
+      Project     = "virtuallab"
       Environment = var.environment
     }
   }
@@ -104,7 +104,7 @@ resource "aws_launch_template" "tailscale_gateway" {
 # CONSTRAINT 6: Always-on, never Spot. ASG ensures automatic replacement on failure.
 
 resource "aws_autoscaling_group" "tailscale_gateway" {
-  name                = "ailab-asg-tailscale-gateway"
+  name                = "virtuallab-asg-tailscale-gateway"
   min_size            = 1
   max_size            = 1
   desired_capacity    = 1
@@ -121,13 +121,13 @@ resource "aws_autoscaling_group" "tailscale_gateway" {
 
   tag {
     key                 = "Name"
-    value               = "ailab-tailscale-gateway"
+    value               = "virtuallab-tailscale-gateway"
     propagate_at_launch = true
   }
 
   tag {
     key                 = "Project"
-    value               = "ailab"
+    value               = "virtuallab"
     propagate_at_launch = true
   }
 

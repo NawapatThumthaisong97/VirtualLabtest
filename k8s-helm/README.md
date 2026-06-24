@@ -1,4 +1,4 @@
-# k8s-helm
+﻿# k8s-helm
 
 Helm Chart — Control Plane Deployment on K3s Master Node
 
@@ -14,7 +14,7 @@ templates/
   fastapi/
     deployment.yaml       ← FastAPI pod (envFrom: aws-credentials Secret, serviceAccountName)
     service.yaml
-    serviceaccount.yaml   ← ailab-fastapi-sa ServiceAccount
+    serviceaccount.yaml   ← virtuallab-fastapi-sa ServiceAccount
     rbac.yaml             ← ClusterRole + ClusterRoleBinding for SkyPilot K3s access
   frontend/
     deployment.yaml
@@ -42,7 +42,7 @@ templates/
 ### fastapi/deployment.yaml — Credential Injection (Constraint #8)
 ```yaml
 spec:
-  serviceAccountName: ailab-fastapi-sa   # K3s RBAC access for SkyPilot
+  serviceAccountName: virtuallab-fastapi-sa   # K3s RBAC access for SkyPilot
   containers:
     - name: fastapi
       envFrom:

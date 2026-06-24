@@ -1,4 +1,4 @@
-# sky_tasks/sky_config.yaml
+﻿# sky_tasks/sky_config.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 # SkyPilot Global Configuration — AI Learner Lab
 #
@@ -13,7 +13,7 @@
 aws:
   # CONSTRAINT #4: All EC2 Spot workers must land in the PRIVATE subnet.
   # Value is substituted by Helm chart from Terraform output: aws_subnet.private.id
-  vpc_name: ailab-vpc
+  vpc_name: virtuallab-vpc
 
   # Disable public IPs at the SkyPilot level as a second layer of enforcement
   # (subnet also has map_public_ip_on_launch=false — CONSTRAINT #4 defense-in-depth)

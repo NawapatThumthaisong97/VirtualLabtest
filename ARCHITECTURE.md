@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — AI Learner Lab (PoC Tracer Platform)
+﻿# ARCHITECTURE.md — AI Learner Lab (PoC Tracer Platform)
 
 > **Classification:** Proof of Concept · Tracer Bullet  
 > **Strategy:** Hybrid Execution — Local K3s First, AWS Spot Burst Second  
@@ -159,7 +159,7 @@ SkyPilot evaluates Tier 1 first. If local K3s nodes are at capacity, it falls th
 **Implementation — Two-Part Strategy:**
 
 #### Part A: AWS Credentials (for Spot provisioning)
-- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are stored as a **Kubernetes Secret** in the `ailab` namespace.
+- `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are stored as a **Kubernetes Secret** in the `virtuallab` namespace.
 - The FastAPI `Deployment` manifest mounts this Secret as environment variables via `envFrom.secretRef`.
 - SkyPilot SDK (running inside the FastAPI pod) reads these env vars to authenticate to AWS APIs.
 - The IAM user/role is scoped to minimum permissions: `ec2:*` on the target VPC + `s3:GetObject/PutObject` on the ML bucket only.
@@ -172,7 +172,7 @@ envFrom:
 ```
 
 #### Part B: K3s Local Access (for local job dispatch)
-- The FastAPI pod is assigned a **Kubernetes ServiceAccount** (`ailab-fastapi-sa`).
+- The FastAPI pod is assigned a **Kubernetes ServiceAccount** (`virtuallab-fastapi-sa`).
 - This ServiceAccount is bound to a **ClusterRole** granting SkyPilot the permissions it needs to list nodes, create pods, and monitor jobs on the local K3s cluster.
 - No kubeconfig file, no static tokens — Kubernetes RBAC handles it entirely.
 
@@ -181,20 +181,20 @@ envFrom:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ailab-fastapi-sa
-  namespace: ailab
+  name: virtuallab-fastapi-sa
+  namespace: virtuallab
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ailab-fastapi-crb
+  name: virtuallab-fastapi-crb
 subjects:
   - kind: ServiceAccount
-    name: ailab-fastapi-sa
-    namespace: ailab
+    name: virtuallab-fastapi-sa
+    namespace: virtuallab
 roleRef:
   kind: ClusterRole
-  name: ailab-skypilot-role
+  name: virtuallab-skypilot-role
   apiGroup: rbac.authorization.k8s.io
 ```
 
@@ -274,7 +274,7 @@ roleRef:
 │  │   └─ SSH from Master ──► Via t4g.nano Tailscale GW          │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │                                                                      │
-│  [S3 VPC Gateway Endpoint]   [AWS S3 Bucket: ailab-ml-artifacts]    │
+│  [S3 VPC Gateway Endpoint]   [AWS S3 Bucket: virtuallab-ml-artifacts]    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -302,7 +302,7 @@ FASTAPI POD
            │
            ├─── EVALUATE K3S CAPACITY ──────────────────────────────────────
            │         │
-           │    K3s nodes available?
+           │    K3s nodes avvirtuallable?
            │         │
            │   YES ──┴────────────────────────────────────────────────────────
            │                        BRANCH A: LOCAL EXECUTION
@@ -312,10 +312,10 @@ FASTAPI POD
            │
            │         K3s Worker Node (On-Prem)
            │          ├─ docker pull trainer:v1 ──► On-Prem ISP → Docker Hub
-           │          ├─ aws s3 cp s3://ailab-ml-artifacts/dataset.tar .
+           │          ├─ aws s3 cp s3://virtuallab-ml-artifacts/dataset.tar .
            │          │   (credentials from pod env → S3 VPC Endpoint or direct)
            │          ├─ [RUN ML TRAINING SCRIPT]
-           │          └─ aws s3 cp model.pt s3://ailab-ml-artifacts/models/xyz/
+           │          └─ aws s3 cp model.pt s3://virtuallab-ml-artifacts/models/xyz/
            │
            │         SkyPilot detects job completion
            │         UPDATE state=SUCCESS → PostgreSQL
@@ -339,10 +339,10 @@ FASTAPI POD
            │
            │         EC2 Spot Worker (10.0.2.15)
            │          ├─ docker pull trainer:v1 ──► NAT GW → Docker Hub
-           │          ├─ aws s3 cp s3://ailab-ml-artifacts/dataset.tar .
+           │          ├─ aws s3 cp s3://virtuallab-ml-artifacts/dataset.tar .
            │          │   (→ VPC S3 Gateway Endpoint → S3, stays on AWS backbone)
            │          ├─ [RUN ML TRAINING SCRIPT]
-           │          └─ aws s3 cp model.pt s3://ailab-ml-artifacts/models/xyz/
+           │          └─ aws s3 cp model.pt s3://virtuallab-ml-artifacts/models/xyz/
            │
            │         Job exits 0
            │         SkyPilot autostop → AWS terminates 10.0.2.15
@@ -365,10 +365,10 @@ Day-0 Setup (Manual):
     ├─► kubectl create secret generic aws-credentials \
     │       --from-literal=AWS_ACCESS_KEY_ID=AKIA... \
     │       --from-literal=AWS_SECRET_ACCESS_KEY=... \
-    │       -n ailab
+    │       -n virtuallab
     │
     └─► Helm Chart deploys FastAPI with:
-            spec.serviceAccountName: ailab-fastapi-sa  ◄── K3s RBAC
+            spec.serviceAccountName: virtuallab-fastapi-sa  ◄── K3s RBAC
             envFrom:
               - secretRef:
                   name: aws-credentials               ◄── AWS API access

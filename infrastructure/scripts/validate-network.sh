@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 ###############################################################################
 # validate-network.sh
 #
@@ -34,12 +34,12 @@ echo "  [OK] Tailscale is running."
 
 # ── Check 2: Tailscale gateway is visible in Tailnet ──────────────────────────
 echo ""
-echo "[2/4] Looking for ailab-aws-gateway in Tailnet..."
-if tailscale status | grep -q "ailab-aws-gateway"; then
-  GATEWAY_IP=$(tailscale status | grep "ailab-aws-gateway" | awk '{print $1}')
+echo "[2/4] Looking for virtuallab-aws-gateway in Tailnet..."
+if tailscale status | grep -q "virtuallab-aws-gateway"; then
+  GATEWAY_IP=$(tailscale status | grep "virtuallab-aws-gateway" | awk '{print $1}')
   echo "  [OK] Found gateway at Tailscale IP: $GATEWAY_IP"
 else
-  echo "  WARNING: 'ailab-aws-gateway' not found in Tailnet."
+  echo "  WARNING: 'virtuallab-aws-gateway' not found in Tailnet."
   echo "           Is the t4g.nano ASG running? Check AWS Console → EC2 → Auto Scaling Groups"
   echo "           Is the Tailscale auth key valid?"
   GATEWAY_IP="$TEST_GATEWAY_HOST"
@@ -76,4 +76,4 @@ echo ""
 echo "Next steps:"
 echo "  - If all checks passed: proceed to Step 1c (create-k8s-secrets.sh)"
 echo "  - If subnet route not visible: go to https://login.tailscale.com/admin/machines"
-echo "    and APPROVE the subnet route for ailab-aws-gateway: $PRIVATE_SUBNET_CIDR"
+echo "    and APPROVE the subnet route for virtuallab-aws-gateway: $PRIVATE_SUBNET_CIDR"

@@ -1,4 +1,4 @@
-# sky_tasks/ml_job.yaml
+﻿# sky_tasks/ml_job.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 # SkyPilot 2-Tier Resource Spec — CONSTRAINT #3 (K3s First, AWS Burst Second)
 #
@@ -9,7 +9,7 @@
 #   sky.launch(sky.Task.from_yaml("sky_tasks/ml_job.yaml"), ...)
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: ailab-ml-job
+name: virtuallab-ml-job
 
 # ── Inputs: fetched from S3 before the run script executes ──────────────────
 file_mounts:
@@ -57,7 +57,7 @@ run: |
 resources:
   # ── Tier 1: On-Prem K3s (first priority) ─────────────────────────────────
   - cloud: kubernetes
-    # SkyPilot uses the in-cluster ServiceAccount token (ailab-fastapi-sa)
+    # SkyPilot uses the in-cluster ServiceAccount token (virtuallab-fastapi-sa)
     # to authenticate — no kubeconfig file needed (CONSTRAINT #8, Part B).
     kubernetes:
       networking: portforward    # Use port-forwarding for SSH; no node port needed

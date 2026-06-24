@@ -1,4 +1,4 @@
-################################################################################
+﻿################################################################################
 # k8s-helm/values.yaml
 #
 # Master values file for the AI Learner Lab Helm chart.
@@ -8,9 +8,10 @@
 # Deploy command (run from repo root after sourcing credentials.env):
 #
 #   source credentials.env
-#   helm upgrade --install ailab ./k8s-helm \
-#     --namespace ailab --create-namespace \
+#   helm upgrade --install virtuallab ./k8s-helm \
+#     --namespace virtuallab --create-namespace \
 #     --set global.cloudflare.tunnelToken="$CLOUDFLARE_TUNNEL_TOKEN" \
+#     --set global.domain="$CLOUDFLARE_TUNNEL_DOMAIN" \
 #     --set global.aws.privateSubnetId="$(terraform -chdir=infrastructure/terraform output -raw private_subnet_id)" \
 #     --set global.aws.sgSpotWorkersId="$(terraform -chdir=infrastructure/terraform output -raw sg_spot_workers_id)" \
 #     --set global.aws.region="$AWS_DEFAULT_REGION" \
@@ -30,7 +31,7 @@ global:
     region: "ap-southeast-1"       # Overridden by --set from $AWS_DEFAULT_REGION
     privateSubnetId: ""            # REQUIRED: from `terraform output -raw private_subnet_id`
     sgSpotWorkersId: ""            # REQUIRED: from `terraform output -raw sg_spot_workers_id`
-    mlBucketName: "ailab-ml-artifacts"   # Overridden by --set from $ML_BUCKET_NAME
+    mlBucketName: "virtuallab-ml-artifacts"   # Overridden by --set from $ML_BUCKET_NAME
 
   # ── Cloudflare Tunnel ────────────────────────────────────────────────────────
   cloudflare:
@@ -43,26 +44,28 @@ global:
     cookieSecret: ""               # REQUIRED: from $OAUTH2_COOKIE_SECRET
 
   # ── Application domain ───────────────────────────────────────────────────────
-  domain: "ailab.example.com"      # Your Cloudflare Tunnel public domain
+  # REQUIRED: from $CLOUDFLARE_TUNNEL_DOMAIN — must match your Cloudflare public hostname
+  # Used for OAuth2 redirect URL: https://<domain>/oauth2/callback
+  domain: ""                       # e.g. virtuallab.yourdomain.com
 
 # ── PostgreSQL ────────────────────────────────────────────────────────────────
 postgresql:
-  user: "ailab"
+  user: "virtuallab"
   password: ""                     # REQUIRED: from $POSTGRES_PASSWORD
-  database: "ailab_db"
+  database: "virtuallab_db"
   storageSize: "5Gi"
-  image: "postgres:16-alpine"
+  image: "postgres:16.3-alpine3.20"  # Pinned — update intentionally
 
 # ── FastAPI Backend ───────────────────────────────────────────────────────────
 fastapi:
-  image: "your-docker-hub/ailab-fastapi:latest"   # Push your image here
+  image: "your-docker-hub/virtuallab-fastapi:latest"   # Push your image here
   replicas: 1
   port: 8000
   skyConfigPath: "/app/sky_tasks/sky_config.yaml"
 
 # ── Frontend ─────────────────────────────────────────────────────────────────
 frontend:
-  image: "your-docker-hub/ailab-frontend:latest"
+  image: "your-docker-hub/virtuallab-frontend:latest"
   replicas: 1
   port: 3000
 
@@ -70,7 +73,7 @@ frontend:
 tailscale:
   authKey: ""                      # REQUIRED: from $TAILSCALE_AUTH_KEY
   onPremCidr: "192.168.0.0/24"    # On-prem subnet to advertise (NOT the AWS VPC CIDR)
-  image: "tailscale/tailscale:latest"
+  image: "tailscale/tailscale:v1.68.2"  # Pinned — update intentionally
 
 # ── Namespace ─────────────────────────────────────────────────────────────────
-namespace: "ailab"
+namespace: "virtuallab"

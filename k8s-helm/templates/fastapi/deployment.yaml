@@ -1,4 +1,4 @@
-################################################################################
+﻿################################################################################
 # templates/fastapi/deployment.yaml
 #
 # CONSTRAINT #8: AWS credentials injected via secretRef (never hardcoded).
@@ -17,7 +17,7 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     app: fastapi
-    project: ailab
+    project: virtuallab
 spec:
   replicas: {{ .Values.fastapi.replicas }}
   selector:
@@ -29,7 +29,7 @@ spec:
         app: fastapi
     spec:
       # CONSTRAINT #8 Part B: ServiceAccount gives SkyPilot K3s RBAC access
-      serviceAccountName: ailab-fastapi-sa
+      serviceAccountName: virtuallab-fastapi-sa
 
       containers:
         - name: fastapi
