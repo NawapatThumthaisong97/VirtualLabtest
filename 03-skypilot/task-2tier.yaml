@@ -1,0 +1,105 @@
+# 03-skypilot/task-2tier.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# POC Test C: 2-Tier Auto Routing (THE CORE CONCEPT)
+#
+# SkyPilot ประเมิน Tier 1 (K3s) ก่อน:
+#   - ถ้า K3s มี capacity → รันบน on-prem ทันที (Branch A)
+#   - ถ้า K3s เต็มหรือไม่ว่าง → burst ไป AWS Spot อัตโนมัติ (Branch B)
+#
+# ไม่ต้องทำอะไรเพิ่ม — SkyPilot จัดการ branching เองทั้งหมด
+#
+# Usage:
+#   source ~/skypilot-venv/bin/activate
+#
+#   # ปกติ (K3s ว่าง → ไปที่ K3s):
+#   sky launch 03-skypilot/task-2tier.yaml --env S3_BUCKET=virtuallab-ml-artifacts
+#
+#   # ทดสอบ burst (รัน multiple jobs จนล้น K3s แล้ว task ใหม่จะไป AWS):
+#   for i in 1 2 3 4 5; do
+#     sky launch 03-skypilot/task-2tier.yaml \
+#       --env JOB_ID=job-$i \
+#       --env S3_BUCKET=virtuallab-ml-artifacts \
+#       --cluster vlab-2tier-$i &
+#   done
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: vlab-2tier
+
+envs:
+  JOB_ID: "2tier-001"
+  S3_BUCKET: "virtuallab-ml-artifacts"   # override with --env S3_BUCKET=...
+
+run: |
+  echo "════════════════════════════════════════════════════════"
+  echo "  VirtualLab — 2-Tier Auto Routing (Core POC)"
+  echo "════════════════════════════════════════════════════════"
+  echo ""
+  echo "   Job ID   : $JOB_ID"
+  echo "   Hostname : $(hostname)"
+  echo "   Node IP  : $(hostname -I | awk '{print $1}')"
+
+  # Detect which branch we landed on
+  IS_AWS=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
+  if [ -n "$IS_AWS" ]; then
+    BRANCH="B — AWS Spot (on-prem was full)"
+    echo "   Branch   : ☁️  $BRANCH"
+
+    # Verify no public IP (Constraint #4)
+    PUBLIC_IP=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || echo "NONE")
+    if [ "$PUBLIC_IP" = "NONE" ] || [ -z "$PUBLIC_IP" ]; then
+      echo "   ✅ No public IP (Constraint #4 OK)"
+    else
+      echo "   ❌ Has public IP $PUBLIC_IP (Constraint #4 VIOLATED!)"
+    fi
+  else
+    BRANCH="A — K3s On-Prem"
+    echo "   Branch   : 🏠 $BRANCH"
+  fi
+
+  echo ""
+  echo "→ Simulating ML workload..."
+  python3 -c "
+import time, math
+for i in range(10):
+    _ = [math.sqrt(x) for x in range(2_000_000)]
+    print(f'  Epoch {i+1:2d}/10 — loss: {1.0/(i+1):.4f}')
+    time.sleep(1)
+print('✅ Workload complete')
+"
+
+  # Write result to S3
+  echo ""
+  echo "→ Writing result to S3..."
+  cat <<RESULT | aws s3 cp - "s3://${S3_BUCKET}/poc-results/2tier/${JOB_ID}.txt"
+2-Tier Routing Result
+=====================
+Job ID    : $JOB_ID
+Completed : $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Branch    : $BRANCH
+Node IP   : $(hostname -I | awk '{print $1}')
+RESULT
+  echo "✅ Result: s3://${S3_BUCKET}/poc-results/2tier/${JOB_ID}.txt"
+
+  echo ""
+  echo "════════════════════════════════════════════════════════"
+  echo "✅ 2-Tier job done — Branch: $BRANCH"
+  echo "════════════════════════════════════════════════════════"
+
+# ── 2-Tier Resource Spec ──────────────────────────────────────────────────────
+# CONSTRAINT #3: K3s (Tier 1) is ALWAYS tried first.
+# Only falls through to AWS (Tier 2) if K3s has no capacity.
+resources:
+  # Tier 1: On-Prem K3s
+  - cloud: kubernetes
+    kubernetes:
+      networking: portforward
+
+  # Tier 2: AWS EC2 Spot (burst fallback)
+  - cloud: aws
+    region: ap-southeast-1
+    instance_type: m7g.medium   # Cheap ARM instance — upgrade to g4dn.xlarge for GPU
+    use_spot: true
+    # Private subnet enforced via ~/.sky/config.yaml
+
+autostop:
+  idle_minutes: 5
