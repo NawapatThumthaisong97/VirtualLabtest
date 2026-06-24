@@ -1,0 +1,37 @@
+# sky_tasks/sky_config.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# SkyPilot Global Configuration — AI Learner Lab
+#
+# This file is referenced in the Dockerfile and Helm deployment.
+# It is copied to ~/.sky/config.yaml inside the FastAPI container at startup.
+#
+# CRITICAL: This enforces CONSTRAINT #4 (No Public IP on Spot workers)
+# by pinning SkyPilot's AWS provider to the PRIVATE subnet.
+# The subnet ID is injected at deploy time from the Helm values (Terraform output).
+# ─────────────────────────────────────────────────────────────────────────────
+
+aws:
+  # CONSTRAINT #4: All EC2 Spot workers must land in the PRIVATE subnet.
+  # Value is substituted by Helm chart from Terraform output: aws_subnet.private.id
+  vpc_name: ailab-vpc
+
+  # Disable public IPs at the SkyPilot level as a second layer of enforcement
+  # (subnet also has map_public_ip_on_launch=false — CONSTRAINT #4 defense-in-depth)
+  use_internal_ips: true
+
+  # SSH must route through Tailscale → t4g.nano GW → private IP (CONSTRAINT #5, #6)
+  # SkyPilot will SSH to the worker's private IP (e.g., 10.0.2.15), which is
+  # reachable from On-Prem only via the t4g.nano Tailscale Subnet Router.
+  ssh_proxy_command: null    # No proxy needed — Tailscale handles routing transparently
+
+kubernetes:
+  # SkyPilot uses the in-cluster ServiceAccount token for K3s auth (CONSTRAINT #8)
+  # When running inside the K3s cluster, the token is auto-mounted at:
+  # /var/run/secrets/kubernetes.io/serviceaccount/token
+  # No kubeconfig file is used or needed.
+  networking: portforward
+
+# ── Logging ────────────────────────────────────────────────────────────────
+# Job logs are streamed via SSE from /api/logs/{job_id}
+# SkyPilot log directory inside the container
+log_dir: /tmp/sky_logs

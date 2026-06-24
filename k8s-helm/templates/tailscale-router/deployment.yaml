@@ -1,0 +1,70 @@
+################################################################################
+# templates/tailscale-router/deployment.yaml
+#
+# On-Prem Tailscale Subnet Router pod.
+# Advertises the ON-PREM K3s CIDR to the Tailnet (NOT the AWS VPC CIDR).
+# The AWS VPC CIDR is advertised by the t4g.nano gateway in AWS.
+#
+# Dynamic values (from credentials.env via helm --set):
+#   TAILSCALE_AUTH_KEY ← $TAILSCALE_AUTH_KEY → --set tailscale.authKey
+#   ON_PREM_CIDR       ← $K3S_MASTER_IP/24   → --set tailscale.onPremCidr
+################################################################################
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tailscale-auth
+  namespace: {{ .Values.namespace }}
+type: Opaque
+stringData:
+  TS_AUTHKEY: {{ .Values.tailscale.authKey | quote }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tailscale-router
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: tailscale-router
+    project: ailab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tailscale-router
+  template:
+    metadata:
+      labels:
+        app: tailscale-router
+    spec:
+      # Required for Tailscale to manage network interfaces
+      hostNetwork: false
+      containers:
+        - name: tailscale
+          image: {{ .Values.tailscale.image }}
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+          env:
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: tailscale-auth
+                  key: TS_AUTHKEY
+            - name: TS_ROUTES
+              value: {{ .Values.tailscale.onPremCidr | quote }}
+            - name: TS_HOSTNAME
+              value: "ailab-onprem-router"
+            - name: TS_ACCEPT_ROUTES
+              value: "true"
+            - name: TS_EXTRA_ARGS
+              value: "--advertise-tags=tag:ailab-router"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"

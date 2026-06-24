@@ -134,8 +134,18 @@ VirtualLabtest/
 │   └── src/{app, components, lib}/
 │
 ├── 📦 backend-fastapi/           ← Async FastAPI + SkyPilot SDK integration
-│   ├── app/{routers, models, schemas, services, db}/
-│   └── sky_tasks/                ← SkyPilot 2-tier YAML task definitions
+│   ├── app/
+│   │   ├── routers/              ← /api/launch, /api/jobs, /api/logs
+│   │   ├── models/               ← SQLAlchemy ORM: Job, User
+│   │   ├── schemas/              ← Pydantic v2: JobCreate, JobStatus
+│   │   ├── services/
+│   │   │   └── skypilot_service.py  ← ✅ SkyPilot SDK wrapper (async, non-blocking)
+│   │   └── db/                   ← Async session, Alembic migrations
+│   ├── sky_tasks/                ← SkyPilot task definitions
+│   │   ├── ml_job.yaml           ← ✅ 2-tier: K3s first → AWS Spot fallback
+│   │   ├── burst_test.yaml       ← ✅ Force-AWS task for Bullet 3B validation
+│   │   └── sky_config.yaml       ← ✅ SkyPilot global config (private subnet, ServiceAccount)
+│   └── requirements.txt          ← ✅ Python deps (FastAPI, SkyPilot, SQLAlchemy, etc.)
 │
 ├── 📦 k8s-helm/                  ← Helm chart: Control Plane on K3s Master
 │   └── templates/
@@ -159,45 +169,150 @@ VirtualLabtest/
 
 ### Prerequisites
 
-Before running anything, ensure you have:
+> ⚠️ **Linux / WSL Required**
+> All backend work, SkyPilot CLI usage, and Terraform runs must be done inside **WSL (Ubuntu)**
+> on Windows — or directly on a Linux machine. SkyPilot does **not** support Windows natively.
+> Open a WSL terminal (`wsl`) for everything below.
 
-- [ ] **K3s cluster** installed with at least 1 worker node joined
-- [ ] **Node.js** ≥ 20 + **npm** ≥ 10
-- [ ] **Python** ≥ 3.11 + `pip`
-- [ ] **Docker** + **Docker Compose**
-- [ ] **kubectl** + **helm** ≥ 3 (pointing at your K3s cluster)
-- [ ] **Terraform** ≥ 1.7
-- [ ] **AWS CLI** + IAM credentials with EC2/S3 permissions
-- [ ] **Tailscale** account + Reusable Auth Key generated
-- [ ] **Cloudflare** account + Tunnel token
-- [ ] **SkyPilot**: `pip install "skypilot[aws,kubernetes]"`
+Before running anything, ensure you have the following **inside your WSL/Linux environment**:
 
----
+| Tool | Min Version | Status (WSL) |
+|:-----|:------------|:-------------|
+| K3s cluster (≥1 worker joined) | latest | ❓ Check manually |
+| Node.js + npm | ≥ 20 / ≥ 10 | ❓ Check manually |
+| Python + pip | ≥ 3.11 | ❓ Run `python3 --version` in WSL |
+| Docker + Docker Compose | latest | ❓ Check manually |
+| **kubectl** | ≥ 1.29 | ❓ Run `kubectl version --client` in WSL |
+| **helm** | ≥ 3 | ❌ Not installed — see below |
+| **Terraform** | ≥ 1.7 | ❌ Not installed — see below |
+| **AWS CLI** | ≥ 2 | ❓ Run `aws --version` in WSL |
+| **Tailscale** account + Reusable Auth Key | — | ❓ Manual step |
+| **Cloudflare** account + Tunnel token | — | ❓ Manual step |
+| **SkyPilot** (local dev only) | ≥ 0.7 | ❌ Not installed — see below |
 
-### Step 1 — Day-0 Infrastructure (Manual, once only)
+#### Install missing tools (Linux / WSL — Ubuntu/Debian)
 
 ```bash
-# 1a. Provision AWS: VPC, Private Subnet, NAT GW, S3 Endpoint, t4g.nano ASG
-cd infrastructure/terraform
-terraform init
-terraform apply
+# ── Terraform ────────────────────────────────────────────────────────────────
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install -y terraform
+terraform -version   # Verify
 
-# 1b. Verify On-Prem → AWS private IP reachability via Tailscale
-bash infrastructure/scripts/validate-network.sh
+# ── Helm ─────────────────────────────────────────────────────────────────────
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version         # Verify
 
-# 1c. Create the AWS credentials Kubernetes Secret
-bash infrastructure/scripts/create-k8s-secrets.sh
-# (This is a reference script — review before running. Never commit secrets to git.)
+# ── AWS CLI v2 (if not already installed) ────────────────────────────────────
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
+aws --version        # Verify
+
+# ── kubectl (if not already installed) ───────────────────────────────────────
+curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+kubectl version --client   # Verify
+
+# ── SkyPilot (local dev / testing only) ──────────────────────────────────────
+# SkyPilot is Linux-only. It is also installed inside the FastAPI container
+# via requirements.txt — this install is for running `sky` CLI locally.
+#
+# ⚠️  IMPORTANT: Install SkyPilot inside a Python virtual environment (venv).
+#    Installing globally with sudo pip can break your system Python packages.
+#
+# Step 1 — Create a dedicated virtual environment (one-time setup)
+python3 -m venv ~/skypilot-venv
+
+# Step 2 — Activate the virtual environment
+#   You MUST activate it every time you open a new terminal before using `sky`.
+source ~/skypilot-venv/bin/activate
+# Your prompt will change to show (skypilot-venv) — this means it is active.
+
+# Step 3 — Upgrade pip inside the venv (prevents obscure install errors)
+pip install --upgrade pip
+
+# Step 4 — Install SkyPilot with AWS + Kubernetes support
+pip install "skypilot[aws,kubernetes]"
+
+# Step 5 — Verify: SkyPilot can see your AWS credentials and K8s cluster
+sky check
+
+# ── To use SkyPilot in future sessions ───────────────────────────────────────
+# Every time you open a NEW terminal, run this first:
+#   source ~/skypilot-venv/bin/activate
+# Then you can run sky commands normally (sky launch, sky exec, sky down …)
 ```
 
 ---
 
-### Step 2 — Deploy Control Plane (Helm)
+### ⚡ TL;DR — Full Deploy in 3 Commands
+
+> แก้ credential ที่เดียว → รัน deploy ได้เลย ไม่ต้องแตะไฟล์อื่น
 
 ```bash
-cd k8s-helm
-helm dependency update
-helm upgrade --install ailab . -f values.yaml -n ailab --create-namespace
+# 1. ตั้งค่า credentials (ทำครั้งเดียว)
+cp credentials.env.example credentials.env
+nano credentials.env          # แก้ค่าให้ครบทุกช่อง
+
+# 2. ติดตั้ง tools ที่จำเป็น (ทำครั้งเดียว)
+bash setup.sh
+
+# 3. Deploy ทุกอย่างในคำสั่งเดียว 🚀
+bash deploy.sh
+```
+
+`deploy.sh` จะรันตามลำดับอัตโนมัติ:
+1. `terraform apply` — สร้าง VPC, NAT GW, S3, t4g.nano ASG, IAM บน AWS
+2. อ่าน Terraform outputs (subnet ID, SG ID)
+3. `kubectl create secret aws-credentials` — ใส่ AWS key เข้า K3s
+4. `helm upgrade --install` — deploy FastAPI, Frontend, PostgreSQL, Cloudflare Tunnel, oauth2-proxy, Tailscale Router ทั้งหมด
+
+> 💡 **ต้องการแก้ค่าใดๆ?** แก้ใน `credentials.env` แล้วรัน `bash deploy.sh` ใหม่ได้เลย
+
+```bash
+# ตัวเลือกพิเศษ
+bash deploy.sh --dry-run    # ดูแผนก่อนโดยไม่ deploy จริง
+bash deploy.sh --tf-only    # รัน Terraform เท่านั้น
+bash deploy.sh --helm-only  # รัน Helm เท่านั้น (ถ้า Terraform ทำไปแล้ว)
+```
+
+---
+
+### Step 1 — Day-0 Infrastructure (อยู่ใน deploy.sh แล้ว)
+
+> ✅ `bash deploy.sh` จัดการทั้งหมดนี้ให้อัตโนมัติ
+> สำหรับ debug หรือรันแยก ใช้คำสั่งด้านล่าง:
+
+```bash
+# รัน Terraform แยก (ถ้าต้องการ)
+cd infrastructure/terraform
+terraform init
+terraform plan
+terraform apply
+
+# ตรวจสอบ network connectivity
+bash infrastructure/scripts/validate-network.sh
+
+# สร้าง K8s Secret แยก (ถ้า Helm ล้มเหลว)
+bash infrastructure/scripts/create-k8s-secrets.sh
+```
+
+---
+
+### Step 2 — Deploy Control Plane (อยู่ใน deploy.sh แล้ว)
+
+> ✅ `bash deploy.sh` จัดการทั้งหมดนี้ให้อัตโนมัติ
+> สำหรับรัน Helm แยก:
+
+```bash
+source credentials.env
+helm upgrade --install ailab ./k8s-helm \
+  --namespace ailab --create-namespace \
+  --set global.cloudflare.tunnelToken="$CLOUDFLARE_TUNNEL_TOKEN" \
+  --set global.aws.region="$AWS_DEFAULT_REGION" \
+  --set postgresql.password="$POSTGRES_PASSWORD"
+  # (ดู deploy.sh สำหรับ --set flags ครบทั้งหมด)
 ```
 
 This deploys: NGINX Ingress, Cloudflare Tunnel pod, oauth2-proxy, PostgreSQL, FastAPI (with ServiceAccount + Secret), Next.js UI, and Tailscale Subnet Router pod.

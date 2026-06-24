@@ -1,0 +1,80 @@
+# sky_tasks/ml_job.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# SkyPilot 2-Tier Resource Spec — CONSTRAINT #3 (K3s First, AWS Burst Second)
+#
+# SkyPilot evaluates resources in ORDER. Tier 1 (K3s) is always tried first.
+# Only if local nodes are at capacity does it fall through to Tier 2 (AWS Spot).
+#
+# This file is launched programmatically by skypilot_service.py via:
+#   sky.launch(sky.Task.from_yaml("sky_tasks/ml_job.yaml"), ...)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: ailab-ml-job
+
+# ── Inputs: fetched from S3 before the run script executes ──────────────────
+file_mounts:
+  /dataset:
+    # S3_BUCKET is injected at runtime by skypilot_service.py from env var $S3_BUCKET
+    # $S3_BUCKET itself comes from the fastapi-config ConfigMap → credentials.env → $ML_BUCKET_NAME
+    source: s3://$(S3_BUCKET)/datasets/
+    mode: MOUNT          # mount (lazy fetch) instead of full copy for large datasets
+
+# ── Environment variables injected at runtime ──────────────────────────────
+# AWS creds are injected by K8s Secret (envFrom.secretRef) into the FastAPI pod.
+# SkyPilot inherits them automatically from the process environment.
+envs:
+  JOB_ID: ""             # Set dynamically by skypilot_service.py before launch
+  # S3_BUCKET: read from env var $S3_BUCKET (set by FastAPI pod from ConfigMap → credentials.env)
+  S3_BUCKET: ""          # overridden at runtime by skypilot_service.py via task.update_envs()
+  S3_OUTPUT_PREFIX: models
+
+# ── Run script executed on the worker ───────────────────────────────────────
+setup: |
+  pip install torch torchvision --quiet
+
+run: |
+  echo "=== AI Learner Lab — ML Job ==="
+  echo "Job ID      : $JOB_ID"
+  echo "Worker node : $(hostname)"
+  echo "GPU         : $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'none')"
+
+  python train.py \
+    --dataset /dataset \
+    --output /tmp/model_output \
+    --job-id "$JOB_ID"
+
+  # Upload model weights back to S3
+  aws s3 cp /tmp/model_output/ \
+    s3://$S3_BUCKET/$S3_OUTPUT_PREFIX/$JOB_ID/ \
+    --recursive
+
+  echo "=== Job $JOB_ID completed — output at s3://$S3_BUCKET/$S3_OUTPUT_PREFIX/$JOB_ID/ ==="
+
+# ── 2-Tier Resource Spec ────────────────────────────────────────────────────
+# CONSTRAINT #3: K3s on-prem is ALWAYS evaluated first (Tier 1).
+# CONSTRAINT #4: AWS Spot workers land in Private Subnet — no Public IP.
+# CONSTRAINT #5: No Tailscale on Spot workers (t4g.nano GW handles routing).
+resources:
+  # ── Tier 1: On-Prem K3s (first priority) ─────────────────────────────────
+  - cloud: kubernetes
+    # SkyPilot uses the in-cluster ServiceAccount token (ailab-fastapi-sa)
+    # to authenticate — no kubeconfig file needed (CONSTRAINT #8, Part B).
+    kubernetes:
+      networking: portforward    # Use port-forwarding for SSH; no node port needed
+
+  # ── Tier 2: AWS EC2 Spot (burst fallback) ────────────────────────────────
+  - cloud: aws
+    # AWS_DEFAULT_REGION is read from the FastAPI pod env (from fastapi-config ConfigMap)
+    # It originates from credentials.env $AWS_DEFAULT_REGION → Helm values.yaml → ConfigMap
+    region: ap-southeast-1      # kept static; override via sky_config if region changes
+    instance_type: g4dn.xlarge   # 1x T4 GPU — suitable for standard ML training
+    use_spot: true               # Spot instances only — significant cost saving
+    # CONSTRAINT #4 enforcement: subnet is set in ~/.sky/config.yaml
+    # (AWS_DEFAULT_SUBNET_ID points to the private subnet — 10.0.2.0/24)
+    # Public IP is disabled at subnet level (map_public_ip_on_launch=false).
+
+# ── Auto-termination ────────────────────────────────────────────────────────
+# Spot instance is torn down automatically after job completion.
+# Prevents runaway costs from orphaned instances.
+autostop:
+  idle_minutes: 5    # Terminate if idle for >5 min after job finishes

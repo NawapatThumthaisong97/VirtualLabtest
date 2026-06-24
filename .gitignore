@@ -19,6 +19,10 @@
 aws-credentials.json
 *credentials*.json
 
+# Project credentials file — contains ALL secrets (AWS, Tailscale, Cloudflare, etc.)
+# Copy credentials.env.example → credentials.env then fill in values
+credentials.env
+
 # Terraform state & secrets
 *.tfstate
 *.tfstate.*

@@ -1,0 +1,78 @@
+################################################################################
+# templates/fastapi/deployment.yaml
+#
+# CONSTRAINT #8: AWS credentials injected via secretRef (never hardcoded).
+# CONSTRAINT #8: K3s access via serviceAccountName (no kubeconfig).
+# CONSTRAINT #2: FastAPI is stateless async — no Redis/Celery containers here.
+#
+# Dynamic values (from credentials.env → helm --set):
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  ← from Secret "aws-credentials"
+#   DATABASE_URL                                ← from ConfigMap "fastapi-config"
+#   AWS_DEFAULT_REGION / S3_BUCKET             ← from ConfigMap "fastapi-config"
+################################################################################
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: fastapi
+    project: ailab
+spec:
+  replicas: {{ .Values.fastapi.replicas }}
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+    spec:
+      # CONSTRAINT #8 Part B: ServiceAccount gives SkyPilot K3s RBAC access
+      serviceAccountName: ailab-fastapi-sa
+
+      containers:
+        - name: fastapi
+          image: {{ .Values.fastapi.image }}
+          ports:
+            - containerPort: {{ .Values.fastapi.port }}
+
+          # CONSTRAINT #8 Part A: AWS creds from K8s Secret (never in image/code)
+          envFrom:
+            - secretRef:
+                name: aws-credentials   # Created by create-k8s-secrets.sh
+            - configMapRef:
+                name: fastapi-config    # Non-secret config (region, bucket, DB URL)
+
+          # SkyPilot sky_config.yaml is mounted from ConfigMap
+          volumeMounts:
+            - name: sky-config
+              mountPath: /root/.sky
+              readOnly: false
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.fastapi.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.fastapi.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+      volumes:
+        - name: sky-config
+          configMap:
+            name: sky-config
