@@ -1,0 +1,7 @@
+- name: Provision Virtual-Lab master
+  hosts: master
+  become: yes
+  roles:
+    - common
+    - tailscale
+    - k3s-server

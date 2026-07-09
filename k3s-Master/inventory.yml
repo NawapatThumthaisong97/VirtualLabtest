@@ -1,0 +1,6 @@
+all:
+  children:
+    master:
+      hosts:
+        virtual-lab-master:
+          ansible_host: 100.93.121.17
