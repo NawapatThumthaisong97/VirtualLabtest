@@ -169,6 +169,10 @@ helm-secrets/
 # Generated kubeconfig from cluster
 admin.conf
 
+# Ansible fetch artifacts — kubeconfig & node-token (full cluster keys)
+k3s-Master/artifacts/*
+!k3s-Master/artifacts/.gitkeep
+
 # -----------------------------------------------------------------------------
 # 🏗️  Infrastructure / Terraform
 # -----------------------------------------------------------------------------
