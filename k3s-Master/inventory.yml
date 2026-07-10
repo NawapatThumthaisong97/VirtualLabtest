@@ -3,4 +3,4 @@ all:
     master:
       hosts:
         virtual-lab-master:
-          ansible_host: 100.93.121.17
+          ansible_host: 100.80.33.50
