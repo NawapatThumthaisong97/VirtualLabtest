@@ -1,0 +1,35 @@
+- name: Install K3s server
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | \
+      INSTALL_K3S_VERSION={{ k3s_version }} sh -s - server \
+      --tls-san {{ ansible_host }} \
+      --node-ip {{ ansible_host }} \
+      --flannel-iface {{ flannel_iface }} \
+      --cluster-cidr {{ k3s_cluster_cidr }} \
+      --service-cidr {{ k3s_service_cidr }} \
+      --write-kubeconfig-mode 644
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Wait for K3s API to be ready
+  ansible.builtin.command: k3s kubectl get --raw /readyz
+  register: k3s_ready
+  until: k3s_ready.rc == 0
+  retries: 12
+  delay: 10
+
+- name: Ensure node is Ready
+  ansible.builtin.command: >-
+    k3s kubectl wait --for=condition=Ready node --all --timeout=120s
+
+- name: Fetch kubeconfig to local machine
+  ansible.builtin.fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: ./artifacts/kubeconfig
+    flat: yes
+
+- name: Fetch node token (ไว้ให้ workers join เฟสหน้า)
+  ansible.builtin.fetch:
+    src: /var/lib/rancher/k3s/server/node-token
+    dest: ./artifacts/node-token
+    flat: yes

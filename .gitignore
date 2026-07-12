@@ -1,0 +1,278 @@
+# =============================================================================
+# AI Learner Lab — .gitignore
+# Stack: Next.js · FastAPI · PostgreSQL · SkyPilot · Helm · Terraform · Tailscale
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 🔐 SECURITY — NEVER COMMIT (Highest Priority)
+# -----------------------------------------------------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+
+# AWS credentials — should only ever live in kubectl secrets
+.aws/
+aws-credentials.json
+*credentials*.json
+
+# Project credentials file — contains ALL secrets (AWS, Tailscale, Cloudflare, etc.)
+# Copy credentials.env.example → credentials.env then fill in values
+credentials.env
+
+# Terraform state & secrets
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+**/.terraform/
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+crash.log
+crash.*.log
+
+# Kubernetes secrets & kubeconfig
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+secrets.yaml
+secret.yaml
+*-secret.yaml
+*_secret.yaml
+
+# SkyPilot credentials & state
+~/.sky/
+.sky/
+sky_logs/
+
+# Tailscale auth keys
+tailscale.key
+*.tskey
+
+# Cloudflare tunnel credentials
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!.eslintrc.json
+!music-lab/ide/settings.json
+# Re-allow specific JSON files above; block credential JSONs
+cloudflare-credentials.json
+tunnel-credentials.json
+cert.pem
+
+# Environment files — use .env.example / .env.local.example as templates
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.local.example
+
+# -----------------------------------------------------------------------------
+# 🐍 Python / FastAPI / SkyPilot
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Pytest & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.coveragerc
+nosetests.xml
+*.log
+
+# Mypy / type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Alembic — keep migrations folder, ignore __pycache__ inside
+backend-fastapi/app/db/migrations/__pycache__/
+
+# Jupyter (if used for exploration)
+.ipynb_checkpoints/
+*.ipynb
+
+# SkyPilot task outputs (local run artifacts)
+sky_logs/
+sky-callback-*/
+
+# -----------------------------------------------------------------------------
+# ⚛️  Next.js / Node.js / Frontend
+# -----------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+.cache/
+.parcel-cache/
+.turbo/
+
+# Build outputs
+dist/
+build/
+
+# npm / yarn / pnpm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# TypeScript compiled output
+*.tsbuildinfo
+next-env.d.ts
+
+# -----------------------------------------------------------------------------
+# ☸️  Kubernetes / Helm
+# -----------------------------------------------------------------------------
+# Never commit rendered chart output
+*.rendered.yaml
+
+# Helm chart lock (commit Chart.lock only if you pin dependencies intentionally)
+# Chart.lock   ← uncomment to ignore
+
+# Helm secrets plugin output
+helm-secrets/
+
+# Generated kubeconfig from cluster
+admin.conf
+
+# Ansible fetch artifacts — kubeconfig & node-token (full cluster keys)
+k3s-Master/artifacts/*
+!k3s-Master/artifacts/.gitkeep
+
+# -----------------------------------------------------------------------------
+# 🏗️  Infrastructure / Terraform
+# -----------------------------------------------------------------------------
+# (see Security section above for .tfstate, .tfvars)
+
+# Terraform plugin cache
+.terraform.lock.hcl
+# ^^ Intentionally NOT ignored — commit this for reproducible provider versions
+
+# Local plan files
+tfplan
+*.tfplan
+
+# Packer
+packer_cache/
+*.box
+
+# -----------------------------------------------------------------------------
+# 🛠️  IDEs & Editors
+# -----------------------------------------------------------------------------
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim / Emacs
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+
+# -----------------------------------------------------------------------------
+# 📦 Docker
+# -----------------------------------------------------------------------------
+# Don't ignore Dockerfiles, but ignore local build artifacts
+.dockerignore
+# ^^ Don't ignore .dockerignore itself — it belongs in the repo
+
+# Local docker-compose overrides with secrets
+docker-compose.override.yml
+docker-compose.local.yml
+
+# -----------------------------------------------------------------------------
+# 📊 Misc / General
+# -----------------------------------------------------------------------------
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# Archive files
+*.tar.gz
+*.zip
+*.gz
+*.7z
+*.rar
+
+# Large ML artifacts — these belong in S3, not git
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.onnx
+*.pkl
+*.pickle
+datasets/
+models/
+checkpoints/
+weights/
+
+# Test output
+test-results/
+junit.xml
+
+docs/PROGRESS.md

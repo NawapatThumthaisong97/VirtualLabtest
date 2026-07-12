@@ -1,0 +1,15 @@
+- name: Provision Virtual-Lab master
+  hosts: master
+  become: yes
+  roles:
+    - common
+    - tailscale
+    - k3s-server
+
+- name: Provision registry_host
+  hosts: registry_host
+  become: yes
+  role:
+    - common
+    - tailscale
+    - registry

@@ -1,0 +1,21 @@
+- name: Check if Tailscale is installed
+  ansible.builtin.command: which tailscale
+  register: ts_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install Tailscale
+  ansible.builtin.shell: curl -fsSL https://tailscale.com/install.sh | sh
+  when: ts_installed.rc != 0
+
+- name: Check Tailscale login state
+  ansible.builtin.command: tailscale status --json
+  register: ts_status
+  changed_when: false
+  failed_when: false
+
+- name: Report Tailscale state
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Tailscale ยัง logged out — ต้อง tailscale up เอง อย่าลืม flags เดิม (--advertise-routes)'
+         if ts_status.rc != 0 else 'Tailscale online อยู่แล้ว ข้ามได้' }}
