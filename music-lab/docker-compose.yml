@@ -1,0 +1,55 @@
+
+services:
+  server:
+    build: ./server
+    # fixed name so it matches the hostname client/nginx.conf's reverse proxy expects
+    # (same name used in the standalone `docker run --name music-lab-server` deploy runbook)
+    container_name: music-lab-server
+    ports:
+      - "8080:8080"
+    environment:
+      - DATA_DIR=/data
+    # dev override: Flask's own reloader instead of the Dockerfile's gunicorn CMD
+    # (gunicorn --preload doesn't auto-reload on code change; the shipped image still
+    # defaults to gunicorn via server/Dockerfile's CMD for standalone/registry use)
+    command: ["flask", "--app", "server", "run", "--host=0.0.0.0", "--port=8080", "--debug"]
+    volumes:
+      - workspace:/workspace
+      - ./my-music:/data/music/local:ro
+      - lab-data:/data
+
+  client:
+    build:
+      context: ./client
+      target: dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - workspace:/workspace
+    depends_on:
+      - server
+
+  client-prod:
+    build:
+      context: ./client
+      target: prod
+    profiles: ["prod"]
+    ports:
+      - "8081:80" # separate port from the dev client (5173) so both can run side by side
+
+  ide:
+    build: ./ide
+    ports:
+      - "8443:8080"
+    environment:
+      - PASSWORD=musiclab
+    # open straight into the shared project folder instead of the coder user's home dir
+    # (which is full of code-server's own internal config/cache clutter)
+    command: ["--bind-addr", "0.0.0.0:8080", "/home/coder/project"]
+    volumes:
+      - workspace:/home/coder/project
+      - lab-data:/data # code-server can run `sqlite3 /data/library.db` directly
+
+volumes:
+  lab-data:
+  workspace:
