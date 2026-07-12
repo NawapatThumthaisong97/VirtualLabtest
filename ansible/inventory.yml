@@ -4,3 +4,8 @@ all:
       hosts:
         virtual-lab-master:
           ansible_host: 100.80.33.50
+
+    registry_host:
+      hosts:
+        virtual-lab-registry_host:
+          ansible_host: #Placeholder

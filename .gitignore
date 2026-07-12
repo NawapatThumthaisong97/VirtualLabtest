@@ -63,6 +63,7 @@ tailscale.key
 !package-lock.json
 !tsconfig.json
 !.eslintrc.json
+!music-lab/ide/settings.json
 # Re-allow specific JSON files above; block credential JSONs
 cloudflare-credentials.json
 tunnel-credentials.json
@@ -273,3 +274,5 @@ weights/
 # Test output
 test-results/
 junit.xml
+
+docs/PROGRESS.md
