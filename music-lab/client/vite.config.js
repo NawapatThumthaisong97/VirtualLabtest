@@ -8,8 +8,10 @@ export default defineConfig({
     port: 5173,
     watch: { usePolling: true }, // source is bind-mounted from the host - native fs events don't cross into Docker
     proxy: {
-      "/api": { target: "http://server:8080", changeOrigin: true },
-      "/stream": { target: "http://server:8080", changeOrigin: true },
+      // VITE_PROXY_TARGET: ใช้ตอนรันแบบ SkyPilot (1 container, คุยผ่าน localhost แทน docker
+      // network) - ไม่ตั้ง env นี้ = พฤติกรรมเดิมเป๊ะสำหรับ docker-compose/docker run
+      "/api": { target: process.env.VITE_PROXY_TARGET || "http://server:8080", changeOrigin: true },
+      "/stream": { target: process.env.VITE_PROXY_TARGET || "http://server:8080", changeOrigin: true },
     },
   },
 });
