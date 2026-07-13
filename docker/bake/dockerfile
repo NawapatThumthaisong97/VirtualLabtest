@@ -1,0 +1,74 @@
+FROM ubuntu:22.04
+
+#Docker Bake image สําหรับการติดตั้งก่อนเริ่มทํางานของระบบ
+
+# k8s pod ไม่มี sshd ติดมาเหมือน VM image ของ cloud ทั่วไป — SkyPilot คุมทุกอย่างผ่าน SSH
+# เข้า pod เสมอ (ไม่ใช่แค่ kubectl exec) ถ้าไม่มี sshd ตรงนี้ SkyPilot เข้า pod ไม่ได้เลย
+# patch ใส่ไว้ด้วยเพราะ RAY_SKYPILOT_INSTALLATION_COMMANDS เรียกใช้ตอน patch ไฟล์ ray
+# (ray_patches.patch()) — ไม่ bake ไว้ก็ไม่พังอะไร แค่ต้อง apt-get install สด ๆ ตอน provision
+# ทุกครั้ง (เจอตอนทดสอบจริงว่ามันรอ "Waiting for patch package to be installed...")
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      openssh-server curl ca-certificates sudo patch \
+    && mkdir -p /var/run/sshd \
+    && rm -rf /var/lib/apt/lists/*
+
+# SSH user ที่ SkyPilot ใช้เข้า pod จริง คือ "sky" (ยืนยันจาก ~/.sky/generated/ssh/<cluster>
+# หลัง sky launch จริงบน k8s backend) ไม่ใช่ root — ทุก path ด้านล่างต้อง bake ใต้ $HOME ของ
+# user นี้ ไม่ใช่ /root ไม่งั้นตอน provision จริงจะหาไฟล์ไม่เจอเพราะ SSH เข้ามาเป็นคนละ user
+RUN useradd -m -s /bin/bash sky \
+    && echo "sky ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/sky \
+    && chmod 440 /etc/sudoers.d/sky
+
+# เตรียม host key ของ sshd และโฟลเดอร์ ~/.ssh ของ sky ไว้ล่วงหน้า ตัว authorized_keys เนื้อจริง
+# (public key เฉพาะ cluster) SkyPilot จะ inject เข้ามาเองตอน provision จริง ไม่ต้อง bake ตรงนี้
+RUN ssh-keygen -A \
+    && mkdir -p /home/sky/.ssh \
+    && touch /home/sky/.ssh/authorized_keys \
+    && chmod 700 /home/sky/.ssh \
+    && chmod 600 /home/sky/.ssh/authorized_keys \
+    && chown -R sky:sky /home/sky/.ssh
+
+USER sky
+ENV HOME=/home/sky
+WORKDIR /home/sky
+
+# uv = ตัวจัดการ venv/pip ที่ SkyPilot ใช้แทน pip ธรรมดา (เร็วกว่ามาก)
+# path ปลายทางตรงกับ SKY_UV_INSTALL_DIR = "$HOME/.local/bin" ใน constants.py ของ SkyPilot เป๊ะ
+RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh
+ENV PATH="/home/sky/.local/bin:${PATH}"
+
+
+ENV SKY_CONDA_ROOT=/home/sky/miniconda3
+RUN curl -L "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh" \
+      -o /tmp/miniconda.sh \
+    && bash /tmp/miniconda.sh -b -p "$SKY_CONDA_ROOT" \
+    && rm /tmp/miniconda.sh
+ENV PATH="/home/sky/miniconda3/bin:${PATH}"
+
+
+ENV SKY_REMOTE_PYTHON_ENV=/home/sky/skypilot-runtime
+RUN uv venv --seed "$SKY_REMOTE_PYTHON_ENV" --python 3.10
+
+# ray + pin เวอร์ชันตาม RAY_INSTALLATION_COMMANDS — ต้องตรงเป๊ะ (SKY_REMOTE_RAY_VERSION)
+# ไม่งั้นตอน provision จริงจะเช็คด้วย `grep ray 2.9.3` แล้วไม่ผ่าน กลายเป็นติดตั้งทับใหม่อยู่ดี
+
+RUN VIRTUAL_ENV="$SKY_REMOTE_PYTHON_ENV" uv pip install "setuptools<70" \
+    && VIRTUAL_ENV="$SKY_REMOTE_PYTHON_ENV" uv pip install "click<8.3.0" \
+    && VIRTUAL_ENV="$SKY_REMOTE_PYTHON_ENV" uv pip install -U \
+         "ray[default]==2.9.3" "pydantic-core==2.41.1" "click<8.3.0"
+
+# SkyPilot wheel เอง — hash นี้ (aa76e5f477bce4878b9e7543772faccd) ดึงมาจากพอด
+# skypilot-api-server จริง หลัง sky launch ครั้งแรกบนเวอร์ชัน 0.12.3.post1 ไม่ใช่ค่าคงที่ทั่วไป
+# ถ้าเวอร์ชัน SkyPilot บน API server เปลี่ยน (upgrade) ต้องทำขั้นตอนนี้ใหม่ทั้งหมด:
+# 1) sky launch ใหม่ 1 ครั้ง 2) kubectl cp wheel ตัวใหม่จากพอด api-server ออกมา
+# 3) แก้ SKY_WHEEL_HASH และชื่อไฟล์ .whl ด้านล่างให้ตรง แล้ว build image ใหม่
+ENV SKY_WHEEL_HASH=aa76e5f477bce4878b9e7543772faccd
+COPY --chown=sky:sky wheels/skypilot-0.12.3.post1-py3-none-any.whl /home/sky/.sky/wheels/aa76e5f477bce4878b9e7543772faccd/skypilot-0.12.3.post1-py3-none-any.whl
+RUN VIRTUAL_ENV="$SKY_REMOTE_PYTHON_ENV" uv pip install \
+      "/home/sky/.sky/wheels/${SKY_WHEEL_HASH}/skypilot-0.12.3.post1-py3-none-any.whl[kubernetes,remote]" \
+    && echo "${SKY_WHEEL_HASH}" > /home/sky/.sky/wheels/current_sky_wheel_hash
+
+# sshd ต้องรันเป็น root เสมอ (bind port 22 + spawn session ให้ user อื่นได้) เลยสลับกลับมา
+# เป็น root ตรงนี้ก่อนจบไฟล์ แม้ว่าขั้นตอน install ด้านบนทั้งหมดจะทำในนาม user sky แล้วก็ตาม
+USER root
+CMD ["/usr/sbin/sshd", "-D"]
