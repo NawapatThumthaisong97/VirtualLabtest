@@ -8,7 +8,10 @@ k3s_service_cidr: 10.43.0.0/16
 flannel_iface: tailscale0
 
 # --- Cloudflare Tunnel ---
-cloudflare_tunnel_token: eyJhIjoiYWYxYmJmNmVlZDI3MzA3OTUyOTlmZDk3ZjkwODcyOTAiLCJ0IjoiYTZhZmFjN2EtYjY5MC00YTQ0LTgwYjYtOGU4MDk1MGQwYTA3IiwicyI6IllqRTVOamxoTm1NdE1EUmlaQzAwWldOa0xXRTJNek10TkRsalptSmhZbVExWlRRMiJ9
+# Token สำหรับ tunnel: 04478da7-cb30-4f2d-8097-4aec084fc456 (tunnel เก่า - ปิดการใช้งาน)
+# Token ใหม่สำหรับ VM เครื่องใหม่
+cloudflare_tunnel_token: eyJhIjoiYWYxYmJmNmVlZDI3MzA3OTUyOTlmZDk3ZjkwODcyOTAiLCJ0IjoiNDE3NGFmNjMtYTJiZC00Mjg5LWFhMTQtNzNhYWQ0NDFmMTczIiwicyI6Ik5tUmxOREUwTTJZdFkyRmxPQzAwWkdGakxUaG1ZakV0TWpFMU5XTXlPR1JqTkRnNSJ9
 
 # --- SkyPilot ---
+# TODO: ใส่ domain ที่ต้องการใช้ เช่น skypilot.yourdomain.com
 skypilot_domain: skypilot.bell-lab.space

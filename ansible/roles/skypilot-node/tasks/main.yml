@@ -5,30 +5,25 @@
     that:
       - skypilot_domain is defined
       - cloudflare_tunnel_token is defined
-      - groups['master'] is defined
-      - groups['master'] | length > 0
     fail_msg: "Missing required variables. Please check group_vars/all.yml"
     success_msg: "All required variables are defined"
 
-# ติดตั้ง Helm บน master node (ถ้ายังไม่มี)
+# ติดตั้ง Helm (ถ้ายังไม่มี)
 - name: Check if helm is installed
   ansible.builtin.command: which helm
-  delegate_to: "{{ groups['master'][0] }}"
   register: helm_check
   ignore_errors: yes
   changed_when: false
 
-- name: Install Helm on master
+- name: Install Helm
   ansible.builtin.shell: |
     curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-  delegate_to: "{{ groups['master'][0] }}"
   when: helm_check.rc != 0
 
 # ติดตั้ง Nginx Ingress Controller
 - name: Create skypilot-ingress namespace
   ansible.builtin.shell: |
     k3s kubectl create namespace skypilot-ingress --dry-run=client -o yaml | k3s kubectl apply -f -
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Install Nginx Ingress Controller via Helm
   ansible.builtin.shell: |
@@ -41,16 +36,15 @@
       --set controller.ingressClassResource.name=skypilot-nginx \
       --set controller.ingressClass=skypilot-nginx \
       --wait \
-      --timeout 5m
+      --timeout 10m \
+      --debug
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 # สร้าง namespace สำหรับ SkyPilot
 - name: Delete existing SkyPilot namespace (if exists)
   ansible.builtin.shell: |
     k3s kubectl delete namespace skypilot --ignore-not-found=true --wait=true --timeout=120s
-  delegate_to: "{{ groups['master'][0] }}"
   ignore_errors: yes
 
 - name: Wait for namespace to be fully deleted
@@ -64,7 +58,6 @@
       sleep 2
     done
     exit 1
-  delegate_to: "{{ groups['master'][0] }}"
   register: ns_delete_wait
   retries: 1
   delay: 5
@@ -73,7 +66,6 @@
 - name: Create SkyPilot namespace
   ansible.builtin.shell: |
     k3s kubectl create namespace skypilot
-  delegate_to: "{{ groups['master'][0] }}"
 
 # ติดตั้ง SkyPilot API Server ผ่าน Helm
 - name: Add SkyPilot Helm repo
@@ -82,7 +74,6 @@
     helm repo update
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Create SkyPilot values file
   ansible.builtin.copy:
@@ -121,7 +112,6 @@
       ingress-nginx:
         enabled: false
     dest: /tmp/skypilot-values.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Install SkyPilot API Server via Helm
   ansible.builtin.shell: |
@@ -135,14 +125,12 @@
       --timeout 10m
   environment:
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
-  delegate_to: "{{ groups['master'][0] }}"
   register: skypilot_install
 
 # รอให้ SkyPilot pods พร้อม (ไม่บังคับ - เพื่อไม่ให้ blocking)
 - name: Wait for SkyPilot pods to be ready
   ansible.builtin.command: |
     k3s kubectl wait --for=condition=ready pod -n skypilot -l app.kubernetes.io/name=skypilot-api-server --timeout=60s
-  delegate_to: "{{ groups['master'][0] }}"
   register: skypilot_ready
   ignore_errors: yes
   failed_when: false
@@ -159,7 +147,6 @@
       sleep 2
     done
     exit 1
-  delegate_to: "{{ groups['master'][0] }}"
   register: skypilot_svc_name
   retries: 3
   delay: 5
@@ -191,16 +178,13 @@
                   port:
                     number: 80
     dest: /tmp/skypilot-ingress.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Apply SkyPilot Ingress
   ansible.builtin.command: k3s kubectl apply -f /tmp/skypilot-ingress.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Wait for Ingress to be created
   ansible.builtin.command: |
     k3s kubectl get ingress skypilot-api-ingress -n skypilot
-  delegate_to: "{{ groups['master'][0] }}"
   retries: 10
   delay: 3
   register: ingress_check
@@ -210,7 +194,6 @@
 - name: Get SkyPilot service name and details
   ansible.builtin.shell: |
     k3s kubectl get svc -n skypilot -o json | jq -r '.items[0].metadata.name'
-  delegate_to: "{{ groups['master'][0] }}"
   register: skypilot_service_name
   ignore_errors: yes
 
@@ -221,7 +204,6 @@
 - name: Get Nginx Ingress service name
   ansible.builtin.shell: |
     k3s kubectl get svc -n skypilot-ingress -l app.kubernetes.io/component=controller -o json | jq -r '.items[0].metadata.name'
-  delegate_to: "{{ groups['master'][0] }}"
   register: nginx_service_name
 
 - name: Display Nginx service name
@@ -231,7 +213,6 @@
 - name: Get SkyPilot ingress backend service
   ansible.builtin.shell: |
     k3s kubectl get ingress -n skypilot -o json | jq -r '.items[0].spec.rules[0].http.paths[0].backend.service.name'
-  delegate_to: "{{ groups['master'][0] }}"
   register: ingress_backend
   ignore_errors: yes
 
@@ -246,7 +227,6 @@
       --from-literal=token={{ cloudflare_tunnel_token }} \
       --namespace skypilot-ingress \
       --dry-run=client -o yaml | k3s kubectl apply -f -
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Deploy Cloudflare Tunnel
   ansible.builtin.copy:
@@ -289,18 +269,15 @@
                   cpu: 200m
                   memory: 256Mi
     dest: /tmp/cloudflare-tunnel.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Apply Cloudflare Tunnel deployment
   ansible.builtin.command: k3s kubectl apply -f /tmp/cloudflare-tunnel.yaml
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Wait for Cloudflare Tunnel to be ready
   ansible.builtin.command: |
     k3s kubectl wait --for=condition=available deployment/cloudflare-tunnel \
       --namespace skypilot-ingress \
       --timeout=120s
-  delegate_to: "{{ groups['master'][0] }}"
   register: tunnel_ready
   ignore_errors: yes
   failed_when: false
@@ -322,7 +299,6 @@
     echo ""
     echo "=== Cloudflare Tunnel Pods ==="
     k3s kubectl get pods -n skypilot-ingress -l app=cloudflare-tunnel
-  delegate_to: "{{ groups['master'][0] }}"
   register: all_resources
 
 - name: Display all resources
@@ -337,35 +313,33 @@
       echo ""
       
       # Get actual service names
-      NGINX_SVC=$(kubectl get svc -n skypilot-ingress -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
-      SKYPILOT_SVC=$(kubectl get svc -n skypilot -o jsonpath='{.items[0].metadata.name}')
+      NGINX_SVC=$(k3s kubectl get svc -n skypilot-ingress -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
+      SKYPILOT_SVC=$(k3s kubectl get svc -n skypilot -o jsonpath='{.items[0].metadata.name}')
       
       echo "Nginx Service: $NGINX_SVC"
       echo "SkyPilot Service: $SKYPILOT_SVC"
       echo ""
       
       echo "1. Testing Nginx Ingress (should return nginx 404 or backend):"
-      kubectl run test-nginx --image=curlimages/curl --rm -i --restart=Never -- \
+      k3s kubectl run test-nginx --image=curlimages/curl --rm -i --restart=Never -- \
         curl -s -o /dev/null -w "HTTP %{http_code}\n" http://$NGINX_SVC.skypilot-ingress.svc.cluster.local -H "Host: {{ skypilot_domain }}"
       echo ""
       
       echo "2. Testing SkyPilot Service directly:"
-      kubectl run test-skypilot --image=curlimages/curl --rm -i --restart=Never -- \
+      k3s kubectl run test-skypilot --image=curlimages/curl --rm -i --restart=Never -- \
         curl -s -o /dev/null -w "HTTP %{http_code}\n" http://$SKYPILOT_SVC.skypilot.svc.cluster.local
       echo ""
       
       echo "3. Ingress details:"
-      kubectl describe ingress -n skypilot
+      k3s kubectl describe ingress -n skypilot
     dest: /tmp/test-skypilot-connectivity.sh
     mode: '0755'
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Copy verify installation script to master
   ansible.builtin.copy:
     src: verify-installation.sh
     dest: /tmp/verify-skypilot.sh
     mode: '0755'
-  delegate_to: "{{ groups['master'][0] }}"
 
 - name: Display final instructions
   ansible.builtin.debug:
@@ -429,21 +403,21 @@
       ===================================================
       
       # ตรวจสอบ pods ทั้งหมด
-      kubectl get pods -n skypilot
-      kubectl get pods -n skypilot-ingress
+      k3s kubectl get pods -n skypilot
+      k3s kubectl get pods -n skypilot-ingress
       
       # ตรวจสอบ services
-      kubectl get svc -n skypilot
-      kubectl get svc -n skypilot-ingress
+      k3s kubectl get svc -n skypilot
+      k3s kubectl get svc -n skypilot-ingress
       
       # ตรวจสอบ ingress
-      kubectl get ingress -n skypilot
-      kubectl describe ingress -n skypilot
+      k3s kubectl get ingress -n skypilot
+      k3s kubectl describe ingress -n skypilot
       
       # ตรวจสอบ logs
-      kubectl logs -n skypilot-ingress deployment/cloudflare-tunnel
-      kubectl logs -n skypilot-ingress -l app.kubernetes.io/component=controller
-      kubectl logs -n skypilot -l app.kubernetes.io/name=skypilot-api-server
+      k3s kubectl logs -n skypilot-ingress deployment/cloudflare-tunnel
+      k3s kubectl logs -n skypilot-ingress -l app.kubernetes.io/component=controller
+      k3s kubectl logs -n skypilot -l app.kubernetes.io/name=skypilot-api-server
       
       # ทดสอบภายใน cluster
       bash /tmp/test-skypilot-connectivity.sh

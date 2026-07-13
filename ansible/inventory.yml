@@ -3,14 +3,7 @@ all:
     master:
       hosts:
         virtual-lab-master:
-          ansible_host: 100.106.139.119
-
-    skypilot_nodes:
-      hosts:
-        skypilot-node-01:
-          ansible_host: 100.110.215.53
-
-#    registry_host:
-#      hosts:
-#        virtual-lab-registry_host:
-#          ansible_host: #Placeholder
+          ansible_host: 100.91.61.45
+          ansible_user: panupong
+          ansible_become: yes
+          ansible_become_method: sudo

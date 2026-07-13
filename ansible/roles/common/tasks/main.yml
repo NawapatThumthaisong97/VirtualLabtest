@@ -9,6 +9,7 @@
       - curl
       - python3-pip
       - open-iscsi
+      - jq
     state: present
 
 - name: Enable IPv4 forwarding
