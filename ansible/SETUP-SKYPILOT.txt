@@ -1,0 +1,52 @@
+SkyPilot Node Setup - Quick Start
+===================================
+
+1. แก้ไข inventory.yml ใส่ IP ของ SkyPilot node:
+   
+   skypilot_nodes:
+     hosts:
+       skypilot-node-01:
+         ansible_host: <Tailscale IP ของ node>
+
+2. รัน Ansible:
+   
+   cd ansible
+   ansible-playbook -i inventory.yml site.yml --limit skypilot_nodes
+
+3. ⚠️  หลังติดตั้งเสร็จ ต้องตั้งค่า Cloudflare Tunnel ใน Dashboard:
+   
+   a. เข้า https://one.dash.cloudflare.com/
+   b. Networks -> Tunnels -> หา tunnel ID
+   c. Configure -> Public Hostname -> Add
+   d. ตั้งค่า:
+      - Subdomain: skypilot
+      - Domain: bell-lab.space
+      - Type: HTTP
+      - URL: <nginx-service-name>.skypilot-ingress.svc.cluster.local:80
+        (Ansible จะแสดง service name หลังติดตั้ง)
+   e. Save
+
+4. รอ 1-2 นาที แล้วเข้าใช้งาน:
+   
+   https://skypilot.bell-lab.space
+
+5. ตรวจสอบสถานะ (บน master node):
+   
+   kubectl get pods -n skypilot
+   kubectl get pods -n skypilot-ingress
+   kubectl get ingress -n skypilot
+
+6. Troubleshooting:
+   
+   kubectl logs -n skypilot-ingress deployment/cloudflare-tunnel
+   kubectl logs -n skypilot deployment/<skypilot-pod-name>
+   bash /tmp/test-skypilot-connectivity.sh
+
+สิ่งที่ติดตั้งโดย Ansible:
+- K3s Agent (join กับ master)
+- Nginx Ingress Controller (รับ traffic จาก Cloudflare Tunnel)
+- SkyPilot API Server (2CPU, 2Gi RAM พร้อม Ingress)
+- Cloudflare Tunnel Pod (เชื่อมต่อกับ Cloudflare Edge)
+
+หมายเหตุ: Cloudflare Tunnel routing ต้องตั้งค่าใน Dashboard เท่านั้น
+เพราะใช้ remotely-managed tunnel (token-based)

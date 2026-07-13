@@ -6,6 +6,15 @@
     - tailscale
     - k3s-server
 
+- name: Provision SkyPilot nodes
+  hosts: skypilot_nodes
+  become: yes
+  roles:
+    - common
+    - tailscale
+    - k3s-agent
+    - skypilot-node
+
 #- name: Provision registry_host
 #  hosts: registry_host
 #  become: yes

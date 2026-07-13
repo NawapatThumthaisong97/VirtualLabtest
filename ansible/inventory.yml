@@ -3,7 +3,12 @@ all:
     master:
       hosts:
         virtual-lab-master:
-          ansible_host: 100.80.33.50
+          ansible_host: 100.106.139.119
+
+    skypilot_nodes:
+      hosts:
+        skypilot-node-01:
+          ansible_host: 100.110.215.53
 
 #    registry_host:
 #      hosts:
