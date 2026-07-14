@@ -1,9 +1,0 @@
-all:
-  children:
-    master:
-      hosts:
-        virtual-lab-master:
-          ansible_host: 100.91.61.45
-          ansible_user: panupong
-          ansible_become: yes
-          ansible_become_method: sudo

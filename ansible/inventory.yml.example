@@ -1,0 +1,16 @@
+all:
+  children:
+    master:
+      hosts:
+        virtual-lab-master:
+          ansible_host: <TAILSCALE_IP_OF_MASTER>   # e.g. 100.x.x.x
+          ansible_user: <SSH_USER>
+          ansible_become: yes
+          ansible_become_method: sudo
+    # workers:
+    #   hosts:
+    #     worker-1:
+    #       ansible_host: <TAILSCALE_IP_OF_WORKER>
+    #       ansible_user: <SSH_USER>
+    #       ansible_become: yes
+    #       ansible_become_method: sudo

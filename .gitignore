@@ -171,8 +171,13 @@ helm-secrets/
 admin.conf
 
 # Ansible fetch artifacts — kubeconfig & node-token (full cluster keys)
-k3s-Master/artifacts/*
-!k3s-Master/artifacts/.gitkeep
+# (path was wrong before: "k3s-Master/artifacts" never matched the real "ansible/artifacts")
+ansible/artifacts/*
+!ansible/artifacts/.gitkeep
+
+# Ansible inventory/vars with real hosts, IPs, and secrets — commit the .example templates only
+ansible/inventory.yml
+ansible/group_vars/all.yml
 
 # -----------------------------------------------------------------------------
 # 🏗️  Infrastructure / Terraform
