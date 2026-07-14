@@ -6,3 +6,5 @@
     - { role: tailscale, tags: ['tailscale'] }
     - { role: k3s-server, tags: ['k3s-server'] }
     - { role: skypilot-node, tags: ['skypilot-node'] }
+
+#ใช้ Tags สําหรับการ Debug เราสามารถเลือกได้ว่าจะทํา role ไหน หากเราเคยทําไปแล้ว
