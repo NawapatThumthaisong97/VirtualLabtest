@@ -281,5 +281,6 @@ test-results/
 junit.xml
 
 docs/PROGRESS.md
+docs/SKYPILOT_REBUILD_COMMANDS.md
 docs/SKYPILOT_BAKE.md
 docs/SKYPILOT_VERSION_CHECK_GUIDE.md

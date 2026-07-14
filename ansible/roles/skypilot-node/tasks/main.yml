@@ -42,10 +42,14 @@
     KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
 # สร้าง namespace สำหรับ SkyPilot
-- name: Delete existing SkyPilot namespace (if exists)
+# Idempotent by default: ของเดิมลบ namespace ทิ้งแบบไม่มีเงื่อนไขทุกครั้งที่รัน playbook ทำให้
+# state ของ API server (cluster records/job history) หายทุกรอบ แม้รันซ้ำกับ deployment ที่ใช้งาน
+# จริงอยู่ก็ตาม - ตอนนี้ลบเฉพาะตอนสั่ง `-e skypilot_reset=true` เท่านั้น ปกติจะข้ามไปเลย
+- name: Delete existing SkyPilot namespace (only when skypilot_reset=true)
   ansible.builtin.shell: |
     k3s kubectl delete namespace skypilot --ignore-not-found=true --wait=true --timeout=120s
   ignore_errors: yes
+  when: skypilot_reset | default(false) | bool
 
 - name: Wait for namespace to be fully deleted
   ansible.builtin.shell: |
@@ -62,10 +66,11 @@
   retries: 1
   delay: 5
   until: ns_delete_wait.rc == 0
+  when: skypilot_reset | default(false) | bool
 
-- name: Create SkyPilot namespace
+- name: Ensure SkyPilot namespace exists
   ansible.builtin.shell: |
-    k3s kubectl create namespace skypilot
+    k3s kubectl create namespace skypilot --dry-run=client -o yaml | k3s kubectl apply -f -
 
 # ติดตั้ง SkyPilot API Server ผ่าน Helm
 - name: Add SkyPilot Helm repo
