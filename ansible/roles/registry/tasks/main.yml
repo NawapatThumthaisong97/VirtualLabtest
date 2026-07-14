@@ -1,0 +1,32 @@
+---
+# ติดตั้ง private Docker registry (camp-registry, port 5001)  เก็บ image ให้เครื่องอื่นดึงไปใช้
+# เครื่อง registry  ต้องติดตั้ง Docker Engine เองก่อน
+- name: Ensure Docker Engine is installed
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+    update_cache: true
+
+- name: Ensure Docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure docker SDK for Ansible
+  ansible.builtin.apt:
+    name: python3-docker
+    state: present
+    update_cache: true
+
+- name: Camp private registry (port 5001)
+  community.docker.docker_container:
+    name: camp-registry
+    image: registry:2
+    restart_policy: always
+    published_ports: ["5001:5001"]
+    env:
+      REGISTRY_HTTP_ADDR: "0.0.0.0:5001"
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - "/srv/camp-registry:/var/lib/registry"

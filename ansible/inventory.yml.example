@@ -2,15 +2,22 @@ all:
   children:
     master:
       hosts:
-        virtual-lab-master:
+        thinkpad:
+          ansible_connection: local
           ansible_host: <TAILSCALE_IP_OF_MASTER>   # e.g. 100.x.x.x
+          ansible_become: yes
+          ansible_become_method: sudo
+    workers:
+      hosts:
+        worker-1:
+          ansible_host: <TAILSCALE_IP_OF_WORKER>
+          ansible_user: <SSH_USER>   # เช็คด้วย `whoami` บนเครื่อง worker เอง ไม่ใช่ชื่อที่ตั้งเอง
+          ansible_become: yes
+          ansible_become_method: sudo
+    registry:
+      hosts:
+        registry-host:
+          ansible_host: <TAILSCALE_IP_OF_REGISTRY>
           ansible_user: <SSH_USER>
           ansible_become: yes
           ansible_become_method: sudo
-    # workers:
-    #   hosts:
-    #     worker-1:
-    #       ansible_host: <TAILSCALE_IP_OF_WORKER>
-    #       ansible_user: <SSH_USER>
-    #       ansible_become: yes
-    #       ansible_become_method: sudo

@@ -19,18 +19,30 @@
   args:
     creates: /usr/local/bin/k3s-agent
 
-- name: Wait for node to be ready
+#เช็กว่า host status ขึ้น ready หรือยัง
+- name: Check current Ready status of this node in the cluster
   ansible.builtin.shell: |
-    # Get actual node name from K3s
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    k3s kubectl get nodes -o wide --no-headers | awk -v ip="{{ ansible_host }}" '$6==ip {print $2}'
+  delegate_to: "{{ groups['master'][0] }}"
+  vars:
+    ansible_become: false
+  changed_when: false
+  register: node_status
+
+
+- name: Wait for node to be ready (ข้ามถ้า Ready อยู่แล้ว)
+  ansible.builtin.shell: |
     for i in {1..30}; do
-      NODE_NAME=$(k3s kubectl get nodes -o name | grep -v master | head -n 1 | cut -d/ -f2)
-      if [ -n "$NODE_NAME" ]; then
-        k3s kubectl wait --for=condition=Ready node/$NODE_NAME --timeout=120s && exit 0
-      fi
+      STATUS=$(k3s kubectl get nodes -o wide --no-headers | awk -v ip="{{ ansible_host }}" '$6==ip {print $2}')
+      [ "$STATUS" = "Ready" ] && exit 0
       sleep 5
     done
     exit 1
   delegate_to: "{{ groups['master'][0] }}"
+  vars:
+    ansible_become: false  #อํานาจเยอะกว่า become=false!
+  when: node_status.stdout != "Ready"
   retries: 3
   delay: 10
   register: node_ready

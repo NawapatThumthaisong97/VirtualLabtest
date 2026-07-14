@@ -1,3 +1,4 @@
+#ใช้ Tags สําหรับการ Debug เราสามารถเลือกได้ว่าจะทํา role ไหน หากเราเคยทําไปแล้ว
 - name: Provision Virtual-Lab master
   hosts: master
   become: yes
@@ -7,4 +8,17 @@
     - { role: k3s-server, tags: ['k3s-server'] }
     - { role: skypilot-node, tags: ['skypilot-node'] }
 
-#ใช้ Tags สําหรับการ Debug เราสามารถเลือกได้ว่าจะทํา role ไหน หากเราเคยทําไปแล้ว
+- name: Provision Virtual-Lab workers
+  hosts: workers
+  become: yes
+  roles:
+    - { role: common, tags: ['common'] }
+    - { role: tailscale, tags: ['tailscale'] }
+    - { role: k3s-agent, tags: ['k3s-agent'] }  
+
+- name: Provision Virtual-Lab registry
+  hosts: registry
+  become: yes
+  roles:
+    - { role: common, tags: ['common'] }
+    - { role: registry, tags: ['registry'] }
