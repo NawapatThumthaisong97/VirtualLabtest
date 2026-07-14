@@ -240,6 +240,11 @@ $RECYCLE.BIN/
 docker-compose.override.yml
 docker-compose.local.yml
 
+# SkyPilot bake image — wheel file is a fetched artifact tied to one exact
+# SkyPilot version/hash (kubectl cp from the API server pod), regenerated every
+# time SkyPilot upgrades. Don't bloat git history with a stale binary each time.
+docker/bake/wheels/*.whl
+
 # -----------------------------------------------------------------------------
 # 📊 Misc / General
 # -----------------------------------------------------------------------------
@@ -276,3 +281,5 @@ test-results/
 junit.xml
 
 docs/PROGRESS.md
+docs/SKYPILOT_BAKE.md
+docs/SKYPILOT_VERSION_CHECK_GUIDE.md
