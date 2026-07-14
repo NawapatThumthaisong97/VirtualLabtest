@@ -2,14 +2,9 @@
   hosts: master
   become: yes
   roles:
-    - common
-    - tailscale
-    - k3s-server
+    - { role: common, tags: ['common'] }
+    - { role: tailscale, tags: ['tailscale'] }
+    - { role: k3s-server, tags: ['k3s-server'] }
+    - { role: skypilot-node, tags: ['skypilot-node'] }
 
-#- name: Provision registry_host
-#  hosts: registry_host
-#  become: yes
-#  role:
-#    - common
-#    - tailscale
-#    - registry
+#ใช้ Tags สําหรับการ Debug เราสามารถเลือกได้ว่าจะทํา role ไหน หากเราเคยทําไปแล้ว

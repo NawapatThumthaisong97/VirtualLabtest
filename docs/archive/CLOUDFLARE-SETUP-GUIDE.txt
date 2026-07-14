@@ -1,0 +1,177 @@
+=========================================================================
+   การตั้งค่า Cloudflare Tunnel Dashboard (จำเป็นต้องทำหลัง Ansible)
+=========================================================================
+
+⚠️  สำคัญมาก: Ansible จะติดตั้งทุกอย่างใน Kubernetes แล้ว แต่ต้องตั้งค่า
+routing ใน Cloudflare Dashboard เพื่อให้ Domain เชื่อมกับ Nginx Ingress
+
+-------------------------------------------------------------------------
+ขั้นตอนที่ 1: เข้า Cloudflare Dashboard
+-------------------------------------------------------------------------
+
+1. เปิด browser ไปที่: https://one.dash.cloudflare.com/
+
+2. Login ด้วย Cloudflare account ของคุณ
+
+3. เลือก Account ที่มี domain bell-lab.space
+
+-------------------------------------------------------------------------
+ขั้นตอนที่ 2: เข้าหน้า Tunnels
+-------------------------------------------------------------------------
+
+1. ซ้ายมือ เลือก: Networks
+
+2. คลิก: Tunnels
+
+3. คุณจะเห็น tunnel ที่สร้างไว้แล้ว:
+   Tunnel ID: 04478da7-cb30-4f2d-8097-4aec084fc456
+   
+4. คลิกที่ tunnel name หรือ "Configure" button
+
+-------------------------------------------------------------------------
+ขั้นตอนที่ 3: Add Public Hostname
+-------------------------------------------------------------------------
+
+1. ใน tunnel configuration page คลิกที่ tab: "Public Hostname"
+
+2. คลิก button: "Add a public hostname"
+
+3. กรอกข้อมูลในฟอร์ม:
+
+   ┌─────────────────────────────────────────────────────────────┐
+   │                                                             │
+   │  Subdomain:  skypilot                                       │
+   │              ↑ พิมพ์ตรงนี้                                  │
+   │                                                             │
+   │  Domain:     bell-lab.space                                 │
+   │              ↑ เลือกจาก dropdown                           │
+   │                                                             │
+   │  Path:       (เว้นว่างไว้)                                  │
+   │                                                             │
+   │  ─────────────────────────────────────────────────────────  │
+   │                                                             │
+   │  Service                                                    │
+   │  ───────                                                    │
+   │                                                             │
+   │  Type:       HTTP                                           │
+   │              ↑ เลือกจาก dropdown                           │
+   │                                                             │
+   │  URL:        ดูจาก Ansible output                           │
+   │              ตัวอย่าง:                                       │
+   │              nginx-controller.skypilot-ingress.svc.cluster.local:80 │
+   │              หรือ                                            │
+   │              skypilot-ingress-ingress-nginx-controller.skypilot-ingress.svc.cluster.local:80 │
+   │                                                             │
+   │              ⚠️  ต้องใช้ service name ที่ Ansible แสดง!     │
+   │                                                             │
+   └─────────────────────────────────────────────────────────────┘
+
+4. คลิก: "Save hostname"
+
+-------------------------------------------------------------------------
+ขั้นตอนที่ 4: ตรวจสอบ Tunnel Status
+-------------------------------------------------------------------------
+
+1. กลับไปที่หน้า Tunnels list
+
+2. ตรวจสอบว่า tunnel status เป็น "HEALTHY" (สีเขียว)
+   
+   ถ้ายังไม่ healthy:
+   - รอ 30 วินาที แล้ว refresh
+   - ตรวจสอบว่า cloudflare-tunnel pod รันอยู่:
+     kubectl get pods -n skypilot-ingress -l app=cloudflare-tunnel
+
+3. ตรวจสอบว่า Public Hostname แสดงอยู่ในรายการ:
+   - skypilot.bell-lab.space -> HTTP -> <nginx-service>:80
+
+-------------------------------------------------------------------------
+ขั้นตอนที่ 5: ทดสอบการเข้าถึง
+-------------------------------------------------------------------------
+
+1. รอ 1-2 นาที ให้ DNS propagate
+
+2. เปิด browser ไปที่: https://skypilot.bell-lab.space
+
+3. คุณควรเห็น:
+   ✅ SkyPilot API Server Dashboard
+   
+   ถ้าเจอ 404 หรือ error:
+   ❌ ตรวจสอบตามด้านล่าง
+
+-------------------------------------------------------------------------
+Troubleshooting Guide
+-------------------------------------------------------------------------
+
+ปัญหา: "404 Not Found"
+สาเหตุที่เป็นไปได้:
+
+1. Service URL ใน Cloudflare ผิด
+   แก้ไข: 
+   - ไปที่ Cloudflare tunnel -> Edit hostname
+   - ตรวจสอบว่า URL ตรงกับ output จาก Ansible
+   - ลองใช้: <service-name>.skypilot-ingress.svc.cluster.local:80
+
+2. Nginx Ingress ไม่ได้ route ไป SkyPilot
+   ตรวจสอบ:
+   kubectl get ingress -n skypilot
+   kubectl describe ingress -n skypilot
+   
+   ควรเห็น:
+   - Host: skypilot.bell-lab.space
+   - Backend: <skypilot-service>:80
+
+3. SkyPilot pods ยังไม่พร้อม
+   ตรวจสอบ:
+   kubectl get pods -n skypilot
+   
+   ควรเห็น status: Running และ Ready: 1/1
+
+4. Ingress Class ไม่ถูกต้อง
+   ตรวจสอบ:
+   kubectl get ingress -n skypilot -o yaml | grep className
+   
+   ควรเป็น: ingressClassName: skypilot-nginx
+
+ปัญหา: "502 Bad Gateway"
+สาเหตุ: Backend service ไม่ตอบสนอง
+
+แก้ไข:
+1. ตรวจสอบ SkyPilot pods:
+   kubectl logs -n skypilot <pod-name>
+
+2. ตรวจสอบ service endpoints:
+   kubectl get endpoints -n skypilot
+
+ปัญหา: "Tunnel not HEALTHY"
+สาเหตุ: Cloudflare tunnel pod มีปัญหา
+
+แก้ไข:
+1. ดู logs:
+   kubectl logs -n skypilot-ingress deployment/cloudflare-tunnel
+
+2. Restart tunnel:
+   kubectl rollout restart deployment/cloudflare-tunnel -n skypilot-ingress
+
+-------------------------------------------------------------------------
+คำสั่งที่มีประโยชน์
+-------------------------------------------------------------------------
+
+# ดู service name ของ Nginx Ingress
+kubectl get svc -n skypilot-ingress
+
+# ดู service name ของ SkyPilot  
+kubectl get svc -n skypilot
+
+# ทดสอบ connectivity จากภายใน cluster
+bash /tmp/test-skypilot-connectivity.sh
+
+# ดู logs ทั้งหมด
+kubectl logs -n skypilot-ingress deployment/cloudflare-tunnel
+kubectl logs -n skypilot <skypilot-pod-name>
+kubectl logs -n skypilot-ingress deployment/skypilot-ingress-ingress-nginx-controller
+
+# Forward port เพื่อทดสอบโดยตรง (ไม่ผ่าน Cloudflare)
+kubectl port-forward -n skypilot service/<skypilot-service> 8080:80
+# แล้วเปิด http://localhost:8080
+
+=========================================================================

@@ -1,0 +1,37 @@
+---
+- name: Read node token from artifacts
+  ansible.builtin.set_fact:
+    k3s_token: "{{ lookup('file', playbook_dir + '/artifacts/node-token') }}"
+
+- name: Get master node IP from inventory
+  ansible.builtin.set_fact:
+    k3s_master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] }}"
+
+- name: Install K3s agent
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | \
+      INSTALL_K3S_VERSION={{ k3s_version }} \
+      K3S_URL=https://{{ k3s_master_ip }}:{{ k3s_api_port }} \
+      K3S_TOKEN={{ k3s_token }} \
+      sh -s - agent \
+      --node-ip {{ ansible_host }} \
+      --flannel-iface {{ flannel_iface }}
+  args:
+    creates: /usr/local/bin/k3s-agent
+
+- name: Wait for node to be ready
+  ansible.builtin.shell: |
+    # Get actual node name from K3s
+    for i in {1..30}; do
+      NODE_NAME=$(k3s kubectl get nodes -o name | grep -v master | head -n 1 | cut -d/ -f2)
+      if [ -n "$NODE_NAME" ]; then
+        k3s kubectl wait --for=condition=Ready node/$NODE_NAME --timeout=120s && exit 0
+      fi
+      sleep 5
+    done
+    exit 1
+  delegate_to: "{{ groups['master'][0] }}"
+  retries: 3
+  delay: 10
+  register: node_ready
+  until: node_ready.rc == 0
