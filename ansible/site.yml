@@ -2,7 +2,7 @@
   hosts: master
   become: yes
   roles:
-    - common
-    - tailscale
-    - k3s-server
-    - skypilot-node
+    - { role: common, tags: ['common'] }
+    - { role: tailscale, tags: ['tailscale'] }
+    - { role: k3s-server, tags: ['k3s-server'] }
+    - { role: skypilot-node, tags: ['skypilot-node'] }

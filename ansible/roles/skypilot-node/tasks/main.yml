@@ -5,6 +5,7 @@
     that:
       - skypilot_domain is defined
       - cloudflare_tunnel_token is defined
+      - skypilot_chart_version is defined
     fail_msg: "Missing required variables. Please check group_vars/all.yml"
     success_msg: "All required variables are defined"
 
@@ -120,7 +121,8 @@
 
 - name: Install SkyPilot API Server via Helm
   ansible.builtin.shell: |
-    helm upgrade --install skypilot-api skypilot/skypilot-nightly --devel \
+    helm upgrade --install skypilot-api skypilot/skypilot \
+      --version {{ skypilot_chart_version }} \
       --namespace skypilot \
       --values /tmp/skypilot-values.yaml \
       --set ingress-nginx.enabled=false \
