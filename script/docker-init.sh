@@ -1,6 +1,6 @@
 #!/bin/bash
 
-REGISTRY=100.98.103.53:5001
+REGISTRY=100.127.74.48:5001
 
 # เช็คว่า repo:tag มีอยู่ใน registry แล้วหรือยัง (HTTP 200 = มีแล้ว, 404 = ยังไม่มี)
 image_exists() {
