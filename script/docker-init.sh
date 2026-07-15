@@ -14,7 +14,7 @@ image_exists() {
   [ "$status" = "200" ]
 }
 
-# build+push เฉพาะเมื่อยังไม่มี tag นี้ใน registry 
+# build+push เฉพาะเมื่อยังไม่มี tag นี้ใน registry
 build_and_push() {
   local repo="$1" tag="$2" context="$3"
   shift 3
@@ -26,8 +26,16 @@ build_and_push() {
   fi
 }
 
-# skypilot/bake
-build_and_push skypilot/bake 0.12.3.post1 docker/bake/ -f docker/bake/dockerfile
+# skypilot/bake - ต้องมีไฟล์ wheel ที่ kubectl cp ออกมาจาก SkyPilot API server pod จริงก่อน
+# (ผูกกับ instance เฉพาะ, ไม่ commit เข้า git - ดู docs/SKYPILOT_REBUILD_COMMANDS.md) เครื่องที่
+# ไม่มี kubectl access ไปยัง cluster (เช่น registry-host) จะไม่มีไฟล์นี้เลย - ข้ามแบบสวย ๆ แทนที่
+# จะพังทั้ง script
+WHEEL_FILE="docker/bake/wheels/skypilot-0.12.3.post1-py3-none-any.whl"
+if [ -f "$WHEEL_FILE" ]; then
+  build_and_push skypilot/bake 0.12.3.post1 docker/bake/ -f docker/bake/dockerfile
+else
+  echo "ไม่พบ $WHEEL_FILE -> ข้าม skypilot/bake (ต้อง kubectl cp จากเครื่องที่เข้าถึง SkyPilot cluster ได้เท่านั้น)"
+fi
 
-# skypilot/music-lab
+# skypilot/music-lab - ไม่ผูกกับ cluster instance ใด ๆ build ที่ไหนก็ได้
 build_and_push skypilot/music-lab lab-01 music-lab/ -f music-lab/skypilot/Dockerfile
