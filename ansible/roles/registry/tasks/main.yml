@@ -31,12 +31,33 @@
     volumes:
       - "/srv/camp-registry:/var/lib/registry"
 
+# Build script ต้องรันบนเครื่องที่มี repo (Dockerfile ต้นฉบับ) + Docker อยู่จริง ไม่ใช่เครื่อง
+# registry เอง (ตัวนั้นแค่เก็บ image) - เลยต้อง delegate ไปที่ master แล้วเตรียม git+docker+repo
+# ให้ก่อนถึงจะ build ได้จริง (ใช้ become ปกติจาก play เพราะ master เป็น SSH host จริงแล้ว ไม่ใช่
+# local connection แบบตอนที่เจอ bug become ชนกับ delegate_to)
+- name: Ensure git is installed on master
+  ansible.builtin.apt:
+    name: git
+    state: present
+  delegate_to: "{{ groups['master'][0] }}"
+
+- name: Ensure Docker Engine is installed on master
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+  delegate_to: "{{ groups['master'][0] }}"
+
+- name: Clone or update VirtualLabtest repo on master
+  ansible.builtin.git:
+    repo: https://github.com/NawapatThumthaisong97/VirtualLabtest.git
+    dest: "/home/{{ hostvars[groups['master'][0]]['ansible_user'] | default('pete') }}/VirtualLabtest"
+    version: main
+  delegate_to: "{{ groups['master'][0] }}"
+
 - name: Build and push images to registry
   ansible.builtin.script: /home/pete/document/VirtualLabtest/script/docker-init.sh
   args:
-    chdir: /home/pete/document/VirtualLabtest
+    chdir: "/home/{{ hostvars[groups['master'][0]]['ansible_user'] | default('pete') }}/VirtualLabtest"
   delegate_to: "{{ groups['master'][0] }}"
-  vars:
-    ansible_become: false
 
 
