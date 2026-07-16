@@ -9,8 +9,8 @@
 
 ## ภาพรวมโปรเจกต์
 
-**Virtual Lab** คือแพลตฟอร์มห้องปฏิบัติการเสมือนสำหรับการเรียนรู้ Cloud Engineering
-แบบลงมือทำจริง นักศึกษาสามารถทำ Lab, รัน AI Jobs และทดลองใน Sandbox
+**Virtual Lab** คือแพลตฟอร์มห้องปฏิบัติการเสมือนสำหรับการเรียนรู้ ของนึกศึกษา
+ภายใต้สภาพแวดล้อมใดๆก็ได้ นักศึกษาสามารถทำ Lab ของอาจาร์ย, รัน AI Jobs และทดลองใน Sandbox
 บนโครงสร้างพื้นฐานจริง โดยระบบจัดการ workload ผ่าน Kubernetes Cluster
 ที่ผสมทรัพยากรระหว่างเครื่อง local และ cloud พร้อม Docker Private Registry
 และ Persistent Storage (Cloudflare R2) สำหรับเก็บ image และข้อมูลถาวร
