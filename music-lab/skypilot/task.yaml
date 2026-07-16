@@ -1,7 +1,7 @@
 # SkyPilot ตัดสินใจว่าจะรันที่ไหน (k8s บ้านเรา, AWS, ฯลฯ) - image นี้มีครบทั้ง 3 service
 # (server/client/ide) bake ไว้แล้ว รันเป็น process เดียวกันในตัวเดียว ไม่มี Docker ซ้อน
 resources:
-  image_id: docker:100.98.103.53:5001/skypilot/music-lab:lab-01
+  image_id: docker:100.127.74.48:5001/skypilot/music-lab:lab-01
   cpus: 2+
   memory: 4+
   ports:
