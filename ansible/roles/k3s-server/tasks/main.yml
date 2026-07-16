@@ -1,3 +1,36 @@
+- name: Get registry-host IP from inventory
+  ansible.builtin.set_fact:
+    registry_ip: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}"
+
+# master ก็ pull image เองได้ (sky launch ทดสอบ, pod ที่ไม่มี taint กันไว้) ต้องเชื่อ registry
+# แบบ HTTP เหมือนกับ worker - เขียนไว้ก่อนติดตั้ง k3s ให้มีผลตั้งแต่ครั้งแรกที่ server เริ่มรัน
+- name: Ensure /etc/rancher/k3s directory exists
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: Configure containerd to trust the private registry as insecure
+  ansible.builtin.copy:
+    content: |
+      mirrors:
+        "{{ registry_ip }}:5001":
+          endpoint:
+            - "http://{{ registry_ip }}:5001"
+      configs:
+        "{{ registry_ip }}:5001":
+          tls:
+            insecure_skip_verify: true
+    dest: /etc/rancher/k3s/registries.yaml
+  register: registries_yaml
+
+- name: Restart k3s to apply registries.yaml (ถ้า config เปลี่ยนและ k3s ติดตั้งไปแล้ว)
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+  when: registries_yaml.changed
+  ignore_errors: true # ครั้งแรกสุด service ยังไม่มี ก็ข้ามไป (server จะอ่านไฟล์นี้ตอนติดตั้งเองอยู่แล้ว)
+
 - name: Install K3s server
   ansible.builtin.shell: |
     curl -sfL https://get.k3s.io | \

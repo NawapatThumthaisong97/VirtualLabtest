@@ -31,12 +31,3 @@
     volumes:
       - "/srv/camp-registry:/var/lib/registry"
 
-- name: Build and push images to registry
-  ansible.builtin.script: /home/pete/document/VirtualLabtest/script/docker-init.sh
-  args:
-    chdir: /home/pete/document/VirtualLabtest
-  delegate_to: "{{ groups['master'][0] }}"
-  vars:
-    ansible_become: false
-
-
