@@ -1,0 +1,58 @@
+# Web Framework
+fastapi==0.136.1              # Web framework สำหรับสร้าง API (เทียบเท่า Express.js)
+uvicorn[standard]==0.35.0     # ASGI server สำหรับรัน FastAPI
+
+# Database
+sqlalchemy==2.0.51            # ORM สำหรับจัดการฐานข้อมูล
+alembic==1.15.0               # Database migration tool
+psycopg2-binary==2.9.10       # PostgreSQL adapter (ถ้าใช้ PostgreSQL)
+# pymysql==1.1.1              # MySQL adapter (ถ้าใช้ MySQL)
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0  # JWT token generation/validation (เทียบเท่า jsonwebtoken)
+passlib[bcrypt]==1.7.4        # Password hashing (เทียบเท่า bcrypt)
+python-multipart==0.0.20      # สำหรับ form data และ file uploads
+
+# CORS & Security Headers
+fastapi-cors==0.0.6           # CORS middleware (เทียบเท่า cors)
+# หรือใช้ built-in: from fastapi.middleware.cors import CORSMiddleware
+
+# Validation
+pydantic==2.10.6              # Data validation (เทียบเท่า zod, built-in ใน FastAPI)
+pydantic-settings==2.7.0      # Environment variables management
+email-validator==2.3.0        # Email validation
+
+# HTTP & Networking
+httpx==0.28.1                 # HTTP client (async-ready)
+aiofiles==24.1.0              # Async file operations
+aiosmtplib==5.1.2             # Async SMTP client (เทียบเท่า nodemailer)
+
+# Cloud Storage (Cloudflare R2 / S3-compatible)
+boto3==1.35.80                # AWS SDK สำหรับ S3-compatible storage (Cloudflare R2)
+aioboto3==13.3.0              # Async version ของ boto3
+
+# Compression
+brotli==1.1.0                 # Brotli compression (เทียบเท่า compression)
+
+# Logging & Monitoring
+# ใช้ Python built-in logging module แทน
+
+# Session Management
+itsdangerous==2.2.0           # Secure session cookies (เทียบเท่า cookie-parser)
+redis==5.2.1                  # สำหรับ session storage (optional)
+
+# Environment Variables
+python-dotenv==1.0.1          # โหลด .env files
+
+# Development Tools
+pytest==8.3.4                 # Testing framework
+pytest-asyncio==0.25.0        # Async testing support
+black==24.10.0                # Code formatter
+flake8==7.1.1                 # Code linter
+mypy==1.13.0                  # Type checker
+
+# Optional: Rate Limiting & Caching
+slowapi==0.1.9                # Rate limiting
+cachetools==5.5.0             # Caching utilities
+
+skypilot==0.12.3.post1
