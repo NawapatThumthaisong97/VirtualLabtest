@@ -62,6 +62,7 @@ tailscale.key
 !package.json
 !package-lock.json
 !tsconfig.json
+!tsconfig.*.json
 !.eslintrc.json
 !music-lab/ide/settings.json
 # Re-allow specific JSON files above; block credential JSONs
