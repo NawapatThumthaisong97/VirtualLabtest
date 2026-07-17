@@ -1,0 +1,82 @@
+# Backend - Python
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.egg-info/
+backend/dist/
+backend/build/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.coverage
+backend/htmlcov/
+backend/logs/
+backend/*.log
+
+# Backend - Environment
+backend/.env
+backend/.env.local
+backend/.env.*.local
+
+# Backend - Database
+backend/db.sqlite3
+backend/*.db
+
+# Frontend - Dependencies
+frontend/node_modules/
+frontend/.pnpm-debug.log*
+
+# Frontend - Build
+frontend/dist/
+frontend/.vite/
+
+# Frontend - Environment
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Frontend - IDE/Editor
+frontend/.vscode/
+frontend/.idea/
+frontend/*.swp
+frontend/*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# OS specific
+*.pid
+*.seed
+*.log
+
+# Misc
+.DS_Store
+.env.local
+.env.*.local
