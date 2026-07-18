@@ -26,7 +26,8 @@
 |--------|------|-----------|--------|
 | GET | `/api/courses` | S2 Courses | วิชาที่ enroll + progress สรุป `{labs_total, labs_finished, nearest_due}` |
 | GET | `/api/courses/{course_id}/labs` | S3 Labwork | แลปในวิชา (เฉพาะ published) + สถานะของฉันต่อแลป |
-| GET | `/api/labs/{lab_id}` | S4 Lab Instruction | รายละเอียดแลป: title, doc_url (R2), image, due_at |
+| GET | `/api/labs/{lab_id}` | S4 Lab Instruction | รายละเอียดแลป: title, image, due_at |
+| GET | `/api/labs/{lab_id}/doc` | S4 Lab Instruction | เอกสารแลป (Markdown) จาก R2 — backend แปลงลิงก์รูปเป็น presigned URL (อายุ ~1 ชม.) ก่อนส่ง + เช็คว่า user enroll วิชานี้จริง — frontend render ด้วย react-markdown |
 | POST | `/api/labs/{lab_id}/finish` | S5 Lab Hub | Mark as Done — upsert `lab_progress.status='finished'` |
 
 ## 3. Sessions
@@ -89,7 +90,7 @@
 | S1 Console | `/api/me`, `/api/dashboard/summary`, `/api/dashboard/continue`, `/api/sessions?limit=4`, `/api/announcements` | ครบ |
 | S2 Courses | `/api/courses` | ครบ |
 | S3 Labwork | `/api/courses/{id}/labs` | ครบ |
-| S4 Lab Instruction | `/api/labs/{id}`, `POST /api/sessions` (ปุ่ม Launch) | ครบ |
+| S4 Lab Instruction | `/api/labs/{id}`, `/api/labs/{id}/doc` (markdown + รูป), `POST /api/sessions` (ปุ่ม Launch) | ครบ |
 | S5 Lab Hub | `GET /api/sessions/{id}` (poll), `/stop`, `/reset`, `POST /api/labs/{id}/finish` | ครบ |
 | S6 Compute Service | ไม่เรียก (placeholder) — อนาคต `POST /api/sessions` ด้วย `service_type='compute'` รองรับอยู่แล้ว | ครบ |
 | S7 My Dashboard | `/api/sessions?status=running`, `/api/dashboard/summary` | ครบ |
