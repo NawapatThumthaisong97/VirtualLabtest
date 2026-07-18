@@ -7,13 +7,14 @@
 | # | หน้า | หมายเหตุ |
 |---|------|----------|
 | S0 | **Home** (public) | ยังไม่ login — แนะนำระบบ + ปุ่ม Sign in with Google |
-| S1 | **Console** | หลัง login — Continue strip, การ์ด service, RECENT, ประกาศ |
+| S1 | **Console** | หลัง login — 2 แท็บ: **Quick Action** (Continue strip, การ์ด service, Recent work, โปรไฟล์+quota, ประกาศ) / **Dashboard** (ตาราง session ที่รันอยู่ + quota meter) |
 | S2 | **Courses** | รายวิชาที่ enroll |
 | S3 | **Labwork** (ต่อวิชา) | แลปทั้งหมดในวิชา + สถานะ + due |
 | S4 | **Lab Instruction** | โจทย์/เอกสาร (doc จาก R2) + ปุ่ม **Launch Lab** |
 | S5 | **Lab Hub** | คุม session หลัง launch |
 | S6 | **Compute Service** | โชว์ UI เฉย ๆ (placeholder — ปุ่มกดไม่ได้/ขึ้น "Coming soon") |
-| S7 | **My Dashboard** | session รันอยู่, storage, quota |
+
+> S7 My Dashboard (เดิม) ถูกยุบเป็นแท็บ Dashboard ของ Console (S1) — เนื้อหาเดิมครบ ไม่มีหน้าแยกแล้ว
 
 **Flow หลัก:** `Console -> Courses -> Labwork -> Lab Instruction -> กด Launch -> Lab Hub`
 

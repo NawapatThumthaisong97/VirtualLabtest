@@ -1,7 +1,7 @@
 # Virtual Lab — Backend API Specification
 
 > เส้น API ทั้งหมดของ FastAPI backend (Draft v1)
-> คู่กับ [frontend.md](frontend.md) — ทุก endpoint ระบุว่าหน้าไหนเรียกใช้ (S0–S7, A1–A6)
+> คู่กับ [frontend.md](frontend.md) — ทุก endpoint ระบุว่าหน้าไหนเรียกใช้ (S0–S6, A1–A6)
 > อิงกับ database schema v2 (PR #30)
 
 ## กติกากลาง
@@ -35,16 +35,16 @@
 | Method | Path | ใช้โดยหน้า | อธิบาย |
 |--------|------|-----------|--------|
 | POST | `/api/sessions` | S4 (ปุ่ม Launch) | body `{service_type, lab_id?, is_remote?}` — insert `status='pending'` + upsert `lab_progress='in_progress'` แล้วตอบ 202 `{session_id}` — background task เรียก SkyPilot ต่อ |
-| GET | `/api/sessions` | S1 Console (RECENT), S7 Dashboard | session ของฉัน — query: `status=`, `limit=` (RECENT ใช้ `limit=4`) |
+| GET | `/api/sessions` | S1 Console (Recent work + แท็บ Dashboard) | session ของฉัน — query: `status=`, `limit=` (Recent work ใช้ `limit=4`) |
 | GET | `/api/sessions/{id}` | S5 Lab Hub (poll ทุก 2–3 วิ) | สถานะ + `endpoints` (URL ต่อ service + ready) + `expires_at` (countdown) |
-| POST | `/api/sessions/{id}/stop` | S5, S7 | หยุด session — SkyPilot down แล้ว `status='stopped'`, `ended_at=now()` |
+| POST | `/api/sessions/{id}/stop` | S5, S1 แท็บ Dashboard | หยุด session — SkyPilot down แล้ว `status='stopped'`, `ended_at=now()` |
 | POST | `/api/sessions/{id}/reset` | S5 | stop + launch ใหม่จาก image เดิม — ตอบ 202 + session id ใหม่ |
 
 ## 4. Console / Dashboard aggregates
 
 | Method | Path | ใช้โดยหน้า | อธิบาย |
 |--------|------|-----------|--------|
-| GET | `/api/dashboard/summary` | S1, S7 | เลขทุกการ์ดใน request เดียว `{labs_in_progress, nearest_due, compute_running, sandbox_running, quota_hours_left, storage_used_mb}` — quota คิดแบบ wall-clock (Phase 1) |
+| GET | `/api/dashboard/summary` | S1 (ทั้งสองแท็บ) | เลขทุกการ์ดใน request เดียว `{labs_in_progress, nearest_due, compute_running, sandbox_running, quota_hours_left, storage_used_mb}` — quota คิดแบบ wall-clock (Phase 1) |
 | GET | `/api/dashboard/continue` | S1 (Continue strip) | แลป `in_progress` ล่าสุด 1 รายการ |
 | GET | `/api/announcements` | S1 | ประกาศ global + วิชาที่ enroll เรียงใหม่สุดก่อน (`limit` default 10) |
 
@@ -87,13 +87,13 @@
 | หน้า (frontend.md) | เส้นที่ใช้ | ครบไหม |
 |--------------------|-----------|--------|
 | S0 Home (public) | ไม่เรียก API — static + ปุ่ม Sign in (redirect ไป oauth2-proxy) | ครบ |
-| S1 Console | `/api/me`, `/api/dashboard/summary`, `/api/dashboard/continue`, `/api/sessions?limit=4`, `/api/announcements` | ครบ |
+| S1 Console — แท็บ Quick Action | `/api/me`, `/api/dashboard/summary`, `/api/dashboard/continue`, `/api/sessions?limit=4`, `/api/announcements` | ครบ |
+| S1 Console — แท็บ Dashboard (S7 เดิม) | `/api/sessions?status=running`, `/api/dashboard/summary`, `POST /api/sessions/{id}/stop` | ครบ |
 | S2 Courses | `/api/courses` | ครบ |
 | S3 Labwork | `/api/courses/{id}/labs` | ครบ |
 | S4 Lab Instruction | `/api/labs/{id}`, `/api/labs/{id}/doc` (markdown + รูป), `POST /api/sessions` (ปุ่ม Launch) | ครบ |
 | S5 Lab Hub | `GET /api/sessions/{id}` (poll), `/stop`, `/reset`, `POST /api/labs/{id}/finish` | ครบ |
 | S6 Compute Service | ไม่เรียก (placeholder) — อนาคต `POST /api/sessions` ด้วย `service_type='compute'` รองรับอยู่แล้ว | ครบ |
-| S7 My Dashboard | `/api/sessions?status=running`, `/api/dashboard/summary` | ครบ |
 | A1 Admin Console | `/api/admin/sessions?status=running`, `/api/admin/nodes`, `/api/admin/images?status=pending` (นับ badge), `POST /api/admin/announcements` | ครบ |
 | A2 Courses | `/api/admin/courses` (GET/POST) | ครบ |
 | A3 Course Detail | `/api/admin/courses/{id}` + `/labs`, `/enrollments`, announcements | ครบ |
