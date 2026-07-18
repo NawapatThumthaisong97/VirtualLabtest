@@ -282,6 +282,10 @@ models/
 checkpoints/
 weights/
 
+# Un-ignore app/models for SQLAlchemy models
+!app/models/
+!web-portal/backend/app/models/
+
 # Test output
 test-results/
 junit.xml
