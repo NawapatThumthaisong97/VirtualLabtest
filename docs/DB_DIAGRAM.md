@@ -76,6 +76,7 @@ erDiagram
     text sky_cluster_name
     int sky_job_id
     text image_ref "snapshot ตอน launch"
+    jsonb endpoints "URL ต่อ service (ide/client/ssh) + ready - ใช้ได้เฉพาะตอน running"
     text status "pending - provisioning - running - stopped/succeeded/failed"
     timestamptz started_at
     timestamptz ended_at
