@@ -4,7 +4,6 @@ Business logic สำหรับ example
 """
 from sqlalchemy.orm import Session
 from datetime import datetime
-from app.models.example import Example
 
 
 # Mock data สำหรับ testing ตอนยังไม่ migrate DB
@@ -37,7 +36,8 @@ class ExampleService:
         
         if db is None:
             raise ValueError("Database connection is not available")
-        return db.query(Example).all()
+        # TODO: implement database query when Example model is available
+        return []
     
     @staticmethod
     def get_example_by_id(db: Session = None, example_id: int = None, use_mock: bool = False):
@@ -49,4 +49,5 @@ class ExampleService:
             raise ValueError("ID must be a positive number")
         if db is None:
             raise ValueError("Database connection is not available")
-        return db.query(Example).filter(Example.id == example_id).first()
+        # TODO: implement database query when Example model is available
+        return None

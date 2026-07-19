@@ -42,6 +42,8 @@ crash.*.log
 # Kubernetes secrets & kubeconfig
 kubeconfig
 kubeconfig.*
+!kubeconfig.yaml.example
+!kubeconfig.yaml.example
 *.kubeconfig
 secrets.yaml
 secret.yaml

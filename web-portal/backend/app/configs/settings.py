@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # Redis (Optional)
     REDIS_URL: Optional[str] = "redis://localhost:6379/0"
     
+    # Kubernetes Configuration (Optional)
+    K8S_ENABLED: bool = True
+    KUBECONFIG_PATH: Optional[str] = None
+    K8S_DEFAULT_NAMESPACE: str = "default"
+    K8S_TIMEOUT: int = 30
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

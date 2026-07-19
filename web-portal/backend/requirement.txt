@@ -56,3 +56,6 @@ slowapi==0.1.9                # Rate limiting
 cachetools==5.5.0             # Caching utilities
 
 skypilot==0.12.3.post1
+
+kubernetes
+pyyaml
