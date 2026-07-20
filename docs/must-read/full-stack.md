@@ -25,12 +25,12 @@
 
 | หน้า | API ที่ต้องใช้ | redirect ไป |
 |------|---------------|-------------|
-| S1 Console | `GET /api/sessions?status=running` · `GET /api/announcements?limit=4` · `GET /api/me` | → S2 Course · → S7 Compute service *(not yet)* |
-| S2 Course | `GET /api/courses` | → S3 Course detail (`/api/courses/{id}`) |
-| S3 Course detail | `GET /api/courses/{id}/docs` · `GET /api/courses/{id}/announcements` · `GET /api/courses/{id}/labs` | → S4 Course lab instruction |
-| S4 Lab instruction | `GET /api/courses/{id}/labs/{id}` · `POST /api/sessions` | → S5-pre Session loading |
+| S1 Console | `GET /api/sessions?status=running`<br>`GET /api/announcements?limit=4`<br>`GET /api/me` | go to S2 Course<br>go to S7 Compute service *(not yet)* |
+| S2 Course | `GET /api/courses` | go to S3 Course detail (`/api/courses/{id}`) |
+| S3 Course detail | `GET /api/courses/{id}/docs`<br>`GET /api/courses/{id}/announcements`<br>`GET /api/courses/{id}/labs` | go to S4 Course lab instruction |
+| S4 Lab instruction | `GET /api/courses/{id}/labs/{id}`<br>`POST /api/sessions` | go to S5-pre Session loading |
 | S5-pre Session loading | WebSocket (ดึง log สด) | ไม่ redirect — รอจน instance พร้อมแล้วเข้า S5 |
-| S5 Session | `GET /api/sessions/{id}` (poll ทุก ๆ X วิ เพื่อฟังจนกว่าจะเสร็จ) · `PATCH /api/sessions/{id}` (เปลี่ยนสถานะ เช่น stop lab) | → กลับ S4 Lab instruction · → IDE / web portal (ลิงก์ที่สร้าง) |
+| S5 Session | `GET /api/sessions/{id}` (poll ทุก ๆ X วิ เพื่อฟังจนกว่าจะเสร็จ)<br>`PATCH /api/sessions/{id}` (เปลี่ยนสถานะ เช่น stop lab) | go to S4 Lab instruction (กลับ)<br>go to IDE / web portal (ลิงก์ที่สร้าง) |
 | S6 Login | unknown | unknown |
 
 ## ข้อสังเกต: จุดที่ต่างจาก spec เดิม (ทีมต้องเคาะ)
