@@ -18,8 +18,27 @@ erDiagram
     text code UK "เช่น CS217"
     text name
     text lecturer_name "display เท่านั้น"
-    text banner_color
+    text image_url "S3 URL - แทน banner_color เดิม"
     uuid created_by FK
+    timestamptz created_at
+  }
+
+  course_images {
+    uuid id PK
+    uuid course_id FK "unique - 1 course : 1 รูป"
+    text image_url "S3 URL ของรูป banner"
+    uuid created_by FK
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  course_documents {
+    uuid id PK
+    uuid course_id FK
+    text name "ชื่อไฟล์ เช่น Syllabus.pdf"
+    text r2_key "path บน R2"
+    int size_mb
+    uuid uploaded_by FK
     timestamptz created_at
   }
 
@@ -34,6 +53,7 @@ erDiagram
     uuid id PK
     uuid course_id FK
     text title
+    text brief_detail "คำอธิบายสั้น (null) - ยังไม่ใน main ต้อง migrate"
     int order_no "unique ต่อ course"
     text doc_url "เอกสารบน R2"
     uuid image_id FK "อ้าง lab_images"
@@ -67,8 +87,8 @@ erDiagram
   sessions {
     uuid id PK
     uuid user_id FK
-    uuid lab_id FK "null สำหรับ sandbox/compute"
-    text service_type "lab | compute | sandbox | ai_job"
+    uuid lab_id FK "null สำหรับ compute_service"
+    text service_type "lab | compute_service (ยุบจาก compute/sandbox/ai_job เดิม)"
     text k8s_pod_name
     text node_name
     boolean is_remote "รันจากบ้าน"
@@ -114,6 +134,10 @@ erDiagram
   users ||--o{ enrollments : "enrolls"
   courses ||--o{ enrollments : "has members"
   users ||--o{ courses : "created by (admin)"
+  courses ||--o| course_images : "banner (1:1)"
+  users ||--o{ course_images : "created by"
+  courses ||--o{ course_documents : "documents"
+  users ||--o{ course_documents : "uploaded by"
   courses ||--o{ labs : "contains"
   lab_images ||--o{ labs : "image of"
   users ||--o{ lab_images : "uploads"
@@ -137,7 +161,18 @@ erDiagram
 
 ## Highlight
 
-- **`sessions` ตารางเดียว** ครอบทุก workload (lab / compute / sandbox / AI job) — แยกประเภทด้วย `service_type`, มี `sky_cluster_name`/`sky_job_id` ผูกกับ SkyPilot
+- **`sessions` ตารางเดียว** ครอบทุก workload — แยกประเภทด้วย `service_type` (`lab` / `compute_service`), มี `sky_cluster_name`/`sky_job_id` ผูกกับ SkyPilot
 - **`lab_progress` แยกจาก `sessions`** — จบแลปเป็น learning fact ใช้กี่ session ก็ได้
-- **`usage_records` เป็น Phase 2** — ตอนนี้ quota คิดจากเวลาเปิด–ปิด session
+- **`usage_records` บันทึกทุก session** — quota block เฉพาะ `compute_service`, คิดจาก `limit` เทียบ `SUM(usage)` ไม่ decrement (ดู Quota & Usage lifecycle ใน [must-read/API_spec.md](must-read/API_spec.md))
 - **image อ้างด้วย `repository` + `tag`** ไม่ฝัง registry host (Tailscale IP เปลี่ยนได้)
+
+## การเปลี่ยนแปลงจาก schema เดิม (sync 2026-07-23)
+
+**มีบน `main` แล้ว** (โค้ด SQLAlchemy อัปไปแล้ว diagram ตามให้ตรง):
+- `courses.banner_color` → `courses.image_url` (commit 3b519bf)
+- เพิ่มตาราง `course_images` — 1 course : 1 รูป banner (S3 URL) (commit e81e6bb)
+
+**ตกลงกันแล้ว แต่ยังไม่ migrate** (ต้องทำ Alembic migration + แก้ model):
+- `labs.brief_detail TEXT NULL` — คำอธิบายสั้นต่อแลป (คอลัมน์ Brief detail หน้า S3)
+- ตาราง `course_documents` — เอกสาร PDF ระดับวิชาที่อาจารย์อัป
+- `sessions.service_type` ยุบจาก `lab/compute/sandbox/ai_job` เหลือ `lab/compute_service` (main ยังเป็น enum 4 ค่า)
