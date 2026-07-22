@@ -4,12 +4,16 @@
 > [full-stack.md](full-stack.md) (หน้า × API × redirect) + [../DB_DIAGRAM.md](../DB_DIAGRAM.md) (schema v2)
 > จุดประสงค์: ลงลึกกว่า full-stack.md ตรงที่ระบุ **request / response / error / ตาราง DB ที่แตะ** รายเส้น
 >
+> ⚠️ **field name อิงโค้ดจริงบน `main`** (ไม่ใช่ DB_DIAGRAM.md ที่ stale) — เพื่อนอัปเดต schema ไปแล้วแต่ยังไม่ sync กลับ diagram:
+> `courses.banner_color` → **`courses.image_url`** + ตาราง `course_images` (1 course : 1 รูป, S3 URL) — ควรอัปเดต DB_DIAGRAM.md ตาม
+>
 > **การตัดสินใจที่ล็อกแล้ว** (Pete เคาะ 2026-07-23):
 > 1. หน้า Session Loading (S5-pre) ใช้ **polling ทุก 2–3 วิ** — WebSocket เลื่อนไป Phase 2
 > 2. หยุด lab ใช้ **`POST /api/sessions/{id}/stop`** (action ชัด กัน frontend ส่ง status มั่ว)
 > 3. ประกาศมี **2 เส้น**: global (`/api/announcements`) + ราย course (`/api/courses/{id}/announcements`)
 > 4. `GET /api/courses/{id}/docs` = list เอกสารที่อาจารย์อัป (PDF ฯลฯ) — **ยังไม่มีในตาราง DB** ดูท้ายไฟล์
 > 5. หน้า S6 Login — **ยังไม่เคาะ** (ข้ามไปก่อน)
+> 6. **Quota อยู่ระดับนักศึกษา (`quotas.user_id`) ไม่ใช่ระดับ lab** — ดู `POST /api/sessions` + Questionnaire ท้ายไฟล์
 
 ## กติกากลาง
 
@@ -59,15 +63,17 @@
     "code": "CS217",
     "name": "Operating Systems",
     "lecturer_name": "อ.สมหญิง",
-    "banner_color": "#2563eb",
+    "image_url": "https://s3.../course/cs217/banner.png",
     "progress": { "labs_total": 8, "labs_finished": 3, "nearest_due": "2026-08-01T16:59:00Z" }
   }
 ]
 ```
+> 📝 Pete ตีธง `progress` ไว้ (comment ②) — รูปแบบ `{labs_total, labs_finished, nearest_due}` ยังไม่ฟิกซ์ ถ้าไม่ใช้ที่หน้า S2 จริงตัดทิ้งได้ รอเคาะ
 
 ### `GET /api/courses/{course_id}/labs`
-- **หน้า:** S3 Course detail
-- **ตาราง:** `labs` (เฉพาะ `status='published'`) + `lab_progress` ของฉัน
+- **หน้า:** S3 Course detail — ตาราง "My labwork" (All my lab task / Uncomplete task)
+- **ตาราง:** `labs` (เฉพาะ `status='published'`) + `lab_progress` ของฉัน + `sessions` (หา session ที่ยังรันของแลปนั้น)
+- **อธิบาย:** Pete comment ③ — response เดิมน้อยไป หน้า S3 ต้องโชว์คอลัมน์ Name / Status / due date / Start-Stop / Brief detail ครบในตารางเดียว จึงเพิ่ม field:
 - **200**
 ```json
 [
@@ -76,10 +82,19 @@
     "title": "Lab 01 — Processes",
     "order_no": 1,
     "due_at": "2026-08-01T16:59:00Z",
-    "my_status": "in_progress"
+    "my_status": "in_progress",
+    "running_session": { "id": "uuid", "status": "running" },
+    "brief_detail": "ทดลองสร้าง/kill process ด้วย fork()"
   }
 ]
 ```
+| field | ที่มา | หมายเหตุ |
+|-------|-------|----------|
+| `id`, `title`, `order_no`, `due_at` | `labs` | ตรง ๆ |
+| `my_status` | `lab_progress.status` (`not_started`/`in_progress`/`finished`) | ถ้าไม่มีแถว = `not_started` |
+| `running_session` | join `sessions` where `lab_id` + `user_id=ฉัน` + `status='running'` | คอลัมน์ "Start/Stop" ในกระดาษ — `null` ถ้าไม่มี session รันอยู่ ⚠️ ดู [ต้องเคาะ #4](#ต้องเคาะ-ที่เหลือ) |
+| `brief_detail` | ❌ **ยังไม่มีในตาราง `labs`** (main มีแค่ title/order_no/doc_url/due_at) | ต้องเพิ่มคอลัมน์ `labs.brief_detail` ⚠️ ดู [ต้องเคาะ #5](#ต้องเคาะ-ที่เหลือ) |
+- **หมายเหตุ frontend:** "Uncomplete task" = filter `my_status != 'finished'` ฝั่ง client จาก list เดียวกัน ไม่ต้องมีเส้นแยก
 - **403** ไม่ได้ enroll วิชานี้
 
 ### `GET /api/courses/{course_id}/announcements`
@@ -106,14 +121,14 @@
 
 ### `GET /api/labs/{lab_id}`
 - **หน้า:** S4 Lab instruction
-- **ตาราง:** `labs` + `lab_images` (repository/tag)
+- **ตาราง:** `labs` + `lab_progress` ของฉัน
+- **อธิบาย:** Pete comment ✗ — **ตัด `image: {repository, tag}` ออก** user ไม่ต้องรู้ docker repo/tag (backend เก็บ `labs.image_id` ไว้ใช้ตอน launch เองพอ) response ฝั่ง user เหลือเท่าที่หน้าอ่านแลปต้องใช้จริง
 - **200**
 ```json
 {
   "id": "uuid",
   "title": "Lab 01 — Processes",
   "due_at": "2026-08-01T16:59:00Z",
-  "image": { "repository": "skypilot/os-lab", "tag": "lab-01" },
   "my_status": "in_progress"
 }
 ```
@@ -128,6 +143,7 @@
 { "markdown": "# Lab 01\n\n![diagram](https://r2.../presigned...)\n..." }
 ```
 - **403** ไม่ได้ enroll · **404** ไม่มี doc
+> 💡 Pete comment — ไอเดีย: ทำ tool แปลง **PDF → Markdown** เผื่ออาจารย์อัปเอกสารเป็น PDF แล้วให้ render เป็น markdown ในหน้าแลปได้ (ยังเป็นแค่ไอเดีย รอเคาะ — ดู Questionnaire)
 
 ### `POST /api/labs/{lab_id}/finish`
 - **หน้า:** S5 Session (ปุ่ม Mark as Done)
@@ -152,7 +168,8 @@
 ```json
 { "session_id": "uuid" }
 ```
-- **403** ไม่ได้ enroll · **409** quota หมด *(รอเคาะ code ที่ #34)*
+- **403** ไม่ได้ enroll · **409** quota หมด
+> **Quota (Pete comment):** เช็ค quota ตอน launch ที่ **ระดับนักศึกษา** (`quotas.user_id`) — **ไม่ใช่**ระดับ lab ของ course. `service_type='compute'` (Compute service) ก็ต้องหักโควตาเดียวกันนี้. Phase 1 คิดแบบ wall-clock เวลาเปิด–ปิด session; `usage_records` (metering ละเอียด เผื่อฝั่ง admin) เป็น Phase 2 — วิธีคำนวณ/ตั้งค่ายังต้องเคาะ ดู Questionnaire ท้ายไฟล์
 
 ### `GET /api/sessions`
 - **หน้า:** S1 Console (Recent work)
@@ -242,9 +259,20 @@
 
 | # | ประเด็น | สถานะ | เสนอ |
 |---|---------|-------|------|
-| 1 | **`GET /api/courses/{id}/docs`** — เอกสารระดับวิชา (PDF) ที่อาจารย์อัป **ไม่มีตารางใน DB_DIAGRAM.md** | รอเคาะ | (ก) เพิ่มตาราง `course_documents (id, course_id, name, r2_key, size_mb, uploaded_by, created_at)` หรือ (ข) ไม่แตะ schema — list จาก R2 prefix `course/{id}/docs/` ตรง ๆ แล้ว presign ตอนส่ง · **เอนไป (ก)** เพราะมี metadata (ชื่อไฟล์, คนอัป) คุมง่ายกว่า |
+| 1 | **`GET /api/courses/{id}/docs`** — เอกสารระดับวิชา (PDF) ที่อาจารย์อัป **ไม่มีตารางใน DB** | รอเคาะ | (ก) เพิ่มตาราง `course_documents (id, course_id, name, r2_key, size_mb, uploaded_by, created_at)` หรือ (ข) ไม่แตะ schema — list จาก R2 prefix `course/{id}/docs/` ตรง ๆ แล้ว presign ตอนส่ง · **เอนไป (ก)** เพราะมี metadata (ชื่อไฟล์, คนอัป) คุมง่ายกว่า |
 | 2 | **S6 Login** | ข้ามไปก่อน (Pete บอก) | เดิมเสนอ: คง SSO → S6 เหลือหน้า Home + ปุ่ม Sign in |
 | 3 | **quota หมด ตอบ code ไหน** ที่ `POST /api/sessions` | รอเคาะ (ค้างจาก #34) | เอนไป **409 Conflict** + `detail` บอกเหลือกี่ชม. |
+| 4 | **`running_session` ใน labs list** — คอลัมน์ Start/Stop | รอเคาะ | join `sessions` (lab_id + user + `status='running'`) แล้ว return เป็น object/`null` — ถ้าไม่อยากให้ query หนัก ทำเป็นเส้นแยกหรือ lazy โหลดทีหลังก็ได้ |
+| 5 | **`labs.brief_detail`** — คำอธิบายสั้นต่อแลป (คอลัมน์ Brief detail) **ไม่มีในตาราง `labs` บน main** | รอเคาะ schema | เพิ่มคอลัมน์ `labs.brief_detail TEXT NULL` (ถ้าจะโชว์ในตาราง S3) |
+| 6 | **PDF → Markdown converter** สำหรับ `labs/{id}/doc` | ไอเดีย | เผื่ออาจารย์อัป PDF แล้วอยากให้ render เป็น markdown — ประเมินว่ามี tool convert ที่เชื่อถือได้ไหม |
+
+## ❓ Questionnaire (Pete ตั้งคำถามให้ทีมช่วยเคาะ)
+
+| # | คำถาม | บริบท |
+|---|-------|-------|
+| Q1 | **Quota / Usage คิดยังไง ตั้งค่ายังไงใน DB?** | `quotas` มี `compute_hours_limit`, `storage_mb_limit`, `period` (weekly/monthly/semester) — ต้องตกลงว่า seed ค่าเริ่มต้นให้นักศึกษาเท่าไร ใครตั้ง (admin ต่อคน/ต่อวิชา) |
+| Q2 | **นักศึกษาสร้าง labwork/session ได้กี่อัน แล้วถ้าโควตาหมดเกิดอะไรขึ้น?** | ตอน `POST /api/sessions` เกินโควตา → block (409) หรือให้ burst แล้วคิดเงินทีหลัง? |
+| Q3 | **Compute service หักโควตาเดียวกับ lab ไหม?** | Pete บอกต้องหักด้วย — ยืนยันว่าใช้ pool เดียว (`quotas.user_id`) ทั้ง `service_type='lab'` และ `'compute'` |
 
 ## Phase 2 (จองไว้ ยังไม่ทำ)
 
@@ -256,4 +284,4 @@
 
 ---
 
-> **หมายเหตุ schema:** ไฟล์นี้อิง `courses.banner_color` ตาม DB_DIAGRAM.md — แต่โค้ดจริงบน `main` เปลี่ยนเป็น `courses.image_url` + เพิ่มตาราง `course_images` แล้ว (commit 3b519bf, e81e6bb) ควร reconcile DB_DIAGRAM.md กับโค้ดให้ตรงกันก่อน freeze สเปคนี้
+> **หมายเหตุ schema:** ไฟล์นี้ปรับ field name ให้ตรงกับโค้ดจริงบน `main` แล้ว (`courses.image_url` + ตาราง `course_images`, commit 3b519bf/e81e6bb) — **DB_DIAGRAM.md ยัง stale** (ยังเขียน `banner_color`) ควรอัปเดต diagram แยกอีก PR ให้ตรงกับ schema จริง
