@@ -14,8 +14,6 @@
 7. **labs list ส่งข้อมูลครบขึ้น**: เพิ่ม `running_session` (object `{id, status}` หรือ `null`) + `brief_detail`
 8. **งาน schema ที่ต้องเพิ่ม**: คอลัมน์ `labs.brief_detail` + ตาราง `course_documents` (ดูท้ายไฟล์)
 
-> ยังไม่เคาะ: หน้า S6 Login (ข้าม), HTTP code ตอน quota หมด (ชั่วคราวใช้ **409**)
-
 ## กติกากลาง
 
 | กติกา | รายละเอียด |
@@ -28,6 +26,47 @@
 | Error format | `{ "detail": "..." }` ตาม exception handler ที่มีใน backend อยู่แล้ว |
 | Pagination | `limit` / `offset` เฉพาะเส้น list ที่โตได้ (sessions) |
 | เวลา | timestamp ทุกตัว ISO 8601 UTC (`...Z`) |
+
+---
+
+## Quota & Usage lifecycle
+
+> "เช็ค quota" กับ "เก็บ usage" คนละจังหวะกัน · quota ไม่ใช่ counter ที่ลดลง — เก็บแค่ `limit` แล้วเทียบกับ `SUM(usage)`
+
+**2 ตารางที่เกี่ยว**
+
+| ตาราง | เก็บอะไร | field หลัก |
+|-------|---------|-----------|
+| `sessions` | เวลา | `started_at`, `ended_at`, `expires_at` |
+| `usage_records` | ผลการใช้ (ไม่มี started/ended) | `session_id`, `cpu_seconds`, `gpu_seconds`, `ram_mb_hours`, `is_cloud_burst`, `est_cost_thb`, `recorded_at` |
+
+**จังหวะ**
+
+```
+1) POST /api/sessions              จุด "เช็ค" (gate) เฉพาะ compute_service
+   - อ่าน SUM(usage งวดนี้) เทียบ quotas.compute_hours_limit → เต็ม = 409
+   - ผ่าน → insert sessions(status=pending)
+   - lab: ข้ามการเช็ค แต่ยังนับ usage ตอนจบเหมือนกัน
+
+2) provisioning → running          set sessions.started_at
+
+3) ระหว่างรัน                       usage สะสมตามเวลา (ยังไม่เขียน usage_records)
+
+4) จบ session                      จุด "เก็บ usage"
+   ทางที่จบได้: POST /stop · POST /reset · background task (expires_at ผ่าน / SkyPilot succeeded|failed)
+   - update sessions.ended_at = now()
+   - duration = ended_at − started_at
+   - insert usage_records:
+       cpu_seconds  = duration_sec × core ที่ขอตอน launch
+       gpu_seconds  = duration_sec × gpu
+       ram_mb_hours = ram_mb × duration_hours
+       est_cost_thb = คิดจากตารางราคา (snapshot ไว้เลย ห้าม recompute)
+```
+
+**จุดสำคัญ**
+- **จุดเก็บ usage ไม่ใช่ API เส้นเดียว** — ทุกทางที่ session จบต้องเขียน (รวม background task ตอนหมดเวลา/พังเอง) กัน usage หายเวลา user ปิดเบราว์เซอร์หนี
+- **"เหลือกี่ชั่วโมง"** (dashboard) = `limit − ( SUM(session ที่จบแล้ว) + (now − started_at ของตัวที่ยังรัน) )` คำนวณสด ไม่ decrement
+- `usage_records.*` เป็น **NOT NULL หมด** → ตอนจบต้องเติมค่าครบ — Phase 1 อนุโลมใช้ `duration × core` ตรง ๆ, metering ละเอียดจาก pod = Phase 2
 
 ---
 
