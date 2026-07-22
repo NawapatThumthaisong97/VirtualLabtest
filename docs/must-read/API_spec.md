@@ -1,19 +1,5 @@
 # Virtual Lab — API Spec (ฝั่ง User / นักศึกษา)
 
-> เส้น API เฉพาะหน้า **user** (ไม่รวม admin) — สกัดจาก [full-stack.md](full-stack.md) + schema จริงบน `main`
-> field name อิงโค้ด `main` ไม่ใช่ [../DB_DIAGRAM.md](../DB_DIAGRAM.md) ที่ยัง stale (ดูหัวข้อ "งาน Schema" ท้ายไฟล์)
-
-## การตัดสินใจที่ล็อกแล้ว (Pete เคาะ 2026-07-23)
-
-1. **S5-pre Session Loading** ใช้ polling `GET /api/sessions/{id}` ทุก 2–3 วิ (WebSocket → Phase 2)
-2. **หยุด lab** ใช้ `POST /api/sessions/{id}/stop` (action ชัด กัน frontend ส่ง status มั่ว)
-3. **ประกาศ 2 เส้น**: global (`/api/announcements`) + ราย course (`/api/courses/{id}/announcements`)
-4. **`service_type` มี 2 แบบ**: `lab` (แลปของวิชา) และ `compute_service` (นักศึกษารันเอง รวม AI workload) — **เลิกใช้** `sandbox`/`ai_job` แยก
-5. **Quota**: block เฉพาะ `compute_service` เท่านั้น · `lab` ใช้ฟรีไม่จำกัด · แต่ **ทุก session บันทึก usage เสมอ** เพื่อรู้ว่าใครใช้ทรัพยากรไปเท่าไร
-6. **`progress`** ไม่ส่งใน API response (หน้า S2 ไม่โชว์) — แต่ยัง track ใน `lab_progress` ตามเดิม
-7. **labs list ส่งข้อมูลครบขึ้น**: เพิ่ม `running_session` (object `{id, status}` หรือ `null`) + `brief_detail`
-8. **งาน schema ที่ต้องเพิ่ม**: คอลัมน์ `labs.brief_detail` + ตาราง `course_documents` (ดูท้ายไฟล์)
-
 ## กติกากลาง
 
 | กติกา | รายละเอียด |
@@ -27,48 +13,7 @@
 | Pagination | `limit` / `offset` เฉพาะเส้น list ที่โตได้ (sessions) |
 | เวลา | timestamp ทุกตัว ISO 8601 UTC (`...Z`) |
 
----
 
-## Quota & Usage lifecycle
-
-> "เช็ค quota" กับ "เก็บ usage" คนละจังหวะกัน · quota ไม่ใช่ counter ที่ลดลง — เก็บแค่ `limit` แล้วเทียบกับ `SUM(usage)`
-
-**2 ตารางที่เกี่ยว**
-
-| ตาราง | เก็บอะไร | field หลัก |
-|-------|---------|-----------|
-| `sessions` | เวลา | `started_at`, `ended_at`, `expires_at` |
-| `usage_records` | ผลการใช้ (ไม่มี started/ended) | `session_id`, `cpu_seconds`, `gpu_seconds`, `ram_mb_hours`, `is_cloud_burst`, `est_cost_thb`, `recorded_at` |
-
-**จังหวะ**
-
-```
-1) POST /api/sessions              จุด "เช็ค" (gate) เฉพาะ compute_service
-   - อ่าน SUM(usage งวดนี้) เทียบ quotas.compute_hours_limit → เต็ม = 409
-   - ผ่าน → insert sessions(status=pending)
-   - lab: ข้ามการเช็ค แต่ยังนับ usage ตอนจบเหมือนกัน
-
-2) provisioning → running          set sessions.started_at
-
-3) ระหว่างรัน                       usage สะสมตามเวลา (ยังไม่เขียน usage_records)
-
-4) จบ session                      จุด "เก็บ usage"
-   ทางที่จบได้: POST /stop · POST /reset · background task (expires_at ผ่าน / SkyPilot succeeded|failed)
-   - update sessions.ended_at = now()
-   - duration = ended_at − started_at
-   - insert usage_records:
-       cpu_seconds  = duration_sec × core ที่ขอตอน launch
-       gpu_seconds  = duration_sec × gpu
-       ram_mb_hours = ram_mb × duration_hours
-       est_cost_thb = คิดจากตารางราคา (snapshot ไว้เลย ห้าม recompute)
-```
-
-**จุดสำคัญ**
-- **จุดเก็บ usage ไม่ใช่ API เส้นเดียว** — ทุกทางที่ session จบต้องเขียน (รวม background task ตอนหมดเวลา/พังเอง) กัน usage หายเวลา user ปิดเบราว์เซอร์หนี
-- **"เหลือกี่ชั่วโมง"** (dashboard) = `limit − ( SUM(session ที่จบแล้ว) + (now − started_at ของตัวที่ยังรัน) )` คำนวณสด ไม่ decrement
-- `usage_records.*` เป็น **NOT NULL หมด** → ตอนจบต้องเติมค่าครบ — Phase 1 อนุโลมใช้ `duration × core` ตรง ๆ, metering ละเอียดจาก pod = Phase 2
-
----
 
 ## 1. Identity
 
@@ -234,14 +179,46 @@
 
 ---
 
-## งาน Schema ที่ต้องทำ (สรุปให้ทีม DB)
+## Quota & Usage lifecycle
 
-| งาน | รายละเอียด |
-|-----|-----------|
-| เพิ่มคอลัมน์ | `labs.brief_detail TEXT NULL` — คำอธิบายสั้นต่อแลป (คอลัมน์ Brief detail หน้า S3) |
-| เพิ่มตาราง | `course_documents (id, course_id FK, name, r2_key, size_mb, uploaded_by FK, created_at)` — เอกสาร PDF ระดับวิชา |
-| consolidate enum | `ServiceType` บน main = `lab/compute/sandbox/ai_job` → spec นี้ใช้แค่ `lab` + `compute_service` ควรยุบให้ตรง |
-| sync diagram | DB_DIAGRAM.md ยังเขียน `courses.banner_color` แต่ main เป็น `image_url` + ตาราง `course_images` แล้ว — ควรอัปเดต diagram แยก PR |
+> "เช็ค quota" กับ "เก็บ usage" คนละจังหวะกัน · quota ไม่ใช่ counter ที่ลดลง — เก็บแค่ `limit` แล้วเทียบกับ `SUM(usage)`
+
+**2 ตารางที่เกี่ยว**
+
+| ตาราง | เก็บอะไร | field หลัก |
+|-------|---------|-----------|
+| `sessions` | เวลา | `started_at`, `ended_at`, `expires_at` |
+| `usage_records` | ผลการใช้ (ไม่มี started/ended) | `session_id`, `cpu_seconds`, `gpu_seconds`, `ram_mb_hours`, `is_cloud_burst`, `est_cost_thb`, `recorded_at` |
+
+**จังหวะ**
+
+```
+1) POST /api/sessions              จุด "เช็ค" (gate) เฉพาะ compute_service
+   - อ่าน SUM(usage งวดนี้) เทียบ quotas.compute_hours_limit → เต็ม = 409
+   - ผ่าน → insert sessions(status=pending)
+   - lab: ข้ามการเช็ค แต่ยังนับ usage ตอนจบเหมือนกัน
+
+2) provisioning → running          set sessions.started_at
+
+3) ระหว่างรัน                       usage สะสมตามเวลา (ยังไม่เขียน usage_records)
+
+4) จบ session                      จุด "เก็บ usage"
+   ทางที่จบได้: POST /stop · POST /reset · background task (expires_at ผ่าน / SkyPilot succeeded|failed)
+   - update sessions.ended_at = now()
+   - duration = ended_at − started_at
+   - insert usage_records:
+       cpu_seconds  = duration_sec × core ที่ขอตอน launch
+       gpu_seconds  = duration_sec × gpu
+       ram_mb_hours = ram_mb × duration_hours
+       est_cost_thb = คิดจากตารางราคา (snapshot ไว้เลย ห้าม recompute)
+```
+
+**จุดสำคัญ**
+- **จุดเก็บ usage ไม่ใช่ API เส้นเดียว** — ทุกทางที่ session จบต้องเขียน (รวม background task ตอนหมดเวลา/พังเอง) กัน usage หายเวลา user ปิดเบราว์เซอร์หนี
+- **"เหลือกี่ชั่วโมง"** (dashboard) = `limit − ( SUM(session ที่จบแล้ว) + (now − started_at ของตัวที่ยังรัน) )` คำนวณสด ไม่ decrement
+- `usage_records.*` เป็น **NOT NULL หมด** → ตอนจบต้องเติมค่าครบ — Phase 1 อนุโลมใช้ `duration × core` ตรง ๆ, metering ละเอียดจาก pod = Phase 2
+
+---
 
 ## ยังต้องเคาะ
 
