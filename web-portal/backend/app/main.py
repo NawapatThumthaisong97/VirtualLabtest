@@ -9,10 +9,72 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
+from sqladmin import Admin, ModelView
 
 from app.configs import settings, check_db_connection
+from app.configs.db import engine
+from app.models import (
+    User, Course, CourseImage, Enrollment, Lab, LabImage,
+    LabProgress, Session, UsageRecord, Quota, Announcement
+)
 from app.routes import api_router
 from app.utils.logger import logger
+
+
+# SQLAdmin Model Views
+class UserAdmin(ModelView, model=User):
+    name = "User"
+    icon = "fa-solid fa-user"
+
+
+class CourseAdmin(ModelView, model=Course):
+    name = "Course"
+    icon = "fa-solid fa-book"
+
+
+class CourseImageAdmin(ModelView, model=CourseImage):
+    name = "Course Image"
+    icon = "fa-solid fa-image"
+
+
+class EnrollmentAdmin(ModelView, model=Enrollment):
+    name = "Enrollment"
+    icon = "fa-solid fa-graduation-cap"
+
+
+class LabAdmin(ModelView, model=Lab):
+    name = "Lab"
+    icon = "fa-solid fa-flask"
+
+
+class LabImageAdmin(ModelView, model=LabImage):
+    name = "Lab Image"
+    icon = "fa-solid fa-image"
+
+
+class LabProgressAdmin(ModelView, model=LabProgress):
+    name = "Lab Progress"
+    icon = "fa-solid fa-chart-line"
+
+
+class SessionAdmin(ModelView, model=Session):
+    name = "Session"
+    icon = "fa-solid fa-terminal"
+
+
+class UsageRecordAdmin(ModelView, model=UsageRecord):
+    name = "Usage Record"
+    icon = "fa-solid fa-chart-bar"
+
+
+class QuotaAdmin(ModelView, model=Quota):
+    name = "Quota"
+    icon = "fa-solid fa-pie-chart"
+
+
+class AnnouncementAdmin(ModelView, model=Announcement):
+    name = "Announcement"
+    icon = "fa-solid fa-bullhorn"
 
 
 @asynccontextmanager
@@ -124,6 +186,23 @@ def health():
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_PREFIX)
+
+
+# Setup SQLAdmin
+admin = Admin(app, engine, authentication_backend=None)
+
+# Add model views to admin
+admin.add_view(UserAdmin)
+admin.add_view(CourseAdmin)
+admin.add_view(CourseImageAdmin)
+admin.add_view(EnrollmentAdmin)
+admin.add_view(LabAdmin)
+admin.add_view(LabImageAdmin)
+admin.add_view(LabProgressAdmin)
+admin.add_view(SessionAdmin)
+admin.add_view(UsageRecordAdmin)
+admin.add_view(QuotaAdmin)
+admin.add_view(AnnouncementAdmin)
 
 
 if __name__ == "__main__":

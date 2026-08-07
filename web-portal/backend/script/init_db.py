@@ -21,6 +21,7 @@ def init_database():
     print("\n📊 Tables created:")
     print("  - users")
     print("  - courses")
+    print("  - course_images")
     print("  - enrollments")
     print("  - labs")
     print("  - lab_images")

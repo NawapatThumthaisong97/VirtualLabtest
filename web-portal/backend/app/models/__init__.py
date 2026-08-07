@@ -3,6 +3,7 @@ Database Models (SQLAlchemy)
 """
 from .user import User, UserRole
 from .course import Course
+from .course_image import CourseImage
 from .enrollment import Enrollment, RoleInCourse
 from .lab import Lab, LabStatus
 from .lab_image import LabImage, ImageStatus
@@ -16,6 +17,7 @@ __all__ = [
     "User",
     "UserRole",
     "Course",
+    "CourseImage",
     "Enrollment",
     "RoleInCourse",
     "Lab",

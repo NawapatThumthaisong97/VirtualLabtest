@@ -64,7 +64,7 @@ def seed_database(db: Session):
         code="CS217",
         name="Web Development",
         lecturer_name="Dr. John Instructor",
-        banner_color="#FF5733",
+        image_url="https://r2.example.com/courses/cs217-banner.jpg",
         created_by=instructor_user.id,
     )
     
@@ -73,7 +73,7 @@ def seed_database(db: Session):
         code="CS301",
         name="Machine Learning",
         lecturer_name="Dr. Jane Instructor",
-        banner_color="#3366FF",
+        image_url="https://r2.example.com/courses/cs301-banner.jpg",
         created_by=instructor_user.id,
     )
     
