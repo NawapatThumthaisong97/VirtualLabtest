@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import inspect
 from sqladmin import Admin, ModelView
 
 from app.configs import settings, check_db_connection
@@ -21,60 +22,90 @@ from app.routes import api_router
 from app.utils.logger import logger
 
 
-# SQLAdmin Model Views
+from sqladmin import Admin, ModelView
+from sqlalchemy import inspect
+
+# SQLAdmin Model Views - Dynamic column_list from model
+def get_model_columns(model, exclude=None):
+    """
+    Extract column names from SQLAlchemy model
+    exclude: list of column names to exclude
+    """
+    if exclude is None:
+        exclude = []
+    
+    mapper = inspect(model)
+    columns = []
+    for column in mapper.columns:
+        if column.name not in exclude:
+            columns.append(getattr(model, column.name))
+    return columns
+
+
 class UserAdmin(ModelView, model=User):
     name = "User"
     icon = "fa-solid fa-user"
+    column_list = get_model_columns(User)
 
 
 class CourseAdmin(ModelView, model=Course):
     name = "Course"
     icon = "fa-solid fa-book"
+    column_list = get_model_columns(Course)
 
 
 class CourseImageAdmin(ModelView, model=CourseImage):
     name = "Course Image"
     icon = "fa-solid fa-image"
+    column_list = get_model_columns(CourseImage)
 
 
 class EnrollmentAdmin(ModelView, model=Enrollment):
     name = "Enrollment"
     icon = "fa-solid fa-graduation-cap"
+    column_list = get_model_columns(Enrollment)
 
 
 class LabAdmin(ModelView, model=Lab):
     name = "Lab"
     icon = "fa-solid fa-flask"
+    column_list = get_model_columns(Lab, exclude=['doc_url'])  # ซ่อน URLs ที่ยาว
 
 
 class LabImageAdmin(ModelView, model=LabImage):
     name = "Lab Image"
     icon = "fa-solid fa-image"
+    column_list = get_model_columns(LabImage)
 
 
 class LabProgressAdmin(ModelView, model=LabProgress):
     name = "Lab Progress"
     icon = "fa-solid fa-chart-line"
+    column_list = get_model_columns(LabProgress)
 
 
 class SessionAdmin(ModelView, model=Session):
     name = "Session"
     icon = "fa-solid fa-terminal"
+    column_list = get_model_columns(Session, exclude=['endpoints'])  # ซ่อน JSON ที่ซับซ้อน
 
 
 class UsageRecordAdmin(ModelView, model=UsageRecord):
     name = "Usage Record"
     icon = "fa-solid fa-chart-bar"
+    column_list = get_model_columns(UsageRecord)
 
 
 class QuotaAdmin(ModelView, model=Quota):
     name = "Quota"
     icon = "fa-solid fa-pie-chart"
+    column_list = get_model_columns(Quota)
 
 
 class AnnouncementAdmin(ModelView, model=Announcement):
     name = "Announcement"
     icon = "fa-solid fa-bullhorn"
+    column_list = get_model_columns(Announcement)
 
 
 @asynccontextmanager
