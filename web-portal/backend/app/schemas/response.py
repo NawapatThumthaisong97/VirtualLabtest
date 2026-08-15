@@ -2,52 +2,50 @@
 Response Schema
 Standard API response format
 """
-from typing import Generic, TypeVar, Optional, Any
-from pydantic import BaseModel, ConfigDict
+from typing import Generic, TypeVar, Optional
+from pydantic import Field
+
+from app.schemas.base import CamelModel
 
 T = TypeVar('T')
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class PaginationMeta(CamelModel):
+    """
+    ข้อมูล pagination (serialize เป็น camelCase: totalPages)
+    """
+    page: int = Field(examples=[1])
+    limit: int = Field(examples=[10])
+    total: int = Field(examples=[100])
+    total_pages: int = Field(examples=[10])
+
+
+class ErrorDetail(CamelModel):
+    """
+    รายละเอียด error
+    - code: machine-readable เช่น "quota_exceeded"
+    - message: human-readable
+    """
+    code: str = Field(examples=["quota_exceeded"])
+    message: str = Field(examples=["Quota exceeded, please try again later"])
+
+
+class ApiResponse(CamelModel, Generic[T]):
     """
     Standard API Response Format
     """
-    success: bool
-    message: str
-    data: Optional[T] = None
-    error: Optional[str] = None
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "success": True,
-            "message": "Request successful",
-            "data": {},
-            "error": None
-        }
-    })
+    success: bool = Field(examples=[True])
+    message: str = Field(examples=["Request successful"])
+    data: Optional[T] = Field(default=None, examples=[{}])
+    error: Optional[ErrorDetail] = None
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse(CamelModel, Generic[T]):
     """
     Paginated API Response Format
     """
-    success: bool
-    message: str
-    data: list[T]
-    pagination: Optional[dict[str, int]] = None
-    error: Optional[str] = None
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "success": True,
-            "message": "Request successful",
-            "data": [],
-            "pagination": {
-                "page": 1,
-                "limit": 10,
-                "total": 100,
-                "total_pages": 10
-            },
-            "error": None
-        }
-    })
+    success: bool = Field(examples=[True])
+    message: str = Field(examples=["Request successful"])
+    data: list[T] = Field(examples=[[]])
+    pagination: Optional[PaginationMeta] = None
+    error: Optional[ErrorDetail] = None
