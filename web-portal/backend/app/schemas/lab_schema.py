@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID
+from pydantic import Field
 from app.schemas.base import CamelModel
 
 from app.models.lab import LabStatus
