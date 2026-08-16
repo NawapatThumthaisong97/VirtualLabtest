@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum, UniqueConstraint
-from sqlalchemy.sql import func
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, Index
+from sqlalchemy.sql import func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.configs.db import Base
@@ -27,8 +27,8 @@ class Lab(Base):
     due_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(Enum(LabStatus), default=LabStatus.DRAFT, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(Timezone=True), onupdate=func.now() , nullable=True )
-    deleted_at = Column(DateTime(Timezone=True), nullable=True , index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now() , nullable=True )
+    deleted_at = Column(DateTime(timezone=True), nullable=True , index=True)
     
     course = relationship("Course", back_populates="labs", foreign_keys=[course_id])
     image = relationship("LabImage", back_populates="labs", foreign_keys=[image_id])
@@ -37,9 +37,9 @@ class Lab(Base):
     
     # Constraint - เราทําให้เมื่อ delete ไปแล้ว order จะรันซํ้าซ้อนต้องแก้ให้มันจําได้เลยว่า เลขนี้ต้องไม่มี deleted_at นะเพราะถ้ามีแสดงว่ามันมีเคยลบไปแล้ว
     __table_args__ = (
-        Index('unique_course_order','course_id', 'order_no', unique=True , postgresql_where=("deleted_at IS NULL")),
+        Index('unique_course_order','course_id', 'order_no', unique=True , postgresql_where=text("deleted_at IS NULL")),
     )
     
     def __repr__(self):
         status = self.status.value if self.status else None
-        return f"<Lab(id={self.id}, course_id={self.course_id}, title='{self.title}', status='{self.status.value}')>"
+        return f"<Lab(id={self.id}, course_id={self.course_id}, title='{self.title}', status='{status}')>"
