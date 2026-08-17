@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status as http_status
+from app.middlewares.request_validation import require_non_empty_body
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
@@ -32,7 +33,7 @@ def create_lab(
     return controller.create_lab(payload)
 
 
-@router.patch("/{lab_id}", response_model=LabResponse)
+@router.patch("/{lab_id}", response_model=LabResponse,dependencies=[Depends(require_non_empty_body)],)
 def update_lab(
     lab_id: UUID,
     payload: LabUpdateRequest,
