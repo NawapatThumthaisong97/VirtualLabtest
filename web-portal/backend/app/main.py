@@ -4,7 +4,7 @@ Entry point for the FastAPI backend
 """
 import sys
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -17,6 +17,13 @@ from app.configs.db import engine
 from app.models import (
     User, Course, CourseImage, Enrollment, Lab, LabImage,
     LabProgress, Session, UsageRecord, Quota, Announcement
+)
+from app.exceptions.domain import (
+    ConflictError,
+    DomainError,
+    ForbiddenError,
+    NotFoundError,
+    ValidationError,
 )
 from app.routes import api_router
 from app.utils.logger import logger
@@ -158,6 +165,46 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # Global Exception Handlers
+
+# map กลุ่มของ domain exception -> HTTP status
+# เรียงจากเจาะจงไปกว้าง เพราะ isinstance() จะ match ตัวแรกที่เจอ
+STATUS_MAP = {
+    NotFoundError: status.HTTP_404_NOT_FOUND,
+    ConflictError: status.HTTP_409_CONFLICT,
+    ForbiddenError: status.HTTP_403_FORBIDDEN,
+    ValidationError: status.HTTP_400_BAD_REQUEST,
+}
+
+
+@app.exception_handler(DomainError)
+async def domain_exception_handler(request, exc: DomainError):
+    """
+    แปลง domain exception (ภาษา business) -> HTTP response (ภาษา HTTP)
+
+    service layer โยน LabNotFoundError / DuplicateOrderNoError ออกมา
+    โดยไม่ต้องรู้จัก HTTP เลย -> handler ตัวนี้เป็นคนแปลให้
+
+    เพิ่ม exception ใหม่ที่สืบทอดจากกลุ่มใน STATUS_MAP
+    จะได้ status ถูกต้องอัตโนมัติ ไม่ต้องแก้ไฟล์นี้
+    """
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    for error_type, code in STATUS_MAP.items():
+        if isinstance(exc, error_type):
+            status_code = code
+            break
+
+    logger.warning(f"[{exc.code}] {exc.message}")
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "success": False,
+            "message": exc.message,
+            "error": {"code": exc.code, "message": exc.message},
+        },
+    )
+
+
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request, exc):
     """จับ database errors"""
