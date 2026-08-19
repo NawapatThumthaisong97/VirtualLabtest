@@ -42,6 +42,7 @@ class Session(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # Relationships
     user = relationship("User", back_populates="sessions", foreign_keys=[user_id])
