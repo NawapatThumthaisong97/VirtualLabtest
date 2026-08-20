@@ -48,7 +48,12 @@ function setMetadata() {
   metaColorScheme.setAttribute('content', APP_METADATA.colorScheme);
 }
 
-export default function RootLayout() {
+type RootLayoutProps = {
+  /** Some pages (e.g. lab detail) run full-bleed without the site footer. */
+  showFooter?: boolean;
+};
+
+export default function RootLayout({ showFooter = true }: RootLayoutProps) {
   useEffect(() => {
     setMetadata();
   }, []);
@@ -66,7 +71,7 @@ export default function RootLayout() {
           <main className="flex-1">
             <Outlet />
           </main>
-          <Footer />
+          {showFooter && <Footer />}
         </div>
       </body>
     </html>
