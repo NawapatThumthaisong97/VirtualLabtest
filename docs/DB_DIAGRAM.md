@@ -176,9 +176,13 @@ erDiagram
 - `labs.brief_detail TEXT NULL` — คำอธิบายสั้นต่อแลป (คอลัมน์ Brief detail หน้า S3)
 - ตาราง `course_documents` — เอกสาร PDF ระดับวิชาที่อาจารย์อัป
 
-## ⚠️ อ่านก่อน pull: `sessions.service_type` เปลี่ยนแล้ว
+## ⚠️ อ่านก่อน pull: schema เปลี่ยน ต้อง drop DB
 
-ยุบจาก 4 ค่า (`lab/compute/sandbox/ai_job`) เหลือ 2 ค่า (`LAB`/`COMPUTE_SERVICE`)
+**1. `sessions.service_type`** — ยุบจาก 4 ค่า (`lab/compute/sandbox/ai_job`) เหลือ 2 ค่า (`LAB`/`COMPUTE_SERVICE`)
+
+**2. `users.password_hash`** — คอลัมน์ใหม่ (nullable) สำหรับ login ด้วย student_id/email
+seed จะตั้งรหัสเริ่มต้นให้ user ตัวอย่างทุกคนเป็น `labpass123`
+ปล่อย nullable ไว้เพราะวันที่ย้ายไป SSO user ที่สร้างจาก SSO จะไม่มีรหัสผ่าน
 
 **ใครที่มี DB อยู่ในเครื่องแล้วต้อง drop ทิ้งแล้วสร้างใหม่** ไม่งั้นจะ error ตอน
 insert session เพราะค่าเก่ายังค้างอยู่ใน enum type ของ Postgres — ต่างจากการเพิ่ม
