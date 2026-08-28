@@ -21,6 +21,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False)
     student_id = Column(String(50), unique=True, nullable=True, index=True)
+    password_hash = Column(String(255), nullable=True)
     role = Column(Enum(UserRole), default=UserRole.STUDENT, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
