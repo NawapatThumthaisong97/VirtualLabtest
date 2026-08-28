@@ -2,6 +2,7 @@
 FastAPI Main Application
 Entry point for the FastAPI backend
 """
+
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
@@ -15,22 +16,34 @@ from sqladmin import Admin, ModelView
 from app.configs import settings, check_db_connection
 from app.configs.db import engine
 from app.models import (
-    User, Course, CourseImage, Enrollment, Lab, LabImage,
-    LabProgress, Session, UsageRecord, Quota, Announcement
+    User,
+    Course,
+    CourseImage,
+    Enrollment,
+    Lab,
+    LabImage,
+    LabProgress,
+    Session,
+    UsageRecord,
+    Quota,
+    Announcement,
 )
 from app.exceptions.domain import (
     ConflictError,
     DomainError,
     ForbiddenError,
     NotFoundError,
+    UnauthorizedError,
     ValidationError,
 )
+from app.middlewares.admin_auth import AdminAuth
 from app.routes import api_router
 from app.utils.logger import logger
 
 
 from sqladmin import Admin, ModelView
 from sqlalchemy import inspect
+
 
 # SQLAdmin Model Views - Dynamic column_list from model
 def get_model_columns(model, exclude=None):
@@ -40,7 +53,7 @@ def get_model_columns(model, exclude=None):
     """
     if exclude is None:
         exclude = []
-    
+
     mapper = inspect(model)
     columns = []
     for column in mapper.columns:
@@ -94,7 +107,7 @@ class LabProgressAdmin(ModelView, model=LabProgress):
 class SessionAdmin(ModelView, model=Session):
     name = "Session"
     icon = "fa-solid fa-terminal"
-    column_list = get_model_columns(Session, exclude=['endpoints'])  # ซ่อน JSON ที่ซับซ้อน
+    column_list = get_model_columns(Session, exclude=["endpoints"])  # ซ่อน JSON ที่ซับซ้อน
 
 
 class UsageRecordAdmin(ModelView, model=UsageRecord):
@@ -126,17 +139,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting FastAPI application...")
     logger.info(f"App: {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Debug Mode: {settings.DEBUG}")
-    
+
     # เช็คการเชื่อมต่อ database
     logger.info("Checking database connection...")
     if not check_db_connection():
         logger.error("Cannot connect to database. Server will not start.")
         sys.exit(1)  # ออกจากโปรแกรมถ้าเชื่อมต่อ DB ไม่สำเร็จ
-    
+
     logger.info("Application started successfully!")
-    
+
     yield  # Server กำลังทำงาน
-    
+
     # Shutdown
     logger.info("Shutting down application...")
 
@@ -148,7 +161,7 @@ app = FastAPI(
     description="FastAPI Backend with PostgreSQL, Cloudflare R2, and more",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS Middleware
@@ -172,6 +185,7 @@ STATUS_MAP = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     ConflictError: status.HTTP_409_CONFLICT,
     ForbiddenError: status.HTTP_403_FORBIDDEN,
+    UnauthorizedError: status.HTTP_401_UNAUTHORIZED,
     ValidationError: status.HTTP_400_BAD_REQUEST,
 }
 
@@ -209,30 +223,21 @@ async def domain_exception_handler(request, exc: DomainError):
 async def sqlalchemy_exception_handler(request, exc):
     """จับ database errors"""
     logger.error(f"Database error: {str(exc)}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Database error occurred"}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Database error occurred"})
 
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request, exc):
     """จับ validation errors"""
     logger.warning(f"Validation error: {str(exc)}")
-    return JSONResponse(
-        status_code=400,
-        content={"detail": str(exc)}
-    )
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """จับ unexpected errors"""
     logger.error(f"Unexpected error: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # Health Check Endpoint
@@ -241,11 +246,7 @@ def health_check():
     """
     Health check endpoint
     """
-    return {
-        "status": "ok",
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION
-    }
+    return {"status": "ok", "app": settings.APP_NAME, "version": settings.APP_VERSION}
 
 
 @app.get("/health", tags=["Health"])
@@ -258,7 +259,7 @@ def health():
         "status": "healthy" if db_status else "unhealthy",
         "database": "connected" if db_status else "disconnected",
         "app": settings.APP_NAME,
-        "version": settings.APP_VERSION
+        "version": settings.APP_VERSION,
     }
 
 
@@ -267,7 +268,9 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 
 
 # Setup SQLAdmin
-admin = Admin(app, engine, authentication_backend=None)
+admin = Admin(
+    app, engine, authentication_backend=AdminAuth(secret_key=settings.SECRET_KEY)
+)
 
 # Add model views to admin
 admin.add_view(UserAdmin)
@@ -285,10 +288,5 @@ admin.add_view(AnnouncementAdmin)
 
 if __name__ == "__main__":
     import uvicorn
-    
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG
-    )
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=settings.DEBUG)

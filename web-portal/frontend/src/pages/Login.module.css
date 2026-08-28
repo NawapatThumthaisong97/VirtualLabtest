@@ -286,6 +286,19 @@
   border-color: #e2e2e2;
 }
 
+.btnPrimary:disabled {
+  cursor: not-allowed;
+  background: #8a8a8a;
+  border-color: #8a8a8a;
+}
+
+.error {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #ff8a80;
+}
+
 .btnContact {
   display: inline-flex;
   align-items: center;

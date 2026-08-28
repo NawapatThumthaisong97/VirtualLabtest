@@ -5,9 +5,11 @@
  * node on the right while the sign-in card sits on the left.
  * Rendered outside RootLayout — no navbar, no footer.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import styles from './Login.module.css';
+import { authService } from '../services/auth';
 
 import art1 from '../assets/login/ART_1.jpeg';
 import art2 from '../assets/login/ART_2.jpeg';
@@ -64,6 +66,9 @@ type Point = { x: number; y: number };
 
 export default function LoginPage() {
   const pageRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   /* The two segments behind the quote are measured at runtime: images are
      px-sized and the quote's box depends on the webfont, so hard-coded %
@@ -110,9 +115,32 @@ export default function LoginPage() {
     setLine(`.${styles.lQuoteBottom}`, B, gapEnd);
   }, []);
 
-  // No auth endpoint yet — swallow the submit so the page does not reload.
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const username = String(form.get('username') ?? '').trim();
+    const password = String(form.get('password') ?? '');
+
+    if (!username || !password) {
+      setError('กรอกรหัสนักศึกษา/อีเมล และรหัสผ่านให้ครบ');
+      return;
+    }
+
+    setError(null);
+    setSubmitting(true);
+    try {
+      await authService.login(username, password);
+      navigate('/');
+    } catch (err) {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      setError(
+        status === 401
+          ? 'รหัสนักศึกษา/อีเมล หรือรหัสผ่านไม่ถูกต้อง'
+          : 'เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง',
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   useEffect(() => {
@@ -220,8 +248,10 @@ export default function LoginPage() {
             />
           </label>
 
-          <button type="submit" className={styles.btnPrimary}>
-            Sign in
+          {error && <p className={styles.error}>{error}</p>}
+
+          <button type="submit" className={styles.btnPrimary} disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
