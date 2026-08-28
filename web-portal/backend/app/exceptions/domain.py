@@ -46,6 +46,21 @@ class DuplicateOrderNoError(ConflictError):
     code = "duplicate_order_no"
 
 
+# ---------- 401 ----------
+class UnauthorizedError(DomainError):
+    """ยังไม่ได้ล็อกอิน หรือ token ใช้ไม่ได้"""
+
+    code = "unauthorized"
+
+
+class InvalidCredentialsError(UnauthorizedError):
+    code = "invalid_credentials"
+
+
+class InvalidTokenError(UnauthorizedError):
+    code = "invalid_token"
+
+
 # ---------- 403 ----------
 class ForbiddenError(DomainError):
     """ไม่มีสิทธิ์ทำสิ่งนี้"""
