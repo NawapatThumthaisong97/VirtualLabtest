@@ -301,3 +301,6 @@ docs/TAILSCALE_K3S_NETWORKING.md
 
 # copy ของ template pre-pull ที่กรอกค่าจริงแล้ว
 script/prepull-daemonset.yaml
+# Personal seed scripts — local only, ไม่ต้อง commit
+web-portal/backend/script/seed_pete.py
+web-portal/backend/script/check_repo.py
