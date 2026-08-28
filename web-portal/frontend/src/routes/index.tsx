@@ -8,8 +8,14 @@ import HomePage from '../pages/Home.tsx';
 import ImagesPage from '../pages/Images.tsx';
 import CoursesPage from '../pages/Courses.tsx';
 import LabDetailPage from '../pages/LabDetail.tsx';
+import LoginPage from '../pages/Login.tsx';
 
 export const router = createBrowserRouter([
+  // Full-bleed auth page: no navbar, no footer
+  {
+    path: '/login',
+    element: <LoginPage />,
+  },
   // Marketing / browsing pages: navbar + footer
   {
     element: <RootLayout />,
@@ -41,3 +47,4 @@ export const router = createBrowserRouter([
 ]);
 
 export default router;
+
