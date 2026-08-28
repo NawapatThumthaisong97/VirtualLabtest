@@ -1,9 +1,15 @@
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from app.exceptions.domain import DuplicateOrderNoError, LabNotFoundError
+from app.adapters.local_storage import local_storage
+from app.exceptions.domain import (
+    DuplicateOrderNoError,
+    LabDocNotFoundError,
+    LabNotFoundError,
+)
 from app.models.lab import Lab, LabStatus
 from app.repositories.lab_repository import LabRepository
 from app.schemas import LabCreateRequest, LabUpdateRequest, LabResponse
@@ -19,6 +25,32 @@ class LabService:
         self, course_id: UUID, status: LabStatus | None = None
     ) -> list[Lab]:
         return self.lab_repo.find_by_course(course_id, status)
+
+    def get_lab_by_id(self, lab_id: UUID) -> Lab:
+        lab = self.lab_repo.find_by_id(lab_id)
+        if lab is None:
+            raise LabNotFoundError(f"Lab {lab_id} not found")
+        return lab
+
+    def get_lab_doc_path(self, lab_id: UUID) -> Path:
+        """
+        คืน path ของไฟล์เอกสารแลปบน disk
+
+        แยก 2 กรณีที่ต่างกันแต่ตอบ 404 เหมือนกัน: แลปยังไม่ได้แนบเอกสาร
+        กับแนบไว้แล้วแต่ไฟล์หายไปจาก storage — ข้อความ error ต่างกันเพื่อให้
+        admin ไล่ปัญหาได้ว่าลืมอัปโหลด หรือไฟล์ถูกลบ
+        """
+        lab = self.get_lab_by_id(lab_id)
+
+        if not lab.doc_url:
+            raise LabDocNotFoundError(f"Lab {lab_id} has no document attached")
+
+        path = local_storage.resolve(lab.doc_url)
+        if not path.is_file():
+            raise LabDocNotFoundError(
+                f"Document file missing from storage: {lab.doc_url}"
+            )
+        return path
 
     #POST
     def create_lab(self, payload: LabCreateRequest) -> Lab:

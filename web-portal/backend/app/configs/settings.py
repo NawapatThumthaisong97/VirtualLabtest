@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     
     # CORS - เก็บเป็น string คั่นด้วย comma แล้ว parse ใน code
     CORS_ORIGINS_STR: str = "http://localhost:3000,http://localhost:5173"
+
+    # Storage - โฟลเดอร์ราก (relative กับที่รัน uvicorn) ที่เก็บไฟล์เอกสารแลป
+    # ใช้ object key แบบเดียวกับ bucket (labs/{lab_id}/doc.pdf) ตั้งแต่ตอนนี้
+    # วันที่ย้ายขึ้น S3/R2 จะได้ก๊อปไฟล์ขึ้นไปเฉย ๆ ไม่ต้องแตะ DB
+    STORAGE_ROOT: str = "storage"
     
     # Cloudflare R2
     R2_ACCOUNT_ID: Optional[str] = None
