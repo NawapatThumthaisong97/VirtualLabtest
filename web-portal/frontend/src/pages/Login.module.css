@@ -1,0 +1,270 @@
+/* ---------------------------------------------------------------
+   Login page
+   Full-bleed dark hero: an art constellation reveals itself node by
+   node while the sign-in card sits on the left. Timings live on each
+   element as --d (delay); the page only flips .play to start them.
+   --------------------------------------------------------------- */
+
+.page {
+  --start-scale: 1.18;
+  --start-blur: 6px;
+  --dur: 1100ms;
+
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  min-height: 640px;
+  background: #000;
+  color: #f5f5f5;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.wordmark {
+  position: absolute;
+  top: 28px;
+  left: 32px;
+  font-family: 'Michroma', sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.35em;
+  color: #f5f5f5;
+  user-select: none;
+  z-index: 10;
+}
+
+/* ---------- constellation ---------- */
+
+.constellation {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.constellation svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.artNode {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transform-origin: center center;
+}
+
+.artNode img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* node entrance: focus-pull */
+.play .artNode {
+  opacity: 0;
+  animation: focus-pull var(--dur) cubic-bezier(0.16, 1, 0.3, 1) var(--d) both;
+}
+
+@keyframes focus-pull {
+  from {
+    opacity: 0;
+    transform: scale(var(--start-scale));
+    filter: blur(var(--start-blur)) saturate(0.55) brightness(1.15);
+  }
+  35% {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0) saturate(1) brightness(1);
+  }
+}
+
+/* connector lines draw themselves */
+.play svg line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: line-draw 700ms ease-out var(--d) both;
+}
+
+@keyframes line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ---------- quote ---------- */
+
+.quote {
+  position: absolute;
+  left: 66%;
+  top: 44%;
+  transform: translateX(-8%);
+  font-family: 'Playfair Display', serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: clamp(24px, 2.6vw, 34px);
+  line-height: 1.35;
+  text-align: center;
+  color: #f5f5f5;
+  z-index: 5;
+  user-select: none;
+}
+
+.play .quote {
+  opacity: 0;
+  animation: quote-in 900ms ease-out 3.1s both;
+}
+
+@keyframes quote-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+/* ---------- login card ---------- */
+
+.card {
+  position: absolute;
+  left: 12%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(420px, 84vw);
+  background: #0a0a0a;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 40px 36px;
+  z-index: 10;
+  animation: card-rise 500ms ease both;
+}
+
+@keyframes card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-50% + 12px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%);
+  }
+}
+
+.card h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+
+.card p {
+  font-size: 14px;
+  color: #b8b8b8;
+  margin: 0 0 24px;
+}
+
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.16);
+  margin: 28px 0;
+}
+
+.card .help {
+  font-size: 13.5px;
+  color: #b8b8b8;
+  margin: 0 0 14px;
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  background: transparent;
+  color: #f5f5f5;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 8px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.btn:hover {
+  border-color: #185fa5;
+  background: rgba(24, 95, 165, 0.1);
+}
+
+.btnSso {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 18px;
+  font-size: 15px;
+}
+
+.btnSso svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.btnContact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 22px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+
+/* ---------- runtime-measured segments ----------
+   Marker classes only: layoutQuoteLines() finds these four elements and
+   recomputes the two segments that frame the quote. The declarations are
+   inert — they exist so the class names survive into the built stylesheet. */
+
+.lineSrc,
+.lineTgt {
+  z-index: 1;
+}
+
+.lQuoteTop,
+.lQuoteBottom {
+  stroke-linecap: butt;
+}
+
+/* ---------- responsive / motion ---------- */
+
+@media (max-width: 900px) {
+  .constellation,
+  .quote {
+    display: none;
+  }
+  .card {
+    left: 50%;
+    transform: translate(-50%, -50%);
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play .artNode,
+  .play .quote {
+    animation: none;
+    opacity: 1;
+  }
+  .play svg line {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
