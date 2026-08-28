@@ -7,6 +7,7 @@ import RootLayout from '../components/Layout.tsx';
 import HomePage from '../pages/Home.tsx';
 import ImagesPage from '../pages/Images.tsx';
 import CoursesPage from '../pages/Courses.tsx';
+import LabDetailPage from '../pages/LabDetail.tsx';
 import LoginPage from '../pages/Login.tsx';
 
 export const router = createBrowserRouter([
@@ -15,7 +16,7 @@ export const router = createBrowserRouter([
     path: '/login',
     element: <LoginPage />,
   },
-  // Pages that share the navbar + footer chrome
+  // Marketing / browsing pages: navbar + footer
   {
     element: <RootLayout />,
     children: [
@@ -33,6 +34,17 @@ export const router = createBrowserRouter([
       },
     ],
   },
+  // Lab workspace pages: navbar only, no footer
+  {
+    element: <RootLayout showFooter={false} />,
+    children: [
+      {
+        path: '/labs/:labId',
+        element: <LabDetailPage />,
+      },
+    ],
+  },
 ]);
 
 export default router;
+

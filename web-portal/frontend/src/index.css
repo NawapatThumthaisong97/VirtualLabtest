@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Inter is the app UI font (weights 400/500/600/700 loaded in index.html).
+   Mapping it onto --font-sans makes every `font-sans` utility resolve to Inter. */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #000000;
