@@ -216,7 +216,7 @@ def seed_database(db: Session):
         id=uuid.uuid4(),
         user_id=student1.id,
         lab_id=None,
-        service_type=ServiceType.SANDBOX,
+        service_type=ServiceType.COMPUTE_SERVICE,
         is_remote=True,
         is_cloud=True,
         sky_cluster_name="sky-cluster-1",
