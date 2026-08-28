@@ -23,6 +23,7 @@ from app.exceptions.domain import (
     DomainError,
     ForbiddenError,
     NotFoundError,
+    UnauthorizedError,
     ValidationError,
 )
 from app.routes import api_router
@@ -172,6 +173,7 @@ STATUS_MAP = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     ConflictError: status.HTTP_409_CONFLICT,
     ForbiddenError: status.HTTP_403_FORBIDDEN,
+    UnauthorizedError: status.HTTP_401_UNAUTHORIZED,
     ValidationError: status.HTTP_400_BAD_REQUEST,
 }
 
