@@ -2,10 +2,10 @@ from uuid import UUID
 
 from sqlalchemy import func , select
 
-from app.repositories.base import BaseRepositories
+from app.repositories.base import BaseRepository
 from app.models.announcement import Announcement  
 
-class AnnouncementRepository(BaseRepositories[Announcement]):
+class AnnouncementRepository(BaseRepository[Announcement]):
     model = Announcement
     
     def find_by_id(self, announcement_id: UUID) -> Announcement | None:

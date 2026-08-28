@@ -6,6 +6,7 @@
  * The navbar comes from RootLayout, so it is not repeated here.
  */
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import TabNav from '../components/TabNav.tsx';
 import type { Tab } from '../components/TabNav.tsx';
 import ServiceCard from '../components/ServiceCard.tsx';
@@ -51,10 +52,19 @@ export default function HomePage({
   studentName = 'Peraphat',
   greeting = 'Good Morning!',
 }: HomePageProps) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState('service');
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
   const isService = tab === 'service';
+
+  const handleServiceSelect = (serviceId: string) => {
+    if (serviceId === 'labwork') {
+      navigate('/courses');
+      return;
+    }
+    setSelectedService(serviceId);
+  };
 
   return (
     <div className="flex w-full flex-col bg-[#FAFAF8] pb-16">
@@ -91,7 +101,7 @@ export default function HomePage({
                     key={svc.id}
                     service={svc}
                     selected={selectedService === svc.id}
-                    onSelect={setSelectedService}
+                    onSelect={handleServiceSelect}
                   />
                 ))}
               </div>

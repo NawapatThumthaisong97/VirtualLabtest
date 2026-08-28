@@ -17,6 +17,7 @@ class Course(Base):
     image_url = Column(String(2048), nullable=True)
     created_by = Column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     creator = relationship("User", back_populates="created_courses", foreign_keys=[created_by])
     enrollments = relationship("Enrollment", back_populates="course")
     labs = relationship("Lab", back_populates="course")
