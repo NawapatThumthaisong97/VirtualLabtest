@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Design prototypes kept locally for reference, not part of the build
+LabSessionFlow.jsx
+files/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

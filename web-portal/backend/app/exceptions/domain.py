@@ -29,6 +29,12 @@ class CourseNotFoundError(NotFoundError):
     code = "course_not_found"
 
 
+class LabDocNotFoundError(NotFoundError):
+    """แลปมีอยู่ แต่ยังไม่ได้แนบเอกสาร หรือไฟล์หายไปจาก storage"""
+
+    code = "lab_doc_not_found"
+
+
 # ---------- 409 ----------
 class ConflictError(DomainError):
     """ข้อมูลชนกับที่มีอยู่แล้ว"""

@@ -76,7 +76,7 @@ class EnrollmentAdmin(ModelView, model=Enrollment):
 class LabAdmin(ModelView, model=Lab):
     name = "Lab"
     icon = "fa-solid fa-flask"
-    column_list = get_model_columns(Lab, exclude=['doc_url'])  # ซ่อน URLs ที่ยาว
+    column_list = get_model_columns(Lab)
 
 
 class LabImageAdmin(ModelView, model=LabImage):
