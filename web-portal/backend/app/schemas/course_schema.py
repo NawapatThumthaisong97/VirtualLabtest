@@ -1,8 +1,15 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import Field
 
 from app.schemas.base import CamelModel
+
+
+class AnnouncementResponse(CamelModel):
+    id: UUID
+    message: str
+    created_at: datetime | None = None
 
 
 class CourseResponse(CamelModel):
@@ -11,6 +18,11 @@ class CourseResponse(CamelModel):
     name: str
     lecturer_name: str
     image_url: str | None
+    announcement_ids: list[UUID] | None = None
+
+
+class CourseDetailResponse(CourseResponse):
+    announcements: list[AnnouncementResponse] = Field(default_factory=list)
 
 
 class CourseCreateRequest(CamelModel):
@@ -26,3 +38,4 @@ class CourseUpdateRequest(CamelModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     lecturer_name: str | None = Field(None, min_length=1, max_length=255)
     image_url: str | None = Field(None, max_length=2048)
+    announcement_ids: list[UUID] | None = Field(None, min_items=1)

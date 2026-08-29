@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { BookOpen, Cloud, Database, Layers3, Route } from 'lucide-react';
 import { coursesService } from '../services/courses';
 import styles from './Courses.module.css';
 import medicalLabLogo from '../assets/medical-lab.png';
+import blueWallBackground from '../assets/a-blue-wall-back.jpg';
 
 const COURSE_ICONS = [Layers3, Database, Cloud, Route, BookOpen];
 
@@ -36,21 +38,27 @@ export default function CoursesPage() {
             {courses.map((course, index) => {
               const Icon = COURSE_ICONS[index % COURSE_ICONS.length];
               return (
-                <article className={styles.card} key={course.id}>
-                  <div
-                    className={styles.cover}
-                    style={course.imageUrl ? { backgroundImage: `url(${course.imageUrl})` } : undefined}
-                  >
-                    <div className={styles.iconTile} aria-hidden="true">
-                      <Icon size={27} strokeWidth={1.8} />
+                <Link to={`/courses/${course.id}`} key={course.id} className={styles.cardLink}>
+                  <article className={styles.card}>
+                    <div
+                      className={styles.cover}
+                      style={{
+                        backgroundImage: `url(${course.imageUrl || blueWallBackground})`,
+                        backgroundBlendMode: course.imageUrl ? 'multiply' : 'normal',
+                        backgroundColor: '#dfeaf4',
+                      }}
+                    >
+                      <div className={styles.iconTile} aria-hidden="true">
+                        <Icon size={27} strokeWidth={1.8} />
+                      </div>
                     </div>
-                  </div>
-                  <div className={styles.cardBody}>
-                    <div className={styles.courseLabel}>COURSE</div>
-                    <h2>{course.code} : {course.name}</h2>
-                    <p>Lecturer : {course.lecturerName}</p>
-                  </div>
-                </article>
+                    <div className={styles.cardBody}>
+                      <div className={styles.courseLabel}>COURSE</div>
+                      <h2>{course.code} : {course.name}</h2>
+                      <p>Lecturer : {course.lecturerName}</p>
+                    </div>
+                  </article>
+                </Link>
               );
             })}
           </section>

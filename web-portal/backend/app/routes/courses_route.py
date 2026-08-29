@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 from app.configs.db import get_db
 from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
-from app.schemas.course_schema import CourseCreateRequest, CourseResponse, CourseUpdateRequest
+from app.schemas.course_schema import (
+    AnnouncementResponse,
+    CourseCreateRequest,
+    CourseDetailResponse,
+    CourseResponse,
+    CourseUpdateRequest,
+)
 from app.services.courses_service import CourseService
 from app.controllers.course_controller import CourseController
 from app.middlewares.request_validation import require_non_empty_body
@@ -22,6 +28,21 @@ def course_response(course, request: Request) -> CourseResponse:
     if response.image_url and not response.image_url.startswith(("http://", "https://")):
         response.image_url = str(request.url_for("get_course_image", course_id=course.id))
     return response
+
+
+def course_detail_response(course, announcements: list, request: Request) -> CourseDetailResponse:
+    response = CourseDetailResponse(
+        id=course.id,
+        code=course.code,
+        name=course.name,
+        lecturer_name=course.lecturer_name,
+        image_url=course.image_url,
+        announcement_ids=None,
+        announcements=[AnnouncementResponse.model_validate(item) for item in announcements],
+    )
+    if response.image_url and not response.image_url.startswith(("http://", "https://")):
+        response.image_url = str(request.url_for("get_course_image", course_id=course.id))
+    return response
     
 def get_course_controller(db: Session = Depends(get_db)) -> CourseController:
     course_repository = CourseRepository(db)
@@ -29,17 +50,17 @@ def get_course_controller(db: Session = Depends(get_db)) -> CourseController:
     course_service = CourseService(course_repository, announcement_repository)
     return CourseController(course_service)
     
-@router.get("/{course_id}", response_model=CourseResponse)
+@router.get("/{course_id}", response_model=CourseDetailResponse)
 def get_course(
     course_id: UUID,
     request: Request,
     controller: CourseController = Depends(get_course_controller),
 ):
-    """ดึงข้อมูล course โดยใช้ course_id"""
-    course = controller.get_course(course_id)
+    """ดึงข้อมูล course พร้อม announcement ที่เกี่ยวข้อง"""
+    course, announcements = controller.get_course_detail(course_id)
     if not course:
         raise NotFoundError(f"Course {course_id} not found")
-    return course_response(course, request)
+    return course_detail_response(course, announcements, request)
 
 @router.post(
     "",
@@ -93,6 +114,11 @@ def upload_course_image(
 def update_course(course_id: UUID, updated_course: CourseUpdateRequest, controller: CourseController = Depends(get_course_controller)):
     """อัปเดตข้อมูล course โดยใช้ course_id"""
     return controller.update_course(course_id, updated_course)
+def update_course_announcement_ids(course_id: UUID, announcement_ids: list[UUID], controller: CourseController = Depends(get_course_controller)):
+    """อัปเดต announcement_ids ของ course โดยใช้ course_id"""
+    updated_course = controller.update_course_announcement_ids(course_id, announcement_ids)
+    if not updated_course:
+        raise NotFoundError(f"Course {course_id} not found")
 
 @router.delete("/{course_id}", status_code=http_status.HTTP_204_NO_CONTENT)
 def soft_delete_course(course_id: UUID, controller: CourseController = Depends(get_course_controller)):

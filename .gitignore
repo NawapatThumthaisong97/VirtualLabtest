@@ -79,6 +79,13 @@ cert.pem
 !.env.*.example
 !.env.local.example
 
+# Local runtime data for the web portal
+web-portal/backend/.venv/
+web-portal/backend/storage/**
+!web-portal/backend/storage/.gitkeep
+web-portal/backend/*.db
+web-portal/backend/*.sqlite3
+
 # -----------------------------------------------------------------------------
 # 🐍 Python / FastAPI / SkyPilot
 # -----------------------------------------------------------------------------
