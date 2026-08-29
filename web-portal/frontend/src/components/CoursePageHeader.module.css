@@ -1,0 +1,21 @@
+.headerShell {
+  width: 100%;
+  background: #f3f1ee;
+}
+
+.titleRow {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-bottom: 4px solid #1d9cf0;
+}
+
+.titleText {
+  margin: 0;
+  padding: 12px 18px 10px 152px;
+  font-size: clamp(1.2rem, 1.1vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1.2;
+  color: #111315;
+  text-align: left;
+}

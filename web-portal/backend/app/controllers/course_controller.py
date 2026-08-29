@@ -11,6 +11,9 @@ class CourseController:
     def get_course(self, course_id: UUID) -> Course | None:
         return self.course_service.get_course_by_id(course_id)
 
+    def get_course_detail(self, course_id: UUID) -> tuple[Course | None, list]:
+        return self.course_service.get_course_detail(course_id)
+
     def create_course(self, course: CourseCreateRequest) -> Course:
         return self.course_service.create_course(Course(**course.model_dump()))
     
@@ -31,3 +34,6 @@ class CourseController:
     
     def get_courses_by_student(self, student_id: UUID) -> list[Course]:
         return self.course_service.get_courses_by_student(student_id)
+    
+    def update_course_announcement_ids(self, course_id: UUID, announcement_ids: list[UUID]) -> Course | None:
+        return self.course_service.update_announcement_ids(course_id, announcement_ids)

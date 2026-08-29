@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -9,6 +10,12 @@ BackgroundKey = Literal["blue1", "blue2", "blue3", "blue4"]
 IconKey = Literal["layers", "database", "cloud"]
 
 
+class AnnouncementResponse(CamelModel):
+    id: UUID
+    message: str
+    created_at: datetime | None = None
+
+
 class CourseResponse(CamelModel):
     id: UUID
     code: str
@@ -17,6 +24,11 @@ class CourseResponse(CamelModel):
     image_url: str | None
     background_key: BackgroundKey | None
     icon_key: IconKey | None
+    announcement_ids: list[UUID] | None = None
+
+
+class CourseDetailResponse(CourseResponse):
+    announcements: list[AnnouncementResponse] = Field(default_factory=list)
 
 
 class CourseCreateRequest(CamelModel):
@@ -36,3 +48,4 @@ class CourseUpdateRequest(CamelModel):
     image_url: str | None = Field(None, max_length=2048)
     background_key: BackgroundKey | None = None
     icon_key: IconKey | None = None
+    announcement_ids: list[UUID] | None = Field(None, min_length=1)

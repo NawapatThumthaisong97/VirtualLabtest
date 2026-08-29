@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { coursesService } from '../services/courses';
 import type { Courses } from '../services/courses';
 import styles from './Courses.module.css';
@@ -48,7 +49,8 @@ export default function CoursesPage() {
         ) : (
           <section className={styles.grid} aria-label="Courses">
             {courses.map((course) => (
-                <article className={styles.card} key={course.id}>
+              <Link to={`/courses/${course.id}`} key={course.id} className={styles.cardLink}>
+                <article className={styles.card}>
                   <div
                     className={styles.cover}
                     style={
@@ -67,6 +69,7 @@ export default function CoursesPage() {
                     <p>Lecturer : {course.lecturerName}</p>
                   </div>
                 </article>
+              </Link>
             ))}
           </section>
         )}
