@@ -14,6 +14,8 @@ export interface Announcement {
   id: string;
   message: string;
   createdAt: string | null;
+  /** ชื่ออาจารย์ที่โพสต์ — null ได้ถ้าเป็นประกาศเก่าที่ยังไม่มี author */
+  authorName: string | null;
 }
 
 interface CourseApiResponse {
@@ -29,6 +31,8 @@ interface CourseApiResponse {
     message: string;
     created_at?: string | null;
     createdAt?: string | null;
+    author_name?: string | null;
+    authorName?: string | null;
   }>;
 }
 
@@ -47,6 +51,7 @@ export const courseService = {
         id: a.id,
         message: a.message,
         createdAt: a.createdAt ?? a.created_at ?? null,
+        authorName: a.authorName ?? a.author_name ?? null,
       })),
     };
   },

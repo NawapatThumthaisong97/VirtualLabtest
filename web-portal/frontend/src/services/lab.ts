@@ -25,6 +25,17 @@ export interface LabDetail {
   course: CourseBrief;
 }
 
+/** `GET /api/labs?courseId=` — LabResponse (ไม่มี course ติดมาเหมือน detail) */
+export interface LabSummary {
+  id: string;
+  title: string;
+  description: string | null;
+  docUrl: string | null;
+  orderNo: number;
+  dueAt: string | null;
+  status: LabStatus;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   message: string;
@@ -33,6 +44,13 @@ export interface ApiResponse<T> {
 }
 
 export const labService = {
+  listByCourse: async (courseId: string): Promise<LabSummary[]> => {
+    const response = await apiClient.get<ApiResponse<LabSummary[]>>('/labs', {
+      params: { courseId },
+    });
+    return (response as unknown as ApiResponse<LabSummary[]>).data ?? [];
+  },
+
   getById: async (labId: string): Promise<LabDetail> => {
     // the response interceptor already unwrapped axios' own `.data`,
     // so what lands here is the envelope — `.data` on it is the payload

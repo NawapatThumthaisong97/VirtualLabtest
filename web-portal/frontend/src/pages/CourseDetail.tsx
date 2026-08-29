@@ -3,21 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
+import type { LabSummary } from '../services/lab';
 import CoursePageHeader from '../components/CoursePageHeader';
 import styles from './CourseDetail.module.css';
-
-type LabRecord = {
-  id: string;
-  title: string;
-  description?: string | null;
-  status?: string | null;
-  order_no?: number | null;
-  orderNo?: number | null;
-  due_at?: string | null;
-  dueAt?: string | null;
-  doc_url?: string | null;
-  docUrl?: string | null;
-};
 
 function getLabStatusMeta(status?: string | null) {
   const value = (status ?? '').toLowerCase();
@@ -51,23 +39,24 @@ export default function CourseDetailPage() {
     isPending: labsPending,
   } = useQuery({
     queryKey: ['course-labs', courseId],
-    queryFn: async () => {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/labs?courseId=${courseId}`);
-      const json = await response.json();
-      return Array.isArray(json?.data) ? (json.data as LabRecord[]) : [];
-    },
+    // ผ่าน labService เพื่อให้ apiClient แนบ token ให้ — fetch() ดิบไม่แนบ
+    queryFn: () => labService.listByCourse(courseId),
     enabled: Boolean(courseId),
   });
 
-  const documents = useMemo(() => {
-    if (!labs) return [];
-    return labs.filter((lab: LabRecord) => lab.doc_url || lab.docUrl).map((lab: LabRecord) => ({
-      id: lab.id,
-      title: lab.title,
-      name: lab.title,
-      docUrl: lab.doc_url || lab.docUrl || labService.docUrl(lab.id),
-    }));
-  }, [labs]);
+  const documents = useMemo(
+    () =>
+      labs
+        .filter((lab: LabSummary) => Boolean(lab.docUrl))
+        .map((lab: LabSummary) => ({
+          id: lab.id,
+          title: lab.title,
+          // docUrl ที่ backend ส่งมาเป็น object key (labs/{id}/doc.pdf) ไม่ใช่ URL
+          // ที่เบราว์เซอร์เปิดได้ ต้องแปลงเป็นเส้น /labs/{id}/doc เสมอ
+          href: labService.docUrl(lab.id),
+        })),
+    [labs]
+  );
 
   if (isPending || labsPending) {
     return <div className={styles.pageMessage}>กำลังโหลดข้อมูลรายวิชา...</div>;
@@ -77,12 +66,12 @@ export default function CourseDetailPage() {
     return <div className={styles.pageMessage}>ไม่พบข้อมูลรายวิชา หรือโหลดข้อมูลไม่สำเร็จ</div>;
   }
 
-  const labTasks = (labs ?? []).map((lab: LabRecord) => ({
+  const labTasks = labs.map((lab: LabSummary) => ({
     id: lab.id,
     title: lab.title,
     status: lab.status ?? 'draft',
-    orderNo: lab.order_no ?? lab.orderNo ?? 0,
-    dueAt: lab.due_at ?? lab.dueAt ?? null,
+    orderNo: lab.orderNo ?? 0,
+    dueAt: lab.dueAt ?? null,
     instruction: lab.description ?? 'No description',
   }));
 
@@ -96,9 +85,9 @@ export default function CourseDetailPage() {
             <h2 className={styles.cardTitle}>Documents</h2>
             <ul className={styles.docList}>
               {documents.length > 0 ? (
-                documents.map((doc: { id: string; title: string; docUrl: string }) => (
+                documents.map((doc: { id: string; title: string; href: string }) => (
                   <li key={doc.id}>
-                    <a href={doc.docUrl} target="_blank" rel="noreferrer">
+                    <a href={doc.href} target="_blank" rel="noreferrer">
                       {doc.title}
                     </a>
                     <span>{course.code}</span>
@@ -116,9 +105,16 @@ export default function CourseDetailPage() {
               {course.announcements.length > 0 ? (
                 <>
                   {course.announcements.map((item) => (
-                    <p key={item.id} className={styles.announcementText}>
-                      {item.message}
-                    </p>
+                    <div key={item.id} className={styles.announcementItem}>
+                      <p className={styles.announcementAuthor}>
+                        {/* ประกาศเก่าที่ยังไม่มี author ให้ตกมาที่ชื่ออาจารย์ประจำวิชา */}
+                        {item.authorName ?? course.lecturerName}
+                        {item.createdAt
+                          ? ` · ${new Date(item.createdAt).toLocaleDateString('en-GB')}`
+                          : ''}
+                      </p>
+                      <p className={styles.announcementText}>{item.message}</p>
+                    </div>
                   ))}
                 </>
               ) : (
