@@ -1,0 +1,3 @@
+# shell script ต้องเป็น LF เสมอ ไม่งั้น shebang พังเมื่อรันใน container
+# (Windows + core.autocrlf=true จะแปลงเป็น CRLF แล้ว exec ไม่ผ่าน)
+*.sh text eol=lf

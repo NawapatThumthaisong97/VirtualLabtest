@@ -37,6 +37,8 @@ def course_detail_response(course, announcements: list, request: Request) -> Cou
         name=course.name,
         lecturer_name=course.lecturer_name,
         image_url=course.image_url,
+        background_key=course.background_key,
+        icon_key=course.icon_key,
         announcement_ids=None,
         announcements=[AnnouncementResponse.model_validate(item) for item in announcements],
     )

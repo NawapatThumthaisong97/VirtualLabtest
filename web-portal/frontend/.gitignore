@@ -26,3 +26,7 @@ files/
 *.njsproj
 *.sln
 *.sw?
+
+# ไฟล์ออกแบบที่ export มาจากเครื่องมือ design เก็บไว้ดูอ้างอิงในเครื่อง
+# โค้ดจริง port เข้า src/ แล้ว ไม่ต้องเอาขึ้น repo
+prototype/
