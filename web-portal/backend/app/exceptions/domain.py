@@ -29,6 +29,12 @@ class CourseNotFoundError(NotFoundError):
     code = "course_not_found"
 
 
+class LabDocNotFoundError(NotFoundError):
+    """แลปมีอยู่ แต่ยังไม่ได้แนบเอกสาร หรือไฟล์หายไปจาก storage"""
+
+    code = "lab_doc_not_found"
+
+
 # ---------- 409 ----------
 class ConflictError(DomainError):
     """ข้อมูลชนกับที่มีอยู่แล้ว"""
@@ -38,6 +44,21 @@ class ConflictError(DomainError):
 
 class DuplicateOrderNoError(ConflictError):
     code = "duplicate_order_no"
+
+
+# ---------- 401 ----------
+class UnauthorizedError(DomainError):
+    """ยังไม่ได้ล็อกอิน หรือ token ใช้ไม่ได้"""
+
+    code = "unauthorized"
+
+
+class InvalidCredentialsError(UnauthorizedError):
+    code = "invalid_credentials"
+
+
+class InvalidTokenError(UnauthorizedError):
+    code = "invalid_token"
 
 
 # ---------- 403 ----------

@@ -2,7 +2,7 @@
 Database Models (SQLAlchemy)
 """
 from .user import User, UserRole
-from .course import Course
+from .courses import Course
 from .course_image import CourseImage
 from .enrollment import Enrollment, RoleInCourse
 from .lab import Lab, LabStatus

@@ -1,0 +1,238 @@
+/* ---------------------------------------------------------------
+   LabLoader
+   Everything scales from --u (one inner square). Override --brand
+   and --brand-bg from the parent to retheme.
+   --------------------------------------------------------------- */
+
+.scene {
+  --u: 32px;
+  --dur: 3s;
+  --pulse: 1.5s;
+
+  /* one unit of chrome: gap, padding and border all share it */
+  --g: calc(var(--u) * 0.22);
+
+  /* how far the claw travels down */
+  --drop: calc(var(--u) * 0.47);
+
+  --brand: #185fa5;
+  --brand-bg: #ffffff;
+
+  color: var(--brand);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ---------- claw rig ---------- */
+
+.claw {
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: calc(var(--u) * 3.1);
+  height: auto;
+  animation: rig var(--dur) cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@keyframes rig {
+  0%,
+  8% {
+    transform: translateY(0);
+  }
+  32%,
+  58% {
+    transform: translateY(var(--drop));
+  }
+  84%,
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.arm {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-box: view-box;
+}
+
+/* the origin is the top of each path — the hinge the arm swings on */
+.armLeft {
+  transform-origin: 42px 63px;
+  animation: swingLeft var(--dur) cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.armRight {
+  transform-origin: 58px 63px;
+  animation: swingRight var(--dur) cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@keyframes swingLeft {
+  0%,
+  10% {
+    transform: rotate(0deg);
+  }
+  30% {
+    transform: rotate(-21deg);
+  }
+  42%,
+  60% {
+    transform: rotate(9deg);
+  }
+  88%,
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes swingRight {
+  0%,
+  10% {
+    transform: rotate(0deg);
+  }
+  30% {
+    transform: rotate(21deg);
+  }
+  42%,
+  60% {
+    transform: rotate(-9deg);
+  }
+  88%,
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+/* ---------- container ---------- */
+
+.box {
+  position: relative;
+  z-index: 2;
+  margin-top: calc(var(--u) * -0.06);
+  padding: var(--g);
+  border: var(--g) solid currentColor;
+  background: var(--brand-bg);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--g);
+  transform-origin: center bottom;
+  animation: jolt var(--dur) cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+/* the squash lands 2% after the claw closes, so it reads as caused by it */
+@keyframes jolt {
+  0%,
+  38% {
+    transform: scale(1, 1);
+  }
+  44% {
+    transform: scale(1.04, 0.93);
+  }
+  52% {
+    transform: scale(0.99, 1.02);
+  }
+  60%,
+  100% {
+    transform: scale(1, 1);
+  }
+}
+
+.box i {
+  display: block;
+  width: var(--u);
+  height: var(--u);
+  background: currentColor;
+  animation: pulse var(--pulse) ease-in-out infinite;
+}
+
+/* clockwise chase: TL, TR, BR, BL — note 4 comes before 3 in DOM order */
+.box i:nth-child(1) {
+  animation-delay: 0s;
+}
+.box i:nth-child(2) {
+  animation-delay: calc(var(--pulse) * -0.75);
+}
+.box i:nth-child(4) {
+  animation-delay: calc(var(--pulse) * -0.5);
+}
+.box i:nth-child(3) {
+  animation-delay: calc(var(--pulse) * -0.25);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.16;
+    transform: scale(0.82);
+  }
+}
+
+/* ---------- caption ---------- */
+
+.captionSlot {
+  margin: 2rem 0 0;
+  width: 340px;
+  min-height: 3.2em;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.55;
+  text-align: center;
+  color: #2c2c2a;
+}
+
+.captionLine {
+  animation: captionFade var(--caption-dur, 5s) ease both;
+}
+
+@keyframes captionFade {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  8%,
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- motion preferences ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .claw,
+  .armLeft,
+  .armRight,
+  .box {
+    animation: none;
+  }
+  .box i {
+    animation-duration: 3s;
+  }
+  .captionLine {
+    animation: none;
+    opacity: 1;
+  }
+}

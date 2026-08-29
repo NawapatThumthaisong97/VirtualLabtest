@@ -175,4 +175,28 @@ erDiagram
 **ตกลงกันแล้ว แต่ยังไม่ migrate** (ต้องทำ Alembic migration + แก้ model):
 - `labs.brief_detail TEXT NULL` — คำอธิบายสั้นต่อแลป (คอลัมน์ Brief detail หน้า S3)
 - ตาราง `course_documents` — เอกสาร PDF ระดับวิชาที่อาจารย์อัป
-- `sessions.service_type` ยุบจาก `lab/compute/sandbox/ai_job` เหลือ `lab/compute_service` (main ยังเป็น enum 4 ค่า)
+
+## ⚠️ อ่านก่อน pull: schema เปลี่ยน ต้อง drop DB
+
+**1. `sessions.service_type`** — ยุบจาก 4 ค่า (`lab/compute/sandbox/ai_job`) เหลือ 2 ค่า (`LAB`/`COMPUTE_SERVICE`)
+
+**2. `users.password_hash`** — คอลัมน์ใหม่ (nullable) สำหรับ login ด้วย student_id/email
+seed จะตั้งรหัสเริ่มต้นให้ user ตัวอย่างทุกคนเป็น `labpass123`
+ปล่อย nullable ไว้เพราะวันที่ย้ายไป SSO user ที่สร้างจาก SSO จะไม่มีรหัสผ่าน
+
+**ใครที่มี DB อยู่ในเครื่องแล้วต้อง drop ทิ้งแล้วสร้างใหม่** ไม่งั้นจะ error ตอน
+insert session เพราะค่าเก่ายังค้างอยู่ใน enum type ของ Postgres — ต่างจากการเพิ่ม
+คอลัมน์ตรงที่ **Postgres ลบค่าออกจาก enum ที่มีอยู่แล้วไม่ได้** ต้องสร้าง type ใหม่
+ซึ่งตอนนี้ยังไม่มี Alembic เลยใช้วิธี drop แล้ว seed ใหม่ (ข้อมูลเป็น seed ทั้งหมด
+ไม่มีของจริงให้เสียหาย)
+
+```bash
+docker exec virtual_lab_db psql -U postgres -c "DROP DATABASE virtual_lab;" -c "CREATE DATABASE virtual_lab;"
+
+cd web-portal/backend
+PYTHONIOENCODING=utf-8 python script/init_db.py
+PYTHONIOENCODING=utf-8 python script/run_seed.py
+```
+
+> `PYTHONIOENCODING=utf-8` จำเป็นบน Windows — สคริปต์ print emoji แล้ว console
+> codepage ไทย (cp874) encode ไม่ได้ จะตายตั้งแต่บรรทัดแรกก่อนสร้างตารางด้วยซ้ำ

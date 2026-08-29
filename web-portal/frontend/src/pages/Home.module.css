@@ -1,0 +1,26 @@
+/* ---------------------------------------------------------------
+   Home
+   Panes that appear on a tab switch rise into place. Keyed on the
+   active tab in Home.tsx so the animation re-runs each switch.
+   --------------------------------------------------------------- */
+
+.fadeUp {
+  animation: fade-up 330ms ease-out both;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fadeUp {
+    animation: none;
+  }
+}

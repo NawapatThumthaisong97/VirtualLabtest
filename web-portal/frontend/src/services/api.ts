@@ -4,7 +4,9 @@
  */
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+// exported because some endpoints return a file, not JSON — those are handed
+// to the browser as a plain URL (<img>, <iframe>, pdf.js) instead of axios
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 // Create axios instance
 export const apiClient = axios.create({

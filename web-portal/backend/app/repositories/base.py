@@ -19,6 +19,12 @@ class BaseRepository(Generic[T]):
             stmt = stmt.where(self.model.deleted_at.is_(None))
         return self.db.execute(stmt).scalar_one_or_none()
 
+    def get_all(self) -> list[T]:
+        stmt = select(self.model)
+        if hasattr(self.model, "deleted_at"):
+            stmt = stmt.where(self.model.deleted_at.is_(None))
+        return list(self.db.execute(stmt).scalars().all())
+
     def save(self, entity: T) -> T:
         self.db.add(entity)
         self.db.flush()
@@ -26,4 +32,8 @@ class BaseRepository(Generic[T]):
 
     def soft_delete(self, entity: T) -> None:
         entity.deleted_at = datetime.now(timezone.utc)
+        self.db.flush()
+
+    def hard_delete(self, entity: T) -> None:
+        self.db.delete(entity)
         self.db.flush()

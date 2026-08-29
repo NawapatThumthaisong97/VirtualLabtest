@@ -8,10 +8,14 @@ import enum
 
 
 class ServiceType(enum.Enum):
+    """
+    ยุบจาก 4 ค่าเดิม (lab/compute/sandbox/ai_job) เหลือ 2 ตาม docs/DB_DIAGRAM.md
+
+    compute/sandbox/ai_job แยกกันแล้วไม่ได้ใช้ต่างกันจริง ทั้งสามคือ "งานที่
+    ไม่ผูกกับแลป" เหมือนกันหมด (lab_id = NULL) เลยรวมเป็น compute_service
+    """
     LAB = "lab"
-    COMPUTE = "compute"
-    SANDBOX = "sandbox"
-    AI_JOB = "ai_job"
+    COMPUTE_SERVICE = "compute_service"
 
 
 class SessionStatus(enum.Enum):

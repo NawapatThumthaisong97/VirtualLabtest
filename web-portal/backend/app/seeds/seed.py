@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
-from app.models.course import Course
+from app.models.courses import Course
 from app.models.enrollment import Enrollment, RoleInCourse
 from app.models.lab import Lab, LabStatus
 from app.models.lab_image import LabImage, ImageStatus
@@ -11,6 +11,10 @@ from app.models.session import Session as ComputeSession, ServiceType, SessionSt
 from app.models.usage_record import UsageRecord
 from app.models.quota import Quota, QuotaPeriod
 from app.models.announcement import Announcement
+from app.utils.security import hash_password
+
+
+SEED_PASSWORD = "labpass123"
 
 
 def seed_database(db: Session):
@@ -28,6 +32,7 @@ def seed_database(db: Session):
         id=uuid.uuid4(),
         email="admin@example.com",
         name="Admin User",
+        password_hash=hash_password(SEED_PASSWORD),
         role=UserRole.ADMIN,
     )
     
@@ -35,6 +40,7 @@ def seed_database(db: Session):
         id=uuid.uuid4(),
         email="instructor@example.com",
         name="Dr. John Instructor",
+        password_hash=hash_password(SEED_PASSWORD),
         role=UserRole.INSTRUCTOR,
     )
     
@@ -43,6 +49,7 @@ def seed_database(db: Session):
         email="student1@example.com",
         name="Alice Student",
         student_id="6420001001",
+        password_hash=hash_password(SEED_PASSWORD),
         role=UserRole.STUDENT,
     )
     
@@ -51,6 +58,7 @@ def seed_database(db: Session):
         email="student2@example.com",
         name="Bob Student",
         student_id="6420001002",
+        password_hash=hash_password(SEED_PASSWORD),
         role=UserRole.STUDENT,
     )
     
@@ -216,7 +224,7 @@ def seed_database(db: Session):
         id=uuid.uuid4(),
         user_id=student1.id,
         lab_id=None,
-        service_type=ServiceType.SANDBOX,
+        service_type=ServiceType.COMPUTE_SERVICE,
         is_remote=True,
         is_cloud=True,
         sky_cluster_name="sky-cluster-1",
