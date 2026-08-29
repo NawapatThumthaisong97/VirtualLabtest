@@ -14,6 +14,9 @@ class AnnouncementResponse(CamelModel):
     id: UUID
     message: str
     created_at: datetime | None = None
+    # ชื่อคนโพสต์ — หน้า course detail แสดง "ใครประกาศ" ไม่ใช่แค่ข้อความลอย ๆ
+    # เก็บเป็นชื่อ ไม่ใช่ author_id เพราะ frontend ไม่มีเส้นแลก id -> ชื่อ
+    author_name: str | None = None
 
 
 class CourseResponse(CamelModel):
