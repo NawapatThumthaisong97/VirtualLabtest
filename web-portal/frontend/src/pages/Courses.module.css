@@ -1,0 +1,153 @@
+.page {
+	min-height: calc(100vh - 3.5rem);
+	background: #fafaf8;
+	color: #20201e;
+}
+
+.header {
+	width: 100%;
+	border-bottom: 1px solid #deddd8;
+	background: rgb(255 253 253 / 96%);
+	box-shadow: 0 3px 7px rgb(40 43 48 / 13%);
+}
+
+.headerInner {
+	display: flex;
+	width: min(100%, 1200px);
+	height: 3.55rem;
+	margin: 0 auto;
+	align-items: center;
+	gap: 0.55rem;
+	padding: 0 1.5rem;
+}
+
+.headerLogo {
+	width: 1.65rem;
+	height: 1.65rem;
+	object-fit: contain;
+}
+
+.header h1 {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 700;
+	line-height: 1;
+	}
+
+.content {
+	padding: 2.75rem clamp(1.25rem, 5vw, 4rem) 5rem;
+}
+
+.courseLabel {
+	color: #185fa5;
+	font-size: 0.68rem;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+
+.grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 1.25rem;
+	width: min(100%, 1120px);
+	margin: 0 auto;
+}
+
+.card {
+	overflow: hidden;
+	border: 1px solid #e5e3dc;
+	background: #fff;
+	box-shadow: 0 8px 22px rgb(35 45 52 / 5%);
+	transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.card:hover {
+	transform: translateY(-3px);
+	box-shadow: 0 14px 28px rgb(35 45 52 / 10%);
+}
+
+.cover {
+	display: grid;
+	min-height: 9.25rem;
+	place-items: center;
+	background: linear-gradient(125deg, #a5d8f2 0%, #1b8ed1 48%, #152d8e 100%);
+	background-position: center;
+	background-size: cover;
+}
+
+.card:nth-child(3n + 2) .cover {
+	background: linear-gradient(125deg, #0b3d91 0%, #08a5c7 54%, #082d72 100%);
+}
+
+.card:nth-child(3n) .cover {
+	background: linear-gradient(125deg, #20176d 0%, #3033b8 48%, #9edcf0 100%);
+}
+
+.iconTile {
+	display: grid;
+	width: 3.7rem;
+	height: 3.7rem;
+	place-items: center;
+	border-radius: 0.3rem;
+	background: rgb(255 255 255 / 84%);
+	color: #082f65;
+	box-shadow: 0 7px 17px rgb(5 31 88 / 17%);
+}
+
+.cardBody {
+	min-height: 6.5rem;
+	padding: 0.95rem 1rem 1.05rem;
+}
+
+.cardBody h2 {
+	margin: 0.22rem 0 0.2rem;
+	font-size: 1rem;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.cardBody p {
+	margin: 0;
+	color: #185fa5;
+	font-size: 0.72rem;
+}
+
+.message {
+	display: grid;
+	min-height: 15rem;
+	width: min(100%, 1120px);
+	margin: 0 auto;
+	place-items: center;
+	border: 1px dashed #cbc9c1;
+	color: #77756e;
+	font-size: 0.95rem;
+}
+
+@media (max-width: 760px) {
+	.page {
+		min-height: calc(100vh - 3.5rem);
+	}
+
+	.headerInner {
+		padding: 0 1rem;
+	}
+
+	.content {
+		padding-top: 2rem;
+	}
+
+	.grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 500px) {
+	.grid {
+		grid-template-columns: 1fr;
+	}
+
+	.cover {
+		min-height: 8rem;
+	}
+}

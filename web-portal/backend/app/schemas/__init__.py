@@ -11,6 +11,7 @@ from .lab_schema import (
     LabResponse,
     LabUpdateRequest,
 )
+from .course_schema import CourseCreateRequest, CourseResponse, CourseUpdateRequest
 
 __all__ = [
     "ExampleBase",
@@ -25,4 +26,7 @@ __all__ = [
     "LabDetailResponse",
     "LabResponse",
     "LabUpdateRequest",
+    "CourseCreateRequest",
+    "CourseResponse",
+    "CourseUpdateRequest",
 ]

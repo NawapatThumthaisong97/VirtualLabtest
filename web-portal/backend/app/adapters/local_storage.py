@@ -6,6 +6,7 @@ Local file storage adapter
 เปลี่ยนแค่ adapter ตัวนี้ตัวเดียว — DB, service และ frontend ไม่ต้องแก้เลย
 """
 from pathlib import Path
+from typing import BinaryIO
 
 from app.configs.settings import settings
 from app.exceptions.domain import ValidationError
@@ -13,7 +14,10 @@ from app.exceptions.domain import ValidationError
 
 class LocalStorage:
     def __init__(self, root: str | None = None):
-        self.root = Path(root or settings.STORAGE_ROOT).resolve()
+        configured_root = Path(root or settings.STORAGE_ROOT)
+        if not configured_root.is_absolute():
+            configured_root = Path(__file__).resolve().parents[2] / configured_root
+        self.root = configured_root.resolve()
 
     def resolve(self, key: str) -> Path:
         """
@@ -30,6 +34,14 @@ class LocalStorage:
 
     def exists(self, key: str) -> bool:
         return self.resolve(key).is_file()
+
+    def save(self, key: str, source: BinaryIO) -> Path:
+        target = self.resolve(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as destination:
+            while chunk := source.read(1024 * 1024):
+                destination.write(chunk)
+        return target
 
 
 local_storage = LocalStorage()

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
-from app.models.course import Course
+from app.models.courses import Course
 from app.models.enrollment import Enrollment, RoleInCourse
 from app.models.lab import Lab, LabStatus
 from app.models.lab_image import LabImage, ImageStatus
