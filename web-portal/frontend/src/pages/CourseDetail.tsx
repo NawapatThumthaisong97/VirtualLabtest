@@ -129,47 +129,66 @@ export default function CourseDetailPage() {
         </div>
 
         <section className={styles.tableCard}>
-          <h2 className={styles.cardTitle}>My Lab work</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>All lab task</th>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Expired date</th>
-                <th>Status lab</th>
-              </tr>
-            </thead>
-            <tbody>
-              {labTasks.length > 0 ? (
-                labTasks.map((lab: { id: string; orderNo: number; title: string; status: string; dueAt: string | null }) => {
-                  const statusMeta = getLabStatusMeta(lab.status);
+          <div className={styles.tableHeader}>
+            <h2 className={styles.cardTitle}>My Lab work</h2>
+          </div>
 
-                  return (
-                    <tr key={lab.id}>
-                      <td>{lab.orderNo ? `Lab ${lab.orderNo}` : 'Lab'}</td>
-                      <td>{lab.title}</td>
-                      <td>{lab.status === 'published' ? 'incomplete' : lab.status}</td>
-                      <td>{lab.dueAt ? new Date(lab.dueAt).toLocaleDateString('en-GB') : '-'}</td>
-                      <td>
-                        <div className={styles.statusCell}>
-                          <span className={`${styles.statusDot} ${styles[statusMeta.tone]}`} aria-hidden="true" />
-                          <span className={styles.statusText}>{statusMeta.label}</span>
-                          <Link to={`/labs/${lab.id}`} className={styles.statusAction}>
-                            {statusMeta.action}
-                          </Link>
-                        </div>
-                      </td>
+          <div className={styles.tableContentWrapper}>
+            <div className={styles.tabSidebar}>
+              <button type="button" className={`${styles.tabButton} ${styles.activeTab}`}>
+                All labs
+              </button>
+              <button type="button" className={styles.tabButton}>
+                Incomplete
+              </button>
+              <button type="button" className={styles.tabButton}>
+                Complete
+              </button>
+            </div>
+
+            <div className={styles.tableWrapper}>
+              <table>
+                <thead>
+                  <tr>
+                    <th className={styles.firstColumn}>Lab</th>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Expired date</th>
+                    <th className={styles.actionColumn}>Instruction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {labTasks.length > 0 ? (
+                    labTasks.map((lab: { id: string; orderNo: number; title: string; status: string; dueAt: string | null; instruction: string }) => {
+                      const statusMeta = getLabStatusMeta(lab.status);
+
+                      return (
+                        <tr key={lab.id}>
+                          <td className={styles.firstColumn}>{lab.orderNo ? `Lab ${lab.orderNo}` : 'Lab'}</td>
+                          <td>{lab.title}</td>
+                          <td>
+                            <span className={`${styles.statusTag} ${styles[statusMeta.tone]}`}>
+                              {lab.status === 'published' ? 'incomplete' : lab.status}
+                            </span>
+                          </td>
+                          <td>{lab.dueAt ? new Date(lab.dueAt).toLocaleDateString('en-GB') : '-'}</td>
+                          <td className={styles.actionColumn}>
+                            <Link to={`/labs/${lab.id}`} className={styles.instructionButton}>
+                              Instruction
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className={styles.emptyTable}>ยังไม่มี Lab สำหรับรายวิชานี้</td>
                     </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={5} className={styles.emptyTable}>ยังไม่มี Lab สำหรับรายวิชานี้</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
       </main>
     </div>
