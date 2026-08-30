@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
 from app.controllers.lab_controller import LabController
+from app.middlewares.auth import get_current_user
 from app.models.lab import LabStatus
+from app.models.user import User
 from app.repositories.lab_repository import LabRepository
 from app.schemas.lab_schema import (
     LabCreateRequest,
@@ -21,6 +23,7 @@ from app.services.lab_service import LabService
 
 router = APIRouter()
 
+
 def get_controller(db: Session = Depends(get_db)) -> LabController:
     return LabController(LabService(db, LabRepository(db)))
 
@@ -29,12 +32,18 @@ def get_controller(db: Session = Depends(get_db)) -> LabController:
 def list_labs(
     course_id: UUID = Query(..., alias="courseId"),
     status: LabStatus | None = Query(None),
+    current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller),
 ):
+    """
+    lab ในวิชา พร้อม progressStatus ของคนที่เรียก
+
+    ต้องล็อกอินเพราะความคืบหน้าเป็นของรายคน ไม่ใช่ข้อมูลกลางของ lab
+    """
     return {
         "success": True,
         "message": "Labs retrieved successfully",
-        "data": controller.get_lab_by_course(course_id, status),
+        "data": controller.get_lab_by_course(course_id, current_user.id, status),
     }
 
 
@@ -66,7 +75,9 @@ def get_lab_doc(lab_id: UUID, controller: LabController = Depends(get_controller
 
 
 @router.post(
-    "", response_model=ApiResponse[LabResponse], status_code=http_status.HTTP_201_CREATED
+    "",
+    response_model=ApiResponse[LabResponse],
+    status_code=http_status.HTTP_201_CREATED,
 )
 def create_lab(
     payload: LabCreateRequest, controller: LabController = Depends(get_controller)

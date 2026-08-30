@@ -4,9 +4,10 @@ from pydantic import Field
 from app.schemas.base import CamelModel
 
 from app.models.lab import LabStatus
+from app.models.lab_progress import ProgressStatus
 
 
-#Fetch information GET methods
+# Fetch information GET methods
 class LabResponse(CamelModel):
     id: UUID
     title: str
@@ -15,6 +16,9 @@ class LabResponse(CamelModel):
     order_no: int
     due_at: datetime | None
     status: LabStatus
+    # ความคืบหน้าของ "คนที่เรียก API" ไม่ใช่ของ lab — คนละคนเรียกได้คนละค่า
+    # None = ยังไม่มีแถวใน lab_progress (ยังไม่เคยเปิดทำ)
+    progress_status: ProgressStatus | None = None
 
 
 class CourseBrief(CamelModel):
@@ -24,6 +28,7 @@ class CourseBrief(CamelModel):
     หัวเรื่องคือ "รหัสวิชา : ชื่อวิชา" เท่านั้น ไม่มีชื่ออาจารย์
     ถ้าหน้าไหนต้องการข้อมูล course มากกว่านี้ ให้ไปเรียก endpoint ของ course เอง
     """
+
     id: UUID
     code: str
     name: str
@@ -37,10 +42,11 @@ class LabDetailResponse(LabResponse):
     ส่วน doc_url ที่ติดมาจาก parent เป็น object key ภายใน (เช่น labs/{id}/doc.pdf)
     ไม่ใช่ URL ที่เบราว์เซอร์เปิดได้ -> ให้เรียก GET /labs/{lab_id}/doc แทน
     """
+
     course: CourseBrief
 
 
-#Sending information POST
+# Sending information POST
 class LabCreateRequest(CamelModel):
     course_id: UUID
     title: str = Field(max_length=255)
@@ -51,10 +57,11 @@ class LabCreateRequest(CamelModel):
     due_at: datetime | None = None
     status: LabStatus = LabStatus.DRAFT
 
-#Alter information PATCH
+
+# Alter information PATCH
 class LabUpdateRequest(CamelModel):
-    #No use to write course_id cause we use only lab_id
-    #ทุก field ต้องมี default None ไม่งั้นกลายเป็น required -> PATCH แก้ field เดียวไม่ได้
+    # No use to write course_id cause we use only lab_id
+    # ทุก field ต้องมี default None ไม่งั้นกลายเป็น required -> PATCH แก้ field เดียวไม่ได้
     title: str | None = Field(None, max_length=255)
     description: str | None = None
     doc_url: str | None = None
@@ -62,4 +69,5 @@ class LabUpdateRequest(CamelModel):
     due_at: datetime | None = None
     status: LabStatus | None = None
 
-#Delete don't require schemas implementation
+
+# Delete don't require schemas implementation

@@ -3,7 +3,8 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.repositories.base import BaseRepository
-from app.models.courses import Course  
+from app.models.courses import Course
+
 
 class CourseRepository(BaseRepository[Course]):
     model = Course
@@ -28,6 +29,12 @@ class CourseRepository(BaseRepository[Course]):
         result = (
             select(self.model)
             .join(Enrollment, Enrollment.course_id == self.model.id)
-            .where(Enrollment.user_id == student_id)
+            .where(
+                Enrollment.user_id == student_id,
+                # เส้นนี้กลายเป็นตัวหลักของหน้า /courses แล้ว วิชาที่ถูกซ่อนไว้
+                # (soft delete) ต้องไม่โผล่กลับมาให้นักศึกษาเห็น
+                self.model.deleted_at.is_(None),
+            )
+            .order_by(self.model.code)
         )
         return list(self.db.execute(result).scalars().all())

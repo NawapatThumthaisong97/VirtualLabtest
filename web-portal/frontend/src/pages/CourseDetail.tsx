@@ -1,40 +1,30 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
+import type { LabSummary, ProgressStatus } from '../services/lab';
 import CoursePageHeader from '../components/CoursePageHeader';
 import styles from './CourseDetail.module.css';
 
-type LabRecord = {
-  id: string;
-  title: string;
-  description?: string | null;
-  status?: string | null;
-  order_no?: number | null;
-  orderNo?: number | null;
-  due_at?: string | null;
-  dueAt?: string | null;
-  doc_url?: string | null;
-  docUrl?: string | null;
-};
+type LabTab = 'all' | 'incomplete' | 'complete';
 
-function getLabStatusMeta(status?: string | null) {
-  const value = (status ?? '').toLowerCase();
+const TABS: { id: LabTab; label: string }[] = [
+  { id: 'all', label: 'All labs' },
+  { id: 'incomplete', label: 'Incomplete' },
+  { id: 'complete', label: 'Complete' },
+];
 
-  if (['running', 'active', 'started', 'ready', 'published', 'completed', 'finished'].includes(value)) {
-    return { label: 'Running', tone: 'green', action: 'View' };
-  }
-
-  if (['starting', 'starting_up', 'initializing', 'activating'].includes(value)) {
-    return { label: 'Starting', tone: 'yellow', action: 'View' };
-  }
-
-  return { label: 'Not running', tone: 'red', action: 'View' };
+/** สถานะที่นักศึกษาสนใจคือ "ตัวเองทำถึงไหน" ไม่ใช่ published/draft ของตัว lab */
+function getProgressMeta(progress: ProgressStatus | null) {
+  if (progress === 'finished') return { label: 'complete', tone: 'green' };
+  if (progress === 'in_progress') return { label: 'in progress', tone: 'yellow' };
+  return { label: 'not started', tone: 'grey' };
 }
 
 export default function CourseDetailPage() {
   const { courseId = '' } = useParams<{ courseId: string }>();
+  const [tab, setTab] = useState<LabTab>('all');
 
   const {
     data: course,
@@ -51,23 +41,24 @@ export default function CourseDetailPage() {
     isPending: labsPending,
   } = useQuery({
     queryKey: ['course-labs', courseId],
-    queryFn: async () => {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/labs?courseId=${courseId}`);
-      const json = await response.json();
-      return Array.isArray(json?.data) ? (json.data as LabRecord[]) : [];
-    },
+    // ผ่าน labService เพื่อให้ apiClient แนบ token ให้ — fetch() ดิบไม่แนบ
+    queryFn: () => labService.listByCourse(courseId),
     enabled: Boolean(courseId),
   });
 
-  const documents = useMemo(() => {
-    if (!labs) return [];
-    return labs.filter((lab: LabRecord) => lab.doc_url || lab.docUrl).map((lab: LabRecord) => ({
-      id: lab.id,
-      title: lab.title,
-      name: lab.title,
-      docUrl: lab.doc_url || lab.docUrl || labService.docUrl(lab.id),
-    }));
-  }, [labs]);
+  const documents = useMemo(
+    () =>
+      labs
+        .filter((lab: LabSummary) => Boolean(lab.docUrl))
+        .map((lab: LabSummary) => ({
+          id: lab.id,
+          title: lab.title,
+          // docUrl ที่ backend ส่งมาเป็น object key (labs/{id}/doc.pdf) ไม่ใช่ URL
+          // ที่เบราว์เซอร์เปิดได้ ต้องแปลงเป็นเส้น /labs/{id}/doc เสมอ
+          href: labService.docUrl(lab.id),
+        })),
+    [labs]
+  );
 
   if (isPending || labsPending) {
     return <div className={styles.pageMessage}>กำลังโหลดข้อมูลรายวิชา...</div>;
@@ -77,14 +68,20 @@ export default function CourseDetailPage() {
     return <div className={styles.pageMessage}>ไม่พบข้อมูลรายวิชา หรือโหลดข้อมูลไม่สำเร็จ</div>;
   }
 
-  const labTasks = (labs ?? []).map((lab: LabRecord) => ({
-    id: lab.id,
-    title: lab.title,
-    status: lab.status ?? 'draft',
-    orderNo: lab.order_no ?? lab.orderNo ?? 0,
-    dueAt: lab.due_at ?? lab.dueAt ?? null,
-    instruction: lab.description ?? 'No description',
-  }));
+  const labTasks = labs
+    .map((lab: LabSummary) => ({
+      id: lab.id,
+      title: lab.title,
+      progress: lab.progressStatus ?? null,
+      orderNo: lab.orderNo ?? 0,
+      dueAt: lab.dueAt ?? null,
+    }))
+    // lab ที่ยังไม่เคยเปิดทำ (progress = null) นับเป็น incomplete เหมือนกัน
+    .filter((lab) => {
+      if (tab === 'complete') return lab.progress === 'finished';
+      if (tab === 'incomplete') return lab.progress !== 'finished';
+      return true;
+    });
 
   return (
     <div className={styles.pageShell}>
@@ -96,9 +93,9 @@ export default function CourseDetailPage() {
             <h2 className={styles.cardTitle}>Documents</h2>
             <ul className={styles.docList}>
               {documents.length > 0 ? (
-                documents.map((doc: { id: string; title: string; docUrl: string }) => (
+                documents.map((doc: { id: string; title: string; href: string }) => (
                   <li key={doc.id}>
-                    <a href={doc.docUrl} target="_blank" rel="noreferrer">
+                    <a href={doc.href} target="_blank" rel="noreferrer">
                       {doc.title}
                     </a>
                     <span>{course.code}</span>
@@ -116,9 +113,16 @@ export default function CourseDetailPage() {
               {course.announcements.length > 0 ? (
                 <>
                   {course.announcements.map((item) => (
-                    <p key={item.id} className={styles.announcementText}>
-                      {item.message}
-                    </p>
+                    <div key={item.id} className={styles.announcementItem}>
+                      <p className={styles.announcementAuthor}>
+                        {/* ประกาศเก่าที่ยังไม่มี author ให้ตกมาที่ชื่ออาจารย์ประจำวิชา */}
+                        {item.authorName ?? course.lecturerName}
+                        {item.createdAt
+                          ? ` · ${new Date(item.createdAt).toLocaleDateString('en-GB')}`
+                          : ''}
+                      </p>
+                      <p className={styles.announcementText}>{item.message}</p>
+                    </div>
                   ))}
                 </>
               ) : (
@@ -135,15 +139,16 @@ export default function CourseDetailPage() {
 
           <div className={styles.tableContentWrapper}>
             <div className={styles.tabSidebar}>
-              <button type="button" className={`${styles.tabButton} ${styles.activeTab}`}>
-                All labs
-              </button>
-              <button type="button" className={styles.tabButton}>
-                Incomplete
-              </button>
-              <button type="button" className={styles.tabButton}>
-                Complete
-              </button>
+              {TABS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setTab(item.id)}
+                  className={`${styles.tabButton} ${tab === item.id ? styles.activeTab : ''}`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
 
             <div className={styles.tableWrapper}>
@@ -159,8 +164,8 @@ export default function CourseDetailPage() {
                 </thead>
                 <tbody>
                   {labTasks.length > 0 ? (
-                    labTasks.map((lab: { id: string; orderNo: number; title: string; status: string; dueAt: string | null; instruction: string }) => {
-                      const statusMeta = getLabStatusMeta(lab.status);
+                    labTasks.map((lab) => {
+                      const statusMeta = getProgressMeta(lab.progress);
 
                       return (
                         <tr key={lab.id}>
@@ -168,7 +173,7 @@ export default function CourseDetailPage() {
                           <td>{lab.title}</td>
                           <td>
                             <span className={`${styles.statusTag} ${styles[statusMeta.tone]}`}>
-                              {lab.status === 'published' ? 'incomplete' : lab.status}
+                              {statusMeta.label}
                             </span>
                           </td>
                           <td>{lab.dueAt ? new Date(lab.dueAt).toLocaleDateString('en-GB') : '-'}</td>
@@ -182,7 +187,11 @@ export default function CourseDetailPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={5} className={styles.emptyTable}>ยังไม่มี Lab สำหรับรายวิชานี้</td>
+                      <td colSpan={5} className={styles.emptyTable}>
+                        {labs.length > 0
+                          ? 'ไม่มี lab ในหมวดนี้'
+                          : 'ยังไม่มี Lab สำหรับรายวิชานี้'}
+                      </td>
                     </tr>
                   )}
                 </tbody>

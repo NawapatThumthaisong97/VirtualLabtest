@@ -3,7 +3,8 @@
   min-height: 100vh;
   background: #f5f7fa;
   color: #17202b;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif;
+  /* ไม่ประกาศฟอนต์เองแล้ว — รับจาก body ที่ index.css ตั้งไว้ที่เดียว
+     ของเดิมบังคับเป็น system font หน้านี้เลยคนละฟอนต์กับหน้า lab ที่ใช้ font-sans */
 }
 
 .content {
@@ -22,7 +23,7 @@
 .tableCard {
   background: #ffffff;
   border: 1px solid #e8eaed;
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -38,14 +39,15 @@
 
 .cardTitle {
   margin: 0;
-  padding: 18px 20px 16px;
-  font-size: 1.08rem;
+  padding: 20px 20px 16px;
+  font-size: 1.15rem;
   font-weight: 700;
-  color: #17202b;
-  line-height: 1.5;
-  letter-spacing: -0.02px;
-  background: #fafbfc;
-  border-bottom: 1px solid #e8eaed;
+  /* หัวการ์ดวางบนพื้นขาว ไม่คาดแถบเทา — แถบเทาทำให้หัวข้อดูจมและอ่านเป็นสีเทาไปด้วย */
+  color: #16324f;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  background: transparent;
+  border-bottom: 1px solid #eceef1;
 }
 
 .docList {
@@ -99,16 +101,36 @@
 }
 
 .announcementBox {
+  /* ไม่มีกล่องเทาซ้อนในการ์ดแล้ว ให้ประกาศไหลบนพื้นขาวและกินระยะขอบ
+     เท่ากับ .docList ฝั่งซ้าย ทั้งสองการ์ดจะได้เรียงตรงกัน */
   min-height: 140px;
-  margin: 0 18px 18px;
-  padding: 18px 20px;
-  border: 1px solid #f3f4f6;
-  background: #fafbfc;
-  border-radius: 10px;
+  margin: 0;
+  padding: 0 20px;
+  border: none;
+  background: transparent;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  gap: 14px;
+  gap: 0;
+}
+
+.announcementItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.announcementItem:last-child {
+  border-bottom: none;
+}
+
+.announcementAuthor {
+  margin: 0;
+  color: #17202b;
+  font-size: 0.86rem;
+  font-weight: 700;
 }
 
 .announcementText {
@@ -121,6 +143,7 @@
 
 .noAnnouncement {
   margin: 0;
+  padding: 14px 0;
   color: #9e9e9e;
   font-size: 0.94rem;
   font-weight: 400;
@@ -131,7 +154,7 @@
   padding: 0 0 12px;
   overflow: hidden;
   border: 1px solid #e8eaed;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   display: flex;
@@ -144,29 +167,8 @@
 }
 
 .tableHeader {
-  border-bottom: 1px solid #e8eaed;
+  /* เส้นคั่นอยู่ที่ .cardTitle แล้ว ถ้าใส่ตรงนี้ด้วยจะกลายเป็นเส้นคู่ */
   padding: 0;
-}
-
-.tableCard .cardTitle {
-  padding-left: 20px;
-  padding-right: 20px;
-  padding-top: 18px;
-  padding-bottom: 16px;
-  position: relative;
-  background: #fafbfc;
-  border-bottom: 1px solid #e8eaed;
-}
-
-.tableCard .cardTitle::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 18px;
-  bottom: 18px;
-  width: 3px;
-  background: #1976d2;
-  border-radius: 0 1.5px 1.5px 0;
 }
 
 .tableContentWrapper {
@@ -312,6 +314,12 @@
 .statusTag.green {
   background: #e8f5e9;
   color: #2e7d32;
+}
+
+/* ยังไม่เริ่ม — ไม่ใช่เรื่องผิดปกติ เลยไม่ใช้แดงเหมือน error */
+.statusTag.grey {
+  background: #eceff1;
+  color: #546e7a;
 }
 
 .instructionButton {
