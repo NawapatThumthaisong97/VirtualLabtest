@@ -11,6 +11,7 @@ from app.exceptions.domain import (
     LabNotFoundError,
 )
 from app.models.lab import Lab, LabStatus
+from app.models.lab_progress import ProgressStatus
 from app.repositories.lab_repository import LabRepository
 from app.schemas import LabCreateRequest, LabUpdateRequest, LabResponse
 
@@ -20,11 +21,16 @@ class LabService:
         self.db = db
         self.lab_repo = lab_repo
 
-    #GET
+    # GET
     def get_lab_by_course(
         self, course_id: UUID, status: LabStatus | None = None
     ) -> list[Lab]:
         return self.lab_repo.find_by_course(course_id, status)
+
+    def get_lab_by_course_for_user(
+        self, course_id: UUID, user_id: UUID, status: LabStatus | None = None
+    ) -> list[tuple[Lab, ProgressStatus | None]]:
+        return self.lab_repo.find_by_course_with_progress(course_id, user_id, status)
 
     def get_lab_by_id(self, lab_id: UUID) -> Lab:
         lab = self.lab_repo.find_by_id(lab_id)
@@ -52,7 +58,7 @@ class LabService:
             )
         return path
 
-    #POST
+    # POST
     def create_lab(self, payload: LabCreateRequest) -> Lab:
         lab = Lab(**payload.model_dump())
         try:
@@ -65,7 +71,7 @@ class LabService:
             ) from e
         return lab
 
-    #PATCH
+    # PATCH
     def update_lab(self, lab_id: UUID, payload: LabUpdateRequest) -> Lab:
         lab = self.lab_repo.find_by_id(lab_id)
         if lab is None:
@@ -84,7 +90,7 @@ class LabService:
             ) from e
         return lab
 
-    #DELETE
+    # DELETE
     def delete_lab(self, lab_id: UUID) -> None:
         # Find object entity that we want to delete then pass to soft-delete as entity parameter
         lab = self.lab_repo.find_by_id(lab_id)
