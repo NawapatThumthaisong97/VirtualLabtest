@@ -25,6 +25,9 @@ export interface LabDetail {
   course: CourseBrief;
 }
 
+/** ความคืบหน้าของผู้ใช้ที่ล็อกอิน — null คือยังไม่เคยเปิดทำ lab นี้ */
+export type ProgressStatus = 'not_started' | 'in_progress' | 'finished';
+
 /** `GET /api/labs?courseId=` — LabResponse (ไม่มี course ติดมาเหมือน detail) */
 export interface LabSummary {
   id: string;
@@ -34,6 +37,7 @@ export interface LabSummary {
   orderNo: number;
   dueAt: string | null;
   status: LabStatus;
+  progressStatus: ProgressStatus | null;
 }
 
 export interface ApiResponse<T> {

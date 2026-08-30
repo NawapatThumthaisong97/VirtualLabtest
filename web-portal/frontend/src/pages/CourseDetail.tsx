@@ -1,28 +1,30 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
-import type { LabSummary } from '../services/lab';
+import type { LabSummary, ProgressStatus } from '../services/lab';
 import CoursePageHeader from '../components/CoursePageHeader';
 import styles from './CourseDetail.module.css';
 
-function getLabStatusMeta(status?: string | null) {
-  const value = (status ?? '').toLowerCase();
+type LabTab = 'all' | 'incomplete' | 'complete';
 
-  if (['running', 'active', 'started', 'ready', 'published', 'completed', 'finished'].includes(value)) {
-    return { label: 'Running', tone: 'green', action: 'View' };
-  }
+const TABS: { id: LabTab; label: string }[] = [
+  { id: 'all', label: 'All labs' },
+  { id: 'incomplete', label: 'Incomplete' },
+  { id: 'complete', label: 'Complete' },
+];
 
-  if (['starting', 'starting_up', 'initializing', 'activating'].includes(value)) {
-    return { label: 'Starting', tone: 'yellow', action: 'View' };
-  }
-
-  return { label: 'Not running', tone: 'red', action: 'View' };
+/** สถานะที่นักศึกษาสนใจคือ "ตัวเองทำถึงไหน" ไม่ใช่ published/draft ของตัว lab */
+function getProgressMeta(progress: ProgressStatus | null) {
+  if (progress === 'finished') return { label: 'complete', tone: 'green' };
+  if (progress === 'in_progress') return { label: 'in progress', tone: 'yellow' };
+  return { label: 'not started', tone: 'grey' };
 }
 
 export default function CourseDetailPage() {
   const { courseId = '' } = useParams<{ courseId: string }>();
+  const [tab, setTab] = useState<LabTab>('all');
 
   const {
     data: course,
@@ -66,14 +68,20 @@ export default function CourseDetailPage() {
     return <div className={styles.pageMessage}>ไม่พบข้อมูลรายวิชา หรือโหลดข้อมูลไม่สำเร็จ</div>;
   }
 
-  const labTasks = labs.map((lab: LabSummary) => ({
-    id: lab.id,
-    title: lab.title,
-    status: lab.status ?? 'draft',
-    orderNo: lab.orderNo ?? 0,
-    dueAt: lab.dueAt ?? null,
-    instruction: lab.description ?? 'No description',
-  }));
+  const labTasks = labs
+    .map((lab: LabSummary) => ({
+      id: lab.id,
+      title: lab.title,
+      progress: lab.progressStatus ?? null,
+      orderNo: lab.orderNo ?? 0,
+      dueAt: lab.dueAt ?? null,
+    }))
+    // lab ที่ยังไม่เคยเปิดทำ (progress = null) นับเป็น incomplete เหมือนกัน
+    .filter((lab) => {
+      if (tab === 'complete') return lab.progress === 'finished';
+      if (tab === 'incomplete') return lab.progress !== 'finished';
+      return true;
+    });
 
   return (
     <div className={styles.pageShell}>
@@ -131,15 +139,16 @@ export default function CourseDetailPage() {
 
           <div className={styles.tableContentWrapper}>
             <div className={styles.tabSidebar}>
-              <button type="button" className={`${styles.tabButton} ${styles.activeTab}`}>
-                All labs
-              </button>
-              <button type="button" className={styles.tabButton}>
-                Incomplete
-              </button>
-              <button type="button" className={styles.tabButton}>
-                Complete
-              </button>
+              {TABS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setTab(item.id)}
+                  className={`${styles.tabButton} ${tab === item.id ? styles.activeTab : ''}`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
 
             <div className={styles.tableWrapper}>
@@ -155,8 +164,8 @@ export default function CourseDetailPage() {
                 </thead>
                 <tbody>
                   {labTasks.length > 0 ? (
-                    labTasks.map((lab: { id: string; orderNo: number; title: string; status: string; dueAt: string | null; instruction: string }) => {
-                      const statusMeta = getLabStatusMeta(lab.status);
+                    labTasks.map((lab) => {
+                      const statusMeta = getProgressMeta(lab.progress);
 
                       return (
                         <tr key={lab.id}>
@@ -164,7 +173,7 @@ export default function CourseDetailPage() {
                           <td>{lab.title}</td>
                           <td>
                             <span className={`${styles.statusTag} ${styles[statusMeta.tone]}`}>
-                              {lab.status === 'published' ? 'incomplete' : lab.status}
+                              {statusMeta.label}
                             </span>
                           </td>
                           <td>{lab.dueAt ? new Date(lab.dueAt).toLocaleDateString('en-GB') : '-'}</td>
@@ -178,7 +187,11 @@ export default function CourseDetailPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={5} className={styles.emptyTable}>ยังไม่มี Lab สำหรับรายวิชานี้</td>
+                      <td colSpan={5} className={styles.emptyTable}>
+                        {labs.length > 0
+                          ? 'ไม่มี lab ในหมวดนี้'
+                          : 'ยังไม่มี Lab สำหรับรายวิชานี้'}
+                      </td>
                     </tr>
                   )}
                 </tbody>
