@@ -1,5 +1,45 @@
+# Environment variables (contains secrets)
+.env
+
 # ไฟล์ที่อัปโหลดตอน runtime (เอกสารแลป) — เก็บโฟลเดอร์ไว้ แต่ไม่เอาไฟล์ขึ้น repo
 # ต้องเป็น storage/* ไม่ใช่ storage/ ไม่งั้น git จะข้ามทั้งโฟลเดอร์
 # แล้วบรรทัด ! ข้างล่างจะไม่มีผล
 storage/*
 !storage/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

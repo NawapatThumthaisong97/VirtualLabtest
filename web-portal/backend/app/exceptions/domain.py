@@ -35,6 +35,18 @@ class LabDocNotFoundError(NotFoundError):
     code = "lab_doc_not_found"
 
 
+class SessionNotFoundError(NotFoundError):
+    code = "session_not_found"
+
+
+class UserNotFoundError(NotFoundError):
+    code = "user_not_found"
+
+
+class LabImageNotFoundError(NotFoundError):
+    code = "lab_image_not_found"
+
+
 # ---------- 409 ----------
 class ConflictError(DomainError):
     """ข้อมูลชนกับที่มีอยู่แล้ว"""
@@ -44,6 +56,10 @@ class ConflictError(DomainError):
 
 class DuplicateOrderNoError(ConflictError):
     code = "duplicate_order_no"
+
+
+class SessionAlreadyExistsError(ConflictError):
+    code = "session_already_exists"
 
 
 # ---------- 401 ----------
@@ -73,3 +89,22 @@ class ValidationError(DomainError):
     """ข้อมูลไม่ผ่านกฎทาง business (คนละเรื่องกับ Pydantic validation)"""
 
     code = "validation_error"
+
+
+class InvalidSessionStateError(ValidationError):
+    code = "invalid_session_state"
+
+
+class LabImageMissingError(ValidationError):
+    code = "lab_image_missing"
+
+
+# ---------- 500 ----------
+class InternalServerError(DomainError):
+    """Internal server error"""
+    
+    code = "internal_server_error"
+
+
+class ClusterOperationError(InternalServerError):
+    code = "cluster_operation_error"

@@ -15,7 +15,7 @@ engine = create_engine(
     pool_pre_ping=True,  # เช็คการเชื่อมต่อก่อนใช้งาน
     pool_size=10,
     max_overflow=20,
-    echo=settings.DEBUG  # แสดง SQL queries เมื่อ debug mode
+    echo=True
 )
 
 # Create SessionLocal class

@@ -122,6 +122,23 @@ def seed_database(db: Session):
         image_digest="sha256:abcd1234",
         size_mb=512,
         status=ImageStatus.APPROVED,
+        # Resource requirements
+        cpu_requirement="2+",
+        memory_requirement="2+",
+        disk_size=50,
+        lifespan_minutes=60,  # 1 ชั่วโมง
+        # Port configuration
+        exposed_ports=[8080, 5173, 8443],
+        # Container runtime
+        entrypoint_script="/bin/bash /run.sh",
+        workdir=None,
+        # Environment variables
+        env_vars={
+            "IDE_PASSWORD": "musiclab",
+            "DATA_DIR": "/data",
+            "MUSIC_DIR": "/data/music"
+        },
+        description="All-in-one Music Lab environment with Flask API, Vite client, and Code-server IDE"
     )
     
     lab_image2 = LabImage(
@@ -133,6 +150,20 @@ def seed_database(db: Session):
         image_digest="sha256:efgh5678",
         size_mb=768,
         status=ImageStatus.APPROVED,
+        # Resource requirements
+        cpu_requirement="2+",
+        memory_requirement="2+",
+        disk_size=30,
+        lifespan_minutes=60,  # 1 ชั่วโมง
+        # Port configuration
+        exposed_ports=[3000],
+        # Container runtime
+        entrypoint_script="/bin/bash /entrypoint.sh",
+        workdir=None,  # ✅ ใช้ WORKDIR จาก Dockerfile แทน
+        env_vars={
+            "NODE_ENV": "development"
+        },
+        description="Basic Node.js web development environment"
     )
     
     db.add_all([lab_image1, lab_image2])
@@ -209,13 +240,13 @@ def seed_database(db: Session):
         id=uuid.uuid4(),
         user_id=student1.id,
         lab_id=lab1.id,
+        lab_image_id=lab_image1.id,  # ✅ ใช้ lab_image_id แทน image_ref
         service_type=ServiceType.LAB,
         k8s_pod_name="pod-lab1-student1",
         node_name="node-01",
         is_remote=False,
         is_cloud=False,
-        image_ref="skypilot/music-lab:lab-01",
-        endpoints={"ide": "http://localhost:8080", "ssh": "ssh://localhost:2222"},
+        endpoints={"ide": "http://localhost:8080", "ssh": "ssh://localhost:2222"},  # ✅ JSONB
         status=SessionStatus.RUNNING,
         started_at=datetime.utcnow() - timedelta(hours=2),
     )
@@ -224,12 +255,12 @@ def seed_database(db: Session):
         id=uuid.uuid4(),
         user_id=student1.id,
         lab_id=None,
+        lab_image_id=lab_image2.id,  # ✅ COMPUTE_SERVICE ก็ใช้ lab_image_id
         service_type=ServiceType.COMPUTE_SERVICE,
         is_remote=True,
         is_cloud=True,
         sky_cluster_name="sky-cluster-1",
         sky_job_id=12345,
-        image_ref="skypilot/gpu:latest",
         status=SessionStatus.PENDING,
     )
     
