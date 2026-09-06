@@ -1,0 +1,24 @@
+# ที่ตั้งของ web-portal บนเครื่อง target
+webportal_dir: /opt/web-portal
+
+# ผูก port กับ Tailscale IP ของเครื่องเอง ไม่ใช่ 0.0.0.0
+# กัน service โผล่บน interface อื่นโดยไม่ตั้งใจ
+webportal_bind_ip: "{{ ansible_host }}"
+
+webportal_http_port: 80
+webportal_api_port: 8000
+
+# --- Postgres ---
+webportal_postgres_user: postgres
+webportal_postgres_db: virtual_lab
+# ค่าจริงควรมาจาก vault — default ไว้ให้รันได้ก่อนแต่ต้องเปลี่ยน
+webportal_postgres_password: "{{ vault_postgres_password | default('changeme-in-vault') }}"
+
+# --- Backend ---
+webportal_secret_key: "{{ vault_backend_secret_key | default('changeme-in-vault') }}"
+webportal_debug: false
+webportal_api_prefix: /api
+
+# master ที่ backend จะคุยด้วยผ่าน kubeconfig
+webportal_k8s_master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] }}"
+webportal_k8s_enabled: true

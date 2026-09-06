@@ -1,23 +1,28 @@
+# คัดลอกเป็น inventory.yml แล้วใส่ IP จริง (inventory.yml ถูก gitignore ไว้)
+#
+# ชื่อ host ต้องไม่ซ้ำกับชื่อ group ไม่งั้น Ansible จะเตือน
+# "Found both group and host with same name" และการอ้าง groups[...] อาจกำกวม
+# จึงใช้ master-1 / webportal-1 แทน master / webportal
+
 all:
   children:
     master:
       hosts:
-        thinkpad:
-          ansible_connection: local
-          ansible_host: <TAILSCALE_IP_OF_MASTER>   # e.g. 100.x.x.x
-          ansible_become: yes
-          ansible_become_method: sudo
+        master-1:
+          ansible_host: "100.0.0.1"
     workers:
       hosts:
         worker-1:
-          ansible_host: <TAILSCALE_IP_OF_WORKER>
-          ansible_user: <SSH_USER>   # เช็คด้วย `whoami` บนเครื่อง worker เอง ไม่ใช่ชื่อที่ตั้งเอง
-          ansible_become: yes
-          ansible_become_method: sudo
+          ansible_host: "100.0.0.2"
     registry:
       hosts:
         registry-host:
-          ansible_host: <TAILSCALE_IP_OF_REGISTRY>
-          ansible_user: <SSH_USER>
-          ansible_become: yes
-          ansible_become_method: sudo
+          ansible_host: "100.0.0.3"
+    webportal:
+      hosts:
+        webportal-1:
+          ansible_host: "100.0.0.4"
+  vars:
+    ansible_user: "your-ssh-user"
+    ansible_become: yes
+    ansible_become_method: sudo

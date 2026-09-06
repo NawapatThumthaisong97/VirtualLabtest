@@ -1,0 +1,85 @@
+# Production compose สำหรับเครื่อง webportal (100.68.206.79)
+#
+# ต่างจาก docker-compose.yml (dev) ตรงที่:
+#   - รันครบทั้ง 3 service ไม่ใช่แค่ db
+#   - db ไม่ publish port ออกนอก container network
+#   - ทุก port ผูกกับ BIND_IP (tailscale0) ไม่ใช่ 0.0.0.0
+#   - ค่า secret มาจาก .env ที่ Ansible render ไม่ใช่ hardcode
+#
+# ค่าใน .env ระดับนี้: BIND_IP, POSTGRES_*, VITE_API_URL (ดู .env.prod.example)
+
+name: virtual-lab
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: virtual_lab_db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    # ไม่มี ports: — db เข้าถึงได้เฉพาะจาก container อื่นใน network เดียวกัน
+    # ถ้าต้อง debug จากข้างนอกใช้ `docker compose exec db psql` แทนการเปิด port
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: virtual_lab_backend
+    restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    # app.main:lifespan เรียก sys.exit(1) ถ้าต่อ DB ไม่ได้
+    # ถ้าไม่รอ db healthy ก่อน container จะตายตั้งแต่ start
+    depends_on:
+      db:
+        condition: service_healthy
+
+    volumes:
+      # ไฟล์เอกสารแลปที่ผู้ใช้อัปโหลด (STORAGE_ROOT) — ต้อง persist ไว้นอก image
+      # ไม่งั้น rebuild ทีไฟล์หายหมด
+      - ./backend/storage:/app/storage
+      # kubeconfig ที่ Ansible ดึงมาจาก master แล้วแก้ server เป็น Tailscale IP
+      - ./backend/kubeconfig.yaml:/app/kubeconfig.yaml:ro
+
+    ports:
+      - "${BIND_IP}:8000:8000"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # ค่านี้ถูกฝังลง bundle ตอน build — เปลี่ยนแล้วต้อง --build ใหม่
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: virtual_lab_frontend
+    restart: unless-stopped
+
+    depends_on:
+      - backend
+
+    ports:
+      - "${BIND_IP}:80:80"
+
+volumes:
+  postgres_data:

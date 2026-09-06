@@ -1,0 +1,13 @@
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+kubeconfig.yaml
+storage
+.git
+.gitignore
+Dockerfile
+.dockerignore
