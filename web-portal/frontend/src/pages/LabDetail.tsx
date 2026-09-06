@@ -88,11 +88,7 @@ export default function LabDetailPage() {
   // The column fills the viewport below the h-14 navbar so the loader can
   // centre itself in whatever space is left under the sub-header.
   return (
-    <div
-      className={`flex min-h-[calc(100vh-3.5rem)] flex-col font-sans text-[#2C2C2A] ${
-        isLaunching ? 'bg-white' : 'bg-[#FAFAF8]'
-      }`}
-    >
+    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col bg-white font-sans text-[#2C2C2A]">
       {/* Sub-header: course title + tabs + primary action */}
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[#E5E3DC] bg-white px-6 py-4">
         <h2 className="text-xl font-bold">
@@ -137,8 +133,11 @@ export default function LabDetailPage() {
           <LabLoader size={48} label="Preparing your lab environment" />
         </div>
       ) : (
-        <div className="mx-auto w-full max-w-[1200px] p-6">
-          <article className="rounded-xl border border-[#E5E3DC] bg-white p-8">
+        // คุมความกว้างคอลัมน์เท่าเดิมเพื่อให้ขนาดตัวหนังสือใน PDF อ่านสบาย
+        // (pdf.js วาดหน้าเท่าความกว้างคอลัมน์ ปล่อยเต็มจอแล้วตัวโตเกินไป)
+        // ต่างจากเดิมตรงที่พื้นหน้าเป็นสีขาว ไม่มีกล่องขาวลอยบนพื้นเทาแล้ว
+        <div className="mx-auto w-full max-w-[1200px] px-8 pt-6 pb-10">
+          <article>
             <h1 className="mb-4 text-[22px] font-semibold">{labHeading}</h1>
 
             {lab.description && (

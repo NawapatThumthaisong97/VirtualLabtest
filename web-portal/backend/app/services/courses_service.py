@@ -14,6 +14,11 @@ class CourseService:
     def get_course_by_id(self, course_id: UUID) -> Course | None:
         return self.course_repository.find_by_id(course_id)
 
+    def get_course_detail(self, course_id: UUID) -> tuple[Course | None, list]:
+        course = self.course_repository.find_by_id(course_id)
+        announcements = self.announcement_repository.find_by_course_id(course_id) if course else []
+        return course, announcements
+
     def create_course(self, course: Course) -> Course:
         saved_course = self.course_repository.save(course)
         self.course_repository.db.commit()
@@ -22,17 +27,15 @@ class CourseService:
     def get_all_courses(self) -> list[Course]:
         return self.course_repository.get_all()
     
-    def update_course(self, course_id: UUID, updated_course: CourseUpdateRequest) -> Course | None:
+    def update_course(self, course_id: UUID, course_update: CourseUpdateRequest) -> Course | None:
         existing_course = self.course_repository.find_by_id(course_id)
         if not existing_course:
             return None
-        for attr, value in updated_course.model_dump(exclude_unset=True).items():
-            if value is not None:
-                setattr(existing_course, attr, value)
-        saved_course = self.course_repository.save(existing_course)
+        for field, value in course_update.model_dump(exclude_unset=True).items():
+            setattr(existing_course, field, value)
         self.course_repository.db.commit()
-        return saved_course
-    
+        return existing_course
+
     def hard_delete_course(self, course_id: UUID) -> bool:
         existing_course = self.course_repository.find_by_id_including_deleted(course_id)
         if not existing_course:
@@ -66,4 +69,11 @@ class CourseService:
         self.course_repository.db.commit()
         return course
     
+    def update_announcement_ids(self, course_id: UUID, announcement_ids: list[UUID]) -> Course | None:
+        course = self.course_repository.find_by_id(course_id)
+        if not course:
+            return None
+        course.announcement_ids = announcement_ids
+        self.course_repository.db.commit()
+        return course
     

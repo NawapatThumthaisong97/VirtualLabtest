@@ -1,0 +1,64 @@
+# Pre-pull DaemonSet — template สำหรับ cluster อื่น
+#
+# ใช้ตอนอยากดึง image ลงเครื่องทุก node ล่วงหน้า ก่อนที่คนจะมาใช้งานพร้อมกัน
+# วัดบน cluster ของเรา: pod ที่ node ยังไม่มี image ใช้ ~2 นาที 52 วิ กว่าจะพร้อม
+# ถ้า image อยู่ใน cache ของ node แล้วเหลือ 2-4 วินาที
+#
+# วิธีใช้:
+#   1. cp prepull-daemonset.example.yaml prepull-daemonset.yaml
+#   2. แก้ <IMAGE> ให้เป็น image ของตัวเอง (ใส่ registry host เต็ม ๆ)
+#   3. kubectl apply -f prepull-daemonset.yaml
+#   4. kubectl rollout status daemonset/prepull        # รอจนครบทุก node
+#   5. kubectl delete -f prepull-daemonset.yaml        # ลบทิ้งได้ cache ไม่หาย
+#
+# ถ้าใช้ registry แบบ HTTP (ไม่มี TLS) containerd ของทุก node ต้องรู้ก่อนว่า
+# ให้เชื่อ registry นั้น — บน k3s เขียนที่ /etc/rancher/k3s/registries.yaml
+# แล้ว restart k3s ไม่งั้นจะขึ้น ImagePullBackOff ตั้งแต่ขั้นนี้เลย
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: prepull
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: prepull
+  template:
+    metadata:
+      labels:
+        app: prepull
+    spec:
+      # ลงให้ครบทุก node รวม control-plane ซึ่งปกติมี taint กัน pod ทั่วไปไว้
+      # ถ้าไม่ใส่บรรทัดนี้ master จะไม่ได้ image ไปด้วย
+      tolerations:
+        - operator: Exists
+
+      # ไม่ต้องรอ graceful shutdown ตอนลบทิ้ง มันไม่ได้ทำงานอะไรอยู่แล้ว
+      terminationGracePeriodSeconds: 0
+
+      # initContainer ทำงานเสร็จแล้วจบทันที (exit 0) แต่ k8s ต้องดึง image
+      # มาก่อนถึงจะรันได้ — ซึ่งคือสิ่งที่เราต้องการพอดี
+      # อยากดึงหลาย image ก็เพิ่ม block แบบเดียวกันต่อท้ายได้เลย
+      initContainers:
+        - name: pull-0
+          image: <IMAGE>          # เช่น 10.0.0.5:5001/team/lab:v1
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "exit 0"]
+
+        # - name: pull-1
+        #   image: <IMAGE_2>
+        #   imagePullPolicy: IfNotPresent
+        #   command: ["/bin/sh", "-c", "exit 0"]
+
+      # container หลักใช้ image ที่ดึงมาแล้ว นอนรอเฉย ๆ ให้ DaemonSet คง
+      # สถานะ ready ไว้ จะได้เช็คด้วย rollout status ได้ว่าครบทุก node หรือยัง
+      containers:
+        - name: holder
+          image: <IMAGE>
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi

@@ -79,6 +79,13 @@ cert.pem
 !.env.*.example
 !.env.local.example
 
+# Local runtime data for the web portal
+web-portal/backend/.venv/
+web-portal/backend/storage/**
+!web-portal/backend/storage/.gitkeep
+web-portal/backend/*.db
+web-portal/backend/*.sqlite3
+
 # -----------------------------------------------------------------------------
 # 🐍 Python / FastAPI / SkyPilot
 # -----------------------------------------------------------------------------
@@ -299,6 +306,8 @@ docs/SKYPILOT_VERSION_CHECK_GUIDE.md
 docs/SKYPILOT_ANSIBLE_MULTIHOST_PROGRESS.md
 docs/TAILSCALE_K3S_NETWORKING.md
 
+# copy ของ template pre-pull ที่กรอกค่าจริงแล้ว
+script/prepull-daemonset.yaml
 # Personal seed scripts — local only, ไม่ต้อง commit
 web-portal/backend/script/seed_pete.py
 web-portal/backend/script/check_repo.py

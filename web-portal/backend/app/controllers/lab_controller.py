@@ -16,10 +16,15 @@ class LabController:
         self.service = service
 
     def get_lab_by_course(
-        self, course_id: UUID, status: LabStatus | None = None
+        self, course_id: UUID, user_id: UUID, status: LabStatus | None = None
     ) -> list[LabResponse]:
-        labs = self.service.get_lab_by_course(course_id, status)
-        return [LabResponse.model_validate(lab) for lab in labs]
+        rows = self.service.get_lab_by_course_for_user(course_id, user_id, status)
+        return [
+            LabResponse.model_validate(lab).model_copy(
+                update={"progress_status": progress}
+            )
+            for lab, progress in rows
+        ]
 
     def get_lab(self, lab_id: UUID) -> LabDetailResponse:
         lab = self.service.get_lab_by_id(lab_id)
