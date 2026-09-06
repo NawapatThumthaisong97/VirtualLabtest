@@ -195,7 +195,9 @@ def seed_database(db: Session):
         size_mb=640,
         status=ImageStatus.APPROVED,
         cpu_requirement="2+",
-        memory_requirement="4+",
+        # task.yaml เขียนไว้ 4+ แต่ worker-pete มี RAM ใช้ได้จริง 2.97 GB
+        # ถ้าขอ 4+ pod จะค้าง Pending จนหมด provision timeout — ทดสอบมาแล้ว
+        memory_requirement="2+",
         disk_size=50,
         lifespan_minutes=60,
         # ต้องตรงกับ endpoints ของ running_session ข้างล่าง
