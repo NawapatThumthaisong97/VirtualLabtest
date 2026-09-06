@@ -247,9 +247,8 @@ $RECYCLE.BIN/
 # -----------------------------------------------------------------------------
 # 📦 Docker
 # -----------------------------------------------------------------------------
-# Don't ignore Dockerfiles, but ignore local build artifacts
-.dockerignore
-# ^^ Don't ignore .dockerignore itself — it belongs in the repo
+# Don't ignore Dockerfiles or .dockerignore — ทั้งคู่เป็น build config ที่ต้องอยู่ใน repo
+# (เดิมมีบรรทัด `.dockerignore` ที่ ignore มันทิ้ง ซึ่งขัดกับคอมเมนต์ที่เขียนกำกับไว้เอง)
 
 # Local docker-compose overrides with secrets
 docker-compose.override.yml
