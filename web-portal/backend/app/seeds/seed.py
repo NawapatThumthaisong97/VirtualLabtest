@@ -182,17 +182,38 @@ def seed_database(db: Session):
     print("[ok] Created 5 enrollments")
 
     # 5. สร้าง Lab Images
+    # image เดียวในโปรเจกต์ที่ build แล้วและ push ขึ้น registry จริง
+    # ค่าทุกตัวข้างล่างล็อกตาม music-lab/skypilot/task.yaml — ห้ามแก้ให้ต่าง
+    # ไม่งั้น session ที่ launch จะเปิด port ไม่ตรงกับที่ image รันจริง
     se_image = LabImage(
         id=uuid.uuid4(),
         uploaded_by=se_instructor.id,
         course_id=se_course.id,
-        repository="vlab/springboot-oop",
-        tag="se301-lab01",
+        repository="skypilot/music-lab",
+        tag="lab-01",
         image_digest="sha256:1f0c9a72",
         size_mb=640,
         status=ImageStatus.APPROVED,
+        cpu_requirement="2+",
+        # task.yaml เขียนไว้ 4+ แต่ worker-pete มี RAM ใช้ได้จริง 2.97 GB
+        # ถ้าขอ 4+ pod จะค้าง Pending จนหมด provision timeout — ทดสอบมาแล้ว
+        memory_requirement="2+",
+        disk_size=50,
+        lifespan_minutes=60,
+        # ต้องตรงกับ endpoints ของ running_session ข้างล่าง
+        exposed_ports=[8080, 5173, 8443],
+        entrypoint_script="/bin/bash /run.sh",
+        workdir=None,
+        env_vars={
+            "IDE_PASSWORD": "musiclab",
+            "DATA_DIR": "/data",
+            "MUSIC_DIR": "/data/music",
+        },
+        description="All-in-one lab: Flask API (8080), Vite client (5173), code-server IDE (8443)",
     )
 
+    # ยังไม่มี image จริงรองรับ (มีแค่ music-lab ตัวเดียวในโปรเจกต์)
+    # ปล่อยชื่อ placeholder ไว้ก่อน แต่กรอกคอลัมน์ใหม่ให้ครบกัน default ว่างเปล่า
     devops_image = LabImage(
         id=uuid.uuid4(),
         uploaded_by=devops_instructor.id,
@@ -202,6 +223,15 @@ def seed_database(db: Session):
         image_digest="sha256:8b45de10",
         size_mb=980,
         status=ImageStatus.APPROVED,
+        cpu_requirement="2+",
+        memory_requirement="4+",
+        disk_size=30,
+        lifespan_minutes=60,
+        exposed_ports=[3000],
+        entrypoint_script="/bin/bash /entrypoint.sh",
+        workdir=None,
+        env_vars={"NODE_ENV": "development"},
+        description="DevOps toolbox (ยังไม่ได้ build image จริง)",
     )
 
     db.add_all([se_image, devops_image])
@@ -312,7 +342,7 @@ def seed_database(db: Session):
         node_name="node-01",
         is_remote=False,
         is_cloud=False,
-        image_ref=f"{se_image.repository}:{se_image.tag}",
+        lab_image_id=se_image.id,
         endpoints={
             "ide": "http://localhost:8443",
             "client": "http://localhost:5173",

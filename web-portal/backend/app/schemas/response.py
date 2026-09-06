@@ -33,19 +33,30 @@ class ErrorDetail(CamelModel):
 class ApiResponse(CamelModel, Generic[T]):
     """
     Standard API Response Format
+    - เมื่อ success=True: ไม่ส่ง error field
+    - เมื่อ success=False: ไม่ส่ง data field
     """
     success: bool = Field(examples=[True])
     message: str = Field(examples=["Request successful"])
     data: Optional[T] = Field(default=None, examples=[{}])
-    error: Optional[ErrorDetail] = None
+    error: Optional[ErrorDetail] = Field(default=None, exclude=True)  # ✅ ไม่ serialize ถ้าเป็น None
+    
+    class Config:
+        # เมื่อ serialize เป็น JSON จะไม่ส่ง fields ที่เป็น None
+        exclude_none = True
 
 
 class PaginatedResponse(CamelModel, Generic[T]):
     """
     Paginated API Response Format
+    - เมื่อ success=True: ไม่ส่ง error field
+    - เมื่อ success=False: ไม่ส่ง data และ pagination
     """
     success: bool = Field(examples=[True])
     message: str = Field(examples=["Request successful"])
     data: list[T] = Field(examples=[[]])
     pagination: Optional[PaginationMeta] = None
-    error: Optional[ErrorDetail] = None
+    error: Optional[ErrorDetail] = Field(default=None, exclude=True)  # ✅ ไม่ serialize ถ้าเป็น None
+    
+    class Config:
+        exclude_none = True

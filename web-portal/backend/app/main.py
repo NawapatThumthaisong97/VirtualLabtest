@@ -32,6 +32,7 @@ from app.exceptions.domain import (
     ConflictError,
     DomainError,
     ForbiddenError,
+    InternalServerError,
     NotFoundError,
     UnauthorizedError,
     ValidationError,
@@ -187,6 +188,7 @@ STATUS_MAP = {
     ForbiddenError: status.HTTP_403_FORBIDDEN,
     UnauthorizedError: status.HTTP_401_UNAUTHORIZED,
     ValidationError: status.HTTP_400_BAD_REQUEST,
+    InternalServerError: status.HTTP_500_INTERNAL_SERVER_ERROR,
 }
 
 
@@ -214,6 +216,7 @@ async def domain_exception_handler(request, exc: DomainError):
         content={
             "success": False,
             "message": exc.message,
+            "data": None,
             "error": {"code": exc.code, "message": exc.message},
         },
     )

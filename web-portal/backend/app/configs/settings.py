@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     K8S_DEFAULT_NAMESPACE: str = "default"
     K8S_TIMEOUT: int = 30
     
+    # Docker Registry for SkyPilot
+    DOCKER_REGISTRY_HOST: Optional[str] = None
+    DOCKER_REGISTRY_PREFIX: Optional[str] = None
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
