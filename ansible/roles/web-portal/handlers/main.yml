@@ -1,0 +1,7 @@
+# .env เปลี่ยนแล้วต้อง recreate container ให้อ่านค่าใหม่
+# ใส่ --build ด้วยเพราะ VITE_API_URL ถูกฝังตอน build ไม่ใช่ runtime
+# แก้แค่ .env แล้ว restart เฉย ๆ frontend จะยังเรียก URL เดิมอยู่
+- name: restart web-portal
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.prod.yml up -d --build
+    chdir: "{{ webportal_dir }}"

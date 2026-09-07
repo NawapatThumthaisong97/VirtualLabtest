@@ -22,3 +22,12 @@
   roles:
     - { role: common, tags: ['common'] }
     - { role: registry, tags: ['registry'] }
+
+# วางท้ายสุดเพราะต้องดึง kubeconfig จาก master ที่ provision เสร็จแล้ว
+- name: Provision Virtual-Lab web portal
+  hosts: webportal
+  become: yes
+  roles:
+    - { role: common, tags: ['common'] }
+    - { role: tailscale, tags: ['tailscale'] }
+    - { role: web-portal, tags: ['web-portal'] }

@@ -1,0 +1,211 @@
+# Build lab image แล้ว push เข้า private registry
+#
+# แยกจาก site.yml เพราะเป็นงานคนละจังหวะ — site.yml คือ provision เครื่อง
+# ส่วนไฟล์นี้คือ build image ซึ่งรันเมื่อโค้ดใน lab เปลี่ยน ไม่ใช่ตอนตั้งเครื่อง
+#
+# build บน "เครื่อง registry" ไม่ใช่เครื่อง control เพราะ push จะกลายเป็น
+# การส่งเข้าตัวเอง ไม่ต้องวิ่งผ่านเน็ต เหลือแค่ส่ง source (ไม่กี่ MB) ไปแทน
+# image (หลาย GB) — รอบแรกที่ build บนเครื่อง control แล้ว push ข้าม Tailscale
+# ได้ราว 0.5 MB/s เพราะ RTT 132ms คอขวดคือ latency ไม่ใช่ความกว้างของท่อ
+#
+#   ansible-playbook -i inventory.yml build-images.yml -K
+#   ansible-playbook -i inventory.yml build-images.yml -K -e lab_image_filter=music-lab
+#   ansible-playbook -i inventory.yml build-images.yml -K -e lab_image_tag=lab-02
+#   ansible-playbook -i inventory.yml build-images.yml -K -e image_build_host=webportal
+#
+# ที่มาของ IP registry คือ inventory ที่เดียว ไม่ต้องแก้ตามไฟล์ต่าง ๆ เวลาย้ายเครื่อง
+
+- name: Build and push lab images to the private registry
+  hosts: "{{ image_build_host | default('registry') }}"
+  gather_facts: yes
+
+  vars:
+    registry_port: 5001
+    registry_host: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}"
+    registry_endpoint: "{{ registry_host }}:{{ registry_port }}"
+
+    # ที่วาง source บนเครื่อง build
+    build_root: /opt/lab-build
+
+    # tag เดียวใช้กับทุก image — override ได้ด้วย -e lab_image_tag=...
+    lab_image_tag: lab-01
+
+    # เพิ่ม image ใหม่ให้เติมที่นี่ที่เดียว ทั้ง sync/build/push จะตามมาเอง
+    #   src        = โฟลเดอร์ต้นทางบนเครื่อง control
+    #   dockerfile = path ของ Dockerfile เทียบกับ context
+    lab_images:
+      - name: music-lab
+        repo: skypilot/music-lab
+        src: "{{ playbook_dir }}/../music-lab/"
+        dockerfile: skypilot/Dockerfile
+
+    # build เฉพาะบาง image: -e lab_image_filter=music-lab
+    # ค่าว่างแปลว่าเอาทั้งหมด
+    lab_image_filter: ""
+    lab_images_selected: >-
+      {{ lab_images | selectattr('name', 'search', lab_image_filter) | list }}
+
+  tasks:
+    # ---------- docker ----------
+
+    - name: Ensure Docker is installed on the build host
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+      become: yes
+
+    - name: Ensure Docker is running
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    - name: Add build user to docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+      become: yes
+
+    # ต้อง reset connection ไม่งั้น session ปัจจุบันยังไม่เห็น group docker
+    # แล้ว docker build จะโดน permission denied ที่ socket
+    - name: Reset connection so the docker group takes effect
+      ansible.builtin.meta: reset_connection
+
+    # registry ตัวนี้เป็น HTTP ล้วน (ไม่มี TLS) docker จะปฏิเสธ push
+    # ด้วย "server gave HTTP response to HTTPS client" ถ้าไม่ประกาศไว้ก่อน
+    #
+    # daemon.json เป็น 0644 อ่านได้โดยไม่ต้อง root — ใช้ become เฉพาะตอนเขียน
+    - name: Read current docker daemon.json
+      ansible.builtin.slurp:
+        src: /etc/docker/daemon.json
+      register: daemon_json_raw
+      failed_when: false
+
+    - name: Parse current daemon.json (ถือว่าว่างถ้าไฟล์ยังไม่มี)
+      ansible.builtin.set_fact:
+        daemon_json: >-
+          {{ (daemon_json_raw.content | b64decode | from_json)
+             if daemon_json_raw.content is defined else {} }}
+
+    # merge เข้าไปในของเดิม ไม่เขียนทับทั้งไฟล์
+    # เผื่อมี setting อื่น (data-root, log-driver) ที่ตั้งไว้แล้วจะได้ไม่หาย
+    - name: Trust the private registry as insecure
+      ansible.builtin.copy:
+        content: "{{ daemon_json | combine({'insecure-registries': [registry_endpoint]}) | to_nice_json }}\n"
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+      become: yes
+      notify: restart docker
+
+    - name: Apply daemon.json now (ก่อน push ไม่ใช่ท้าย play)
+      ansible.builtin.meta: flush_handlers
+
+    # ---------- source ----------
+
+    - name: Create build root
+      ansible.builtin.file:
+        path: "{{ build_root }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0755"
+      become: yes
+
+    # become: false + rsync_path จำเป็น — synchronize อ่าน become จาก play
+    # แล้วเติม --rsync-path='sudo -u root rsync' ซึ่งรันโดยไม่มี tty จึงรับรหัสไม่ได้
+    - name: Sync image sources to the build host
+      become: false
+      ansible.posix.synchronize:
+        src: "{{ item.src }}"
+        dest: "{{ build_root }}/{{ item.name }}/"
+        rsync_path: "rsync"
+        delete: yes
+        rsync_opts:
+          - "--exclude=node_modules"
+          - "--exclude=venv"
+          - "--exclude=__pycache__"
+          - "--exclude=.env"
+          - "--exclude=dist"
+      loop: "{{ lab_images_selected }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # ---------- registry ----------
+
+    - name: Ensure registry is reachable
+      ansible.builtin.uri:
+        url: "http://{{ registry_endpoint }}/v2/_catalog"
+        status_code: 200
+      register: registry_check
+      retries: 3
+      delay: 5
+      until: registry_check.status == 200
+
+    # ---------- build & push ----------
+
+    - name: Build image
+      ansible.builtin.command:
+        cmd: >-
+          docker build
+          -t {{ registry_endpoint }}/{{ item.repo }}:{{ lab_image_tag }}
+          -f {{ item.dockerfile }} .
+        chdir: "{{ build_root }}/{{ item.name }}"
+      loop: "{{ lab_images_selected }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+
+    - name: Push image to registry
+      ansible.builtin.command:
+        cmd: "docker push {{ registry_endpoint }}/{{ item.repo }}:{{ lab_image_tag }}"
+      loop: "{{ lab_images_selected }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+
+    # ---------- keep task.yaml in sync ----------
+    # image_id ใน task.yaml เคยเป็น IP hardcode แล้วค้างชี้ registry เก่าอยู่นาน
+    # render จาก inventory แทนเพื่อไม่ให้หลุดอีก
+    #
+    # เขียนกลับที่ repo บนเครื่อง control ไม่ใช่เครื่อง build จึง delegate
+
+    - name: Render music-lab SkyPilot task.yaml with current registry
+      ansible.builtin.template:
+        src: templates/music-lab-task.yaml.j2
+        dest: "{{ playbook_dir }}/../music-lab/skypilot/task.yaml"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+      when: "'music-lab' in (lab_images_selected | map(attribute='name') | list)"
+
+    # ---------- verify ----------
+
+    - name: Read registry catalog
+      ansible.builtin.uri:
+        url: "http://{{ registry_endpoint }}/v2/{{ item.repo }}/tags/list"
+        return_content: yes
+      register: tags_check
+      loop: "{{ lab_images_selected }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Report what landed in the registry
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.repo }} มี tag:
+          {{ item.json.tags | default([]) | join(', ') }}
+          @ {{ registry_endpoint }}
+      loop: "{{ tags_check.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+  handlers:
+    - name: restart docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+      become: yes
