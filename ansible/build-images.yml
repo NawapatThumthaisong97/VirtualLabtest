@@ -179,7 +179,15 @@
         dest: "{{ playbook_dir }}/../music-lab/skypilot/task.yaml"
         mode: "0644"
       delegate_to: localhost
-      become: false
+      # ต้องทับที่ระดับ "ตัวแปร" ไม่ใช่ keyword become: — inventory ตั้ง
+      # ansible_become: yes ไว้ที่ all.vars และตัวแปรมี precedence สูงกว่า keyword
+      # พอ delegate มา localhost มันจึงพยายาม sudo บนเครื่อง control ด้วยรหัสของ
+      # remote user ที่ได้จาก -K แล้วค้างรอ input ที่ไม่มีวันมา
+      #
+      # ansible_connection: local กันไม่ให้มันพยายาม ssh กลับเข้าหาตัวเองด้วย
+      vars:
+        ansible_become: false
+        ansible_connection: local
       when: "'music-lab' in (lab_images_selected | map(attribute='name') | list)"
 
     # ---------- verify ----------
