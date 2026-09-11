@@ -38,6 +38,10 @@
       - docker-compose-plugin
     state: present
     update_cache: yes
+    # ถ้าไม่ใส่ cache_valid_time มันจะบังคับดึง index ใหม่ทุกครั้งที่รัน playbook
+    # ซึ่งบนเน็ตที่ไปหา archive.ubuntu.com ได้ ~200 KB/s และสะดุดเป็นพัก ๆ
+    # กลายเป็นค้างสิบกว่านาทีทั้งที่ Docker ลงไว้แล้วและไม่มีอะไรต้องติดตั้ง
+    cache_valid_time: 3600
 
 - name: Ensure Docker service is running
   ansible.builtin.systemd:
