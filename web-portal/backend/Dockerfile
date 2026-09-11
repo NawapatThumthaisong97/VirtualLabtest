@@ -4,9 +4,30 @@ FROM python:3.12-slim
 
 # curl ใช้ทำ healthcheck ใน compose — ไม่ได้มีติดมากับ slim image
 # libpq5 เป็น runtime lib ที่ psycopg2-binary ต้องใช้
+#
+# ที่เหลือเป็นของที่ SkyPilot เรียกผ่าน subprocess ตอนใช้ Kubernetes เป็น backend
+# ลง pip install skypilot อย่างเดียวไม่พอ เพราะมันไม่ได้ลากพวกนี้มาให้
+#   socat          - port-forward เข้า pod
+#   openssh-client - ssh เข้าไปใน pod ที่ provision แล้ว
+#   rsync          - ส่งไฟล์ workdir เข้า pod
+# ขาดตัวไหนไปจะได้ FileNotFoundError ตอนสร้าง session ซึ่งอ่านแล้วนึกว่าไฟล์หาย
+# ทั้งที่เป็นตัวโปรแกรมเองที่ไม่มี
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl libpq5 \
+    && apt-get install -y --no-install-recommends \
+        curl libpq5 socat openssh-client rsync \
     && rm -rf /var/lib/apt/lists/*
+
+# kubectl ไม่มีใน apt ของ debian ต้องโหลด binary ตรง
+# ปล่อยว่างไว้จะใช้ stable ล่าสุด หรือ pin ด้วย --build-arg KUBECTL_VERSION=v1.35.5
+# ควรอยู่ใน ±1 minor version กับ k3s ที่ cluster ใช้
+ARG KUBECTL_VERSION=""
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    ver="${KUBECTL_VERSION:-$(curl -fsSL https://dl.k8s.io/release/stable.txt)}"; \
+    curl -fsSL -o /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/${ver}/bin/linux/${arch}/kubectl"; \
+    chmod +x /usr/local/bin/kubectl; \
+    kubectl version --client
 
 WORKDIR /app
 
