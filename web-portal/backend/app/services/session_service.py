@@ -21,7 +21,6 @@ from app.exceptions.domain import (
     LabImageNotFoundError,
     LabImageMissingError,
     SessionAlreadyExistsError,
-    InvalidSessionStateError,
     ClusterOperationError,
 )
 
@@ -243,22 +242,28 @@ run: |
         
         cluster_stopped = False
         if session.status == SessionStatus.RUNNING:
-            if not session.sky_cluster_name:
-                raise InvalidSessionStateError("Session does not have a cluster name")
-            
-            try:
-                sky.down(session.sky_cluster_name)
-                cluster_stopped = True
-                
-                session.status = SessionStatus.STOPPED
-                session.ended_at = datetime.utcnow()
-                self.db.commit()
-                
-            except Exception as e:
-                raise ClusterOperationError(
-                    f"Failed to stop cluster {session.sky_cluster_name}: {str(e)}"
-                )
-        
+            # RUNNING แต่ไม่มี sky_cluster_name = record ค้าง ไม่ใช่ cluster ที่รันอยู่จริง
+            # เกิดได้จาก seed, จาก create ที่พังกลางทางก่อนบันทึกชื่อ cluster, หรือ
+            # จากการแก้ DB ตรง ๆ
+            #
+            # เดิมโยน error ทิ้งตรงนี้ ทำให้ลบไม่ได้เลย แต่ create_session ก็ยังนับว่า
+            # ผู้ใช้มี session RUNNING อยู่แล้วเลยตอบ 409 กลับมา ติดตายทั้งสองทาง
+            # ทางเดียวที่ออกได้คือไปแก้ DB เอง ซึ่งไม่ควรเป็นคำตอบของ API
+            #
+            # ไม่มี cluster ก็แค่ไม่มีอะไรให้ปิด ปล่อยให้ไปลบต่อได้ตามปกติ
+            if session.sky_cluster_name:
+                try:
+                    sky.down(session.sky_cluster_name)
+                    cluster_stopped = True
+                except Exception as e:
+                    raise ClusterOperationError(
+                        f"Failed to stop cluster {session.sky_cluster_name}: {str(e)}"
+                    )
+
+            session.status = SessionStatus.STOPPED
+            session.ended_at = datetime.utcnow()
+            self.db.commit()
+
         self.session_repository.soft_delete(session)
         
         return {
