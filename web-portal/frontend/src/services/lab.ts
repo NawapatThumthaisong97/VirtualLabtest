@@ -62,6 +62,32 @@ export const labService = {
     return (response as unknown as ApiResponse<LabDetail>).data;
   },
 
-  /** URL the browser fetches the document from — served as a file, not JSON */
+  /**
+   * URL ดิบของเอกสาร
+   *
+   * ⚠️ ใช้ได้เฉพาะกรณีที่ไม่ต้องแนบ token — เบราว์เซอร์จะยิงเองโดยไม่มี
+   * Authorization header ตอนนี้ GET /labs/:id/doc ต้องใช้ token จึงตอบ 401
+   * ถ้าจะเปิดเอกสารจริงให้ใช้ fetchDoc() ข้างล่างแทน
+   *
+   * ยังไม่ลบทิ้งเพราะ CourseDetail ใช้เป็น href อยู่ — ซึ่งก็เจอปัญหาเดียวกัน
+   * และต้องแก้ตามมาในภายหลัง
+   */
   docUrl: (labId: string): string => `${API_URL}/labs/${labId}/doc`,
+
+  /**
+   * ดึงไฟล์เอกสารมาเป็น ArrayBuffer ผ่าน apiClient
+   *
+   * ห้ามส่ง URL ดิบให้ react-pdf โหลดเอง เพราะมันยิง fetch ของตัวเองซึ่งไม่ผ่าน
+   * interceptor ของ axios เลยไม่มี Authorization header ติดไป endpoint นี้ต้องใช้
+   * token จึงตอบ 401 แล้วหน้าเว็บขึ้น "เปิดเอกสารไม่สำเร็จ" ทั้งที่ยิงด้วย curl
+   * พร้อม token ได้ 200 ปกติ
+   *
+   * ดึงมาเป็น buffer แล้วส่งเข้า <Document file={{ data }} /> แทน
+   */
+  fetchDoc: async (labId: string): Promise<ArrayBuffer> => {
+    const response = await apiClient.get(`/labs/${labId}/doc`, {
+      responseType: 'arraybuffer',
+    });
+    return response as unknown as ArrayBuffer;
+  },
 };
