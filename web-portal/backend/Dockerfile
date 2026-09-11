@@ -12,11 +12,13 @@ FROM python:3.12-slim
 #   socat          - port-forward เข้า pod
 #   openssh-client - ssh + ssh-keygen สำหรับ key ที่ SkyPilot สร้างเอง
 #   rsync          - ส่งไฟล์ workdir เข้า pod
+#   git            - SkyPilot เรียกตอน launch (sky check ไม่ได้ตรวจตัวนี้ให้
+#                    ต้องเปิด SKYPILOT_DEBUG=1 ถึงจะเห็นว่าเป็น git ที่หาย)
 # ขาดตัวไหนไปจะได้ FileNotFoundError ตอนสร้าง session ซึ่งอ่านแล้วนึกว่าไฟล์หาย
 # ทั้งที่เป็นตัวโปรแกรมเองที่ไม่มี — เช็คว่าขาดอะไรได้ด้วย `sky check kubernetes`
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl libpq5 socat openssh-client rsync netcat-openbsd \
+        curl libpq5 socat openssh-client rsync netcat-openbsd git \
     && rm -rf /var/lib/apt/lists/*
 
 # kubectl ไม่มีใน apt ของ debian ต้องโหลด binary ตรง

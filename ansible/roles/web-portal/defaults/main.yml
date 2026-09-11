@@ -21,6 +21,11 @@ webportal_api_prefix: /api
 
 # master ที่ backend จะคุยด้วยผ่าน kubeconfig
 webportal_k8s_master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] }}"
+
+# registry ที่ SkyPilot จะดึง image ของ lab ไปใช้ — ดึงจาก inventory ไม่ฮาร์ดโค้ด
+# ค่า default ในโค้ด (session_service) ชี้ registry เก่าที่ตายแล้ว ต้องส่งค่านี้
+# ไปทับเสมอ ไม่งั้น pod จะ pull image ไม่ได้
+webportal_registry_endpoint: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}:5001"
 webportal_k8s_enabled: true
 
 # seed ข้อมูล persona (Sophia + วิชา + lab) — ปิดไว้เป็นค่าเริ่มต้นเพราะเขียนทับ
