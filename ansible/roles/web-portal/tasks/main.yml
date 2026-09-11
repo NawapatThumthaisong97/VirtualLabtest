@@ -208,6 +208,24 @@
   delay: 5
   until: db_probe.status in [200, 401, 403]
 
+# SkyPilot ต้องมีเครื่องมือระดับระบบครบ (kubectl, nc, socat, ssh, rsync) ถึงจะใช้
+# Kubernetes เป็น backend ได้ ซึ่ง pip install skypilot ไม่ได้ลากมาให้
+#
+# ขาดตัวไหนไป การสร้าง session จะพังด้วย FileNotFoundError ที่ไม่บอกว่าโปรแกรมไหนหาย
+# เพราะ subprocess ใช้ข้อความเดียวกับตอนเปิดไฟล์ไม่เจอ ส่วน sky check บอกตรง ๆ
+# ว่าขาดอะไรและติดตั้งยังไง — ใช้มันตรวจตั้งแต่ตอน deploy ดีกว่าปล่อยให้ผู้ใช้
+# ไปเจอ 500 ตอนกดเปิด lab
+- name: Verify SkyPilot can actually use the Kubernetes cluster
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      sky check kubernetes
+    chdir: "{{ webportal_dir }}"
+  register: sky_check
+  changed_when: false
+  failed_when: "'Kubernetes: disabled' in sky_check.stdout"
+  when: webportal_k8s_enabled | bool
+
 - name: Report access URL
   ansible.builtin.debug:
     msg: >-
