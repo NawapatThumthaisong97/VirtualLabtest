@@ -169,6 +169,45 @@
   retries: 12
   delay: 5
 
+# ---------- Database schema ----------
+# เดิม role ไม่เคยสร้างตารางเลย deploy จึงขึ้นแบบ "เขียวแต่ใช้ไม่ได้" — container
+# healthy ครบ แต่ทุก endpoint ที่แตะ DB ตอบ 500 relation does not exist
+#
+# create_all เป็น idempotent: ตารางไหนมีอยู่แล้วจะข้าม ไม่ลบ ไม่แก้ข้อมูลเดิม
+# จึงรันทุกครั้งที่ deploy ได้อย่างปลอดภัย
+- name: Create database schema
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      python script/init_db.py
+    chdir: "{{ webportal_dir }}"
+  register: init_db
+  changed_when: "'Database initialized' in init_db.stdout"
+
+# seed เป็น optional เพราะใส่ข้อมูล persona ทับของเดิมได้ ไม่ควรรันทุก deploy
+#   ansible-playbook ... -l webportal -e webportal_seed=true
+- name: Seed initial data (ต้องสั่งเปิดเอง)
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      python script/run_seed.py
+    chdir: "{{ webportal_dir }}"
+  when: webportal_seed | bool
+  changed_when: true
+
+# ---------- Verify ----------
+# /health เช็คแค่ว่าต่อ DB ติดไหม ไม่ได้บอกว่ามี schema หรือเปล่า
+# ต้องยิง endpoint ที่ query ตารางจริงถึงจะจับเคส "ตารางหาย" ได้ตั้งแต่ตอน deploy
+# แทนที่จะไปรู้ตอนผู้ใช้เปิดหน้าเว็บแล้วเจอ 500
+- name: Verify the API can actually query the database
+  ansible.builtin.uri:
+    url: "http://{{ webportal_bind_ip }}:{{ webportal_api_port }}{{ webportal_api_prefix }}/sessions"
+    status_code: [200, 401, 403]
+  register: db_probe
+  retries: 6
+  delay: 5
+  until: db_probe.status in [200, 401, 403]
+
 - name: Report access URL
   ansible.builtin.debug:
     msg: >-

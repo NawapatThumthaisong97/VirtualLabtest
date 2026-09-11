@@ -1,3 +1,7 @@
+# Ansible managed
+# ไฟล์นี้ถูก render โดย ansible/build-images.yml — แก้ที่ ansible/templates/ ไม่ใช่ที่นี่
+# (image_id เคยเป็น IP hardcode แล้วค้างชี้ registry เก่า จึงดึงจาก inventory แทน)
+#
 # SkyPilot ตัดสินใจว่าจะรันที่ไหน (k8s บ้านเรา, AWS, ฯลฯ) - image นี้มีครบทั้ง 3 service
 # (server/client/ide) bake ไว้แล้ว รันเป็น process เดียวกันในตัวเดียว ไม่มี Docker ซ้อน
 resources:

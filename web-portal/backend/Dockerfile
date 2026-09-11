@@ -17,6 +17,11 @@ RUN pip install --no-cache-dir -r requirement.txt
 
 COPY app/ ./app/
 
+# script/ ต้องติดไปด้วย ไม่ใช่แค่ app/ — init_db.py สร้างตาราง, run_seed.py
+# ใส่ข้อมูลตั้งต้น, setup_lab_doc.py ผูกไฟล์เอกสารเข้ากับ lab และ assets/
+# เก็บ PDF ต้นฉบับไว้ ทั้งหมดจำเป็นตอนตั้งเครื่องใหม่
+COPY script/ ./script/
+
 # storage เป็นที่เก็บไฟล์เอกสารแลป (STORAGE_ROOT ใน settings)
 # สร้างไว้เผื่อกรณีที่ยังไม่มี volume mount ทับ
 RUN mkdir -p /app/storage

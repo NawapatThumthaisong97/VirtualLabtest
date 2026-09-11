@@ -22,3 +22,7 @@ webportal_api_prefix: /api
 # master ที่ backend จะคุยด้วยผ่าน kubeconfig
 webportal_k8s_master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] }}"
 webportal_k8s_enabled: true
+
+# seed ข้อมูล persona (Sophia + วิชา + lab) — ปิดไว้เป็นค่าเริ่มต้นเพราะเขียนทับ
+# ข้อมูลเดิมได้ เปิดตอนตั้งเครื่องใหม่ด้วย -e webportal_seed=true
+webportal_seed: false
