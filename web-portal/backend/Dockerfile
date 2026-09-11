@@ -7,14 +7,16 @@ FROM python:3.12-slim
 #
 # ที่เหลือเป็นของที่ SkyPilot เรียกผ่าน subprocess ตอนใช้ Kubernetes เป็น backend
 # ลง pip install skypilot อย่างเดียวไม่พอ เพราะมันไม่ได้ลากพวกนี้มาให้
+#   netcat-openbsd - ให้คำสั่ง nc ที่ SkyPilot ใช้ทำ portforward (networking mode
+#                    เริ่มต้นของ Kubernetes) ขาดตัวนี้ sky check จะขึ้น disabled
 #   socat          - port-forward เข้า pod
-#   openssh-client - ssh เข้าไปใน pod ที่ provision แล้ว
+#   openssh-client - ssh + ssh-keygen สำหรับ key ที่ SkyPilot สร้างเอง
 #   rsync          - ส่งไฟล์ workdir เข้า pod
 # ขาดตัวไหนไปจะได้ FileNotFoundError ตอนสร้าง session ซึ่งอ่านแล้วนึกว่าไฟล์หาย
-# ทั้งที่เป็นตัวโปรแกรมเองที่ไม่มี
+# ทั้งที่เป็นตัวโปรแกรมเองที่ไม่มี — เช็คว่าขาดอะไรได้ด้วย `sky check kubernetes`
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl libpq5 socat openssh-client rsync \
+        curl libpq5 socat openssh-client rsync netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # kubectl ไม่มีใน apt ของ debian ต้องโหลด binary ตรง
