@@ -38,9 +38,7 @@
       - docker-compose-plugin
     state: present
     update_cache: yes
-    # ถ้าไม่ใส่ cache_valid_time มันจะบังคับดึง index ใหม่ทุกครั้งที่รัน playbook
-    # ซึ่งบนเน็ตที่ไปหา archive.ubuntu.com ได้ ~200 KB/s และสะดุดเป็นพัก ๆ
-    # กลายเป็นค้างสิบกว่านาทีทั้งที่ Docker ลงไว้แล้วและไม่มีอะไรต้องติดตั้ง
+    # กันไม่ให้ดึง apt index ใหม่ทุกรอบ — เน็ตไป archive.ubuntu.com ช้าจนค้างเป็นสิบนาที
     cache_valid_time: 3600
 
 - name: Ensure Docker service is running
@@ -65,14 +63,9 @@
     group: "{{ ansible_user }}"
     mode: "0755"
 
-# ส่งเฉพาะ source — node_modules/venv สร้างใหม่ใน image อยู่แล้วและใหญ่มาก
-# storage/ ไม่ sync เพราะเป็นข้อมูลฝั่ง server ไม่ใช่ของที่มาจาก repo
-#
-# synchronize อ่านค่า become จาก play ไม่ใช่จาก task — ใส่ become: false ตรงนี้อย่างเดียว
-# ไม่พอ มันยังเติม --rsync-path='sudo -u root rsync' มาให้อยู่ดี แล้ว sudo ตัวนั้นรันโดยไม่มี
-# tty จึงรับรหัสจาก -K ไม่ได้และ fail ทันที ต้อง override rsync_path เป็น rsync เปล่า ๆ ด้วย
-#
-# ไม่ต้องใช้ root อยู่แล้วเพราะ task ก่อนหน้าตั้ง owner ของ directory เป็น ansible_user ไว้
+# ส่งเฉพาะ source — node_modules/venv สร้างใน image, storage/ เป็นข้อมูลฝั่ง server
+# synchronize เอา become จาก play มาเติม sudo ให้ rsync อยู่ดีแม้ใส่ become: false
+# และ sudo นั้นไม่มี tty รับรหัส -K ไม่ได้ จึงต้อง override rsync_path ด้วย
 - name: Sync web-portal source to target
   become: false
   ansible.posix.synchronize:
@@ -98,9 +91,8 @@
     mode: "0755"
 
 # ---------- kubeconfig ----------
-# k3s เขียน kubeconfig โดยชี้ server เป็น 127.0.0.1 เสมอ
-# ถ้าเอามาใช้ที่เครื่องนี้ตรง ๆ backend จะเรียกหาตัวเองแล้วพัง
-# ต้องเปลี่ยนเป็น Tailscale IP ของ master ซึ่ง cert ครอบไว้แล้วด้วย --tls-san
+# k3s ชี้ server เป็น 127.0.0.1 เสมอ ต้องเปลี่ยนเป็น Tailscale IP ของ master
+# (cert ครอบไว้แล้วด้วย --tls-san) ไม่งั้น backend จะเรียกหาตัวเอง
 
 - name: Read kubeconfig from master
   ansible.builtin.slurp:
@@ -170,11 +162,7 @@
   delay: 5
 
 # ---------- Database schema ----------
-# เดิม role ไม่เคยสร้างตารางเลย deploy จึงขึ้นแบบ "เขียวแต่ใช้ไม่ได้" — container
-# healthy ครบ แต่ทุก endpoint ที่แตะ DB ตอบ 500 relation does not exist
-#
-# create_all เป็น idempotent: ตารางไหนมีอยู่แล้วจะข้าม ไม่ลบ ไม่แก้ข้อมูลเดิม
-# จึงรันทุกครั้งที่ deploy ได้อย่างปลอดภัย
+# create_all เป็น idempotent (มีตารางแล้วข้าม ไม่แตะข้อมูล) จึงรันทุก deploy ได้
 - name: Create database schema
   ansible.builtin.command:
     cmd: >-
@@ -184,8 +172,7 @@
   register: init_db
   changed_when: "'Database initialized' in init_db.stdout"
 
-# seed เป็น optional เพราะใส่ข้อมูล persona ทับของเดิมได้ ไม่ควรรันทุก deploy
-#   ansible-playbook ... -l webportal -e webportal_seed=true
+# seed เป็น optional เพราะทับข้อมูลเดิมได้ สั่งเปิดด้วย -e webportal_seed=true
 - name: Seed initial data (ต้องสั่งเปิดเอง)
   ansible.builtin.command:
     cmd: >-
@@ -196,9 +183,7 @@
   changed_when: true
 
 # ---------- Verify ----------
-# /health เช็คแค่ว่าต่อ DB ติดไหม ไม่ได้บอกว่ามี schema หรือเปล่า
-# ต้องยิง endpoint ที่ query ตารางจริงถึงจะจับเคส "ตารางหาย" ได้ตั้งแต่ตอน deploy
-# แทนที่จะไปรู้ตอนผู้ใช้เปิดหน้าเว็บแล้วเจอ 500
+# /health เช็คแค่ต่อ DB ติด ต้องยิง endpoint ที่ query ตารางจริงถึงจะจับเคสตารางหายได้
 - name: Verify the API can actually query the database
   ansible.builtin.uri:
     url: "http://{{ webportal_bind_ip }}:{{ webportal_api_port }}{{ webportal_api_prefix }}/sessions"
@@ -208,13 +193,8 @@
   delay: 5
   until: db_probe.status in [200, 401, 403]
 
-# SkyPilot ต้องมีเครื่องมือระดับระบบครบ (kubectl, nc, socat, ssh, rsync) ถึงจะใช้
-# Kubernetes เป็น backend ได้ ซึ่ง pip install skypilot ไม่ได้ลากมาให้
-#
-# ขาดตัวไหนไป การสร้าง session จะพังด้วย FileNotFoundError ที่ไม่บอกว่าโปรแกรมไหนหาย
-# เพราะ subprocess ใช้ข้อความเดียวกับตอนเปิดไฟล์ไม่เจอ ส่วน sky check บอกตรง ๆ
-# ว่าขาดอะไรและติดตั้งยังไง — ใช้มันตรวจตั้งแต่ตอน deploy ดีกว่าปล่อยให้ผู้ใช้
-# ไปเจอ 500 ตอนกดเปิด lab
+# SkyPilot ต้องมี kubectl, nc, socat, ssh, rsync ซึ่ง pip ไม่ได้ลงให้ ถ้าขาดจะพังเป็น
+# FileNotFoundError ที่ไม่บอกว่าตัวไหนหาย — ใช้ sky check ตรวจตอน deploy แทน
 - name: Verify SkyPilot can actually use the Kubernetes cluster
   ansible.builtin.command:
     cmd: >-
