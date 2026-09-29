@@ -57,7 +57,13 @@ cachetools==5.5.0             # Caching utilities
 
 skypilot==0.12.3.post1
 
-kubernetes
+# ต้องอยู่ในช่วงที่ skypilot 0.12.3 รองรับ (>=20.0.0, <36.0.0, ไม่เอา 32.0.0)
+# เดิมเขียนว่า kubernetes เปล่า ๆ pip เลยลงตัวล่าสุด (36.0.3) ทับข้อกำหนดของ
+# skypilot ผลคือ sky launch พังด้วย
+#   InvalidCloudConfigs: Validation error in metadata.labels:
+#   No module named 'kubernetes.client.models.dict[str, str]'
+# เพราะ 36.x เปลี่ยนรูปแบบ type annotation ของ model แล้ว skypilot หาไม่เจอ
+kubernetes>=20.0.0,<36.0.0,!=32.0.0
 pyyaml
 
 sqladmin

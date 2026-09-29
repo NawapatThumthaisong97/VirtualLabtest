@@ -1,4 +1,4 @@
-# Production compose สำหรับเครื่อง webportal (100.68.206.79)
+# Production compose สำหรับเครื่อง webportal (100.98.10.101)
 #
 # ต่างจาก docker-compose.yml (dev) ตรงที่:
 #   - รันครบทั้ง 3 service ไม่ใช่แค่ db

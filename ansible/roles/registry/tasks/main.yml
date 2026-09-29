@@ -6,6 +6,10 @@
     name: docker.io
     state: present
     update_cache: true
+    # ถ้าไม่ใส่ cache_valid_time จะบังคับดึง index ใหม่ทุกครั้งที่รัน playbook
+    # ความเร็วเน็ตไป archive.ubuntu.com แกว่งระหว่าง 5 MB/s กับ 2 KB/s
+    # ตกจังหวะช้าเมื่อไหร่ก็ค้างสิบกว่านาทีทั้งที่ไม่มีอะไรต้องติดตั้ง
+    cache_valid_time: 3600
 
 - name: Ensure Docker service is running
   ansible.builtin.systemd:
@@ -18,6 +22,7 @@
     name: python3-docker
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
 - name: Camp private registry (port 5001)
   community.docker.docker_container:

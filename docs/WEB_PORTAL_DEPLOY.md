@@ -6,11 +6,11 @@
 
 ## 1. เป้าหมาย
 
-Host `web-portal/` (FastAPI + React + Postgres) บนเครื่องแยกที่ `100.68.206.79` แบบ standalone
+Host `web-portal/` (FastAPI + React + Postgres) บนเครื่องแยกที่ `100.98.10.101` แบบ standalone
 docker-compose โดยไม่ join k3s cluster
 
 **การเข้าถึง: Tailscale IP ตรงๆ** — ไม่ใช้ domain, ไม่ใช้ Cloudflare Tunnel
-เข้าที่ `http://100.68.206.79` จากเครื่องที่อยู่ใน tailnet เดียวกัน
+เข้าที่ `http://100.98.10.101` จากเครื่องที่อยู่ใน tailnet เดียวกัน
 
 > ถ้าวันหน้าอยากได้ HTTPS หรือเปิดสู่อินเทอร์เน็ต เพิ่ม `tailscale serve` / `tailscale funnel`
 > ได้ภายหลังโดยไม่ต้องรื้อ architecture — โครงนี้ไม่ปิดทาง
@@ -24,17 +24,34 @@ docker-compose โดยไม่ join k3s cluster
 |---|---|---|---|
 | master | `master` | 100.81.134.35 | k3s server (control-plane) |
 | worker | `worker-1` | 100.73.174.96 | k3s agent — รัน lab workload |
-| registry | `registry-host` | 100.86.105.18 | container registry |
-| webportal | `webportal` | 100.68.206.79 | **ใหม่** — docker-compose (db + backend + frontend) |
+| registry | `registry-host` | 100.126.162.14 | container registry |
+| webportal | `webportal` | 100.98.10.101 | **ใหม่** — docker-compose (db + backend + frontend) |
 
 SSH user ของทั้ง 4 เครื่อง: `room111` (become: sudo)
+
+> **IP ในตารางนี้เป็นแค่ภาพ ณ เวลาที่เขียน — ตัวจริงอยู่ที่ `ansible/inventory.yml`**
+> Tailscale จ่าย IP ใหม่ทุกครั้งที่เครื่อง re-join tailnet (สังเกตจากชื่อ device ที่มี
+> `-1` ต่อท้าย เช่น `room111-32-1`) เวลาเจอว่าต่อไม่ได้ ให้ไล่หา IP ใหม่จาก
+> `tailscale status` แล้วแก้ที่ inventory ที่เดียว playbook ทุกตัวอ่านจากตรงนั้น
+>
+> วิธีระบุว่าเครื่องไหนเป็นบทบาทอะไรโดยไม่ต้องเดา — ดูจากสิ่งที่รันอยู่จริง:
+>
+> ```bash
+> for ip in <ip ทั้งหมดจาก tailscale status>; do
+>   printf '%-16s ' "$ip"
+>   ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=6 \
+>     room111@$ip 'hostname; docker ps --format "{{.Names}}"; systemctl is-active k3s'
+> done
+> ```
+>
+> `camp-registry` = registry, `virtual_lab_*` = webportal, k3s `active` = master
 Tailscale: **up ครบทั้ง 4 เครื่องแล้ว** (ยืนยัน 2026-09-04)
 
 ```
-        ผู้ใช้ในtailnet ── http://100.68.206.79 ──┐
+        ผู้ใช้ในtailnet ── http://100.98.10.101 ──┐
                                                   │
                                          ┌────────▼─────────┐
-                                         │  webportal       │  100.68.206.79
+                                         │  webportal       │  100.98.10.101
                                          │  ┌────────────┐  │
                                          │  │ frontend   │  │  nginx  :80
                                          │  │ backend    │  │  uvicorn :8000
@@ -47,7 +64,7 @@ Tailscale: **up ครบทั้ง 4 เครื่องแล้ว** (ย
                                          └────────┬─────────┘
                                                   │
                              ┌────────────────────┴──────────────┐
-                        worker-1 100.73.174.96          registry 100.86.105.18
+                        worker-1 100.73.174.96          registry 100.126.162.14
 ```
 
 port ที่เปิดบน webportal (ผูกกับ `tailscale0` เท่านั้น ไม่ใช่ `0.0.0.0`):
@@ -72,8 +89,8 @@ port ที่เปิดบน webportal (ผูกกับ `tailscale0` เ�
 | G9 | group `webportal` ใน inventory + play ใน `site.yml` | ไม่มี | เพิ่ม |
 | G6 | ~~ค่า R2~~ | ประกาศใน `settings.py` แต่ **ไม่ถูกใช้ที่ไหนเลย** (ไม่มี `boto3`) ไฟล์ใช้ `STORAGE_ROOT` บน filesystem แทน | **ไม่ต้องทำ** — ตัดออกจาก `.env` ที่ render |
 | G7 | `SECRET_KEY` | เป็น placeholder | generate ใหม่ เก็บใน Vault |
-| G10 | `CORS_ORIGINS_STR` | ชี้ `localhost:3000,localhost:5173` | ต้องเพิ่ม `http://100.68.206.79` ไม่งั้น frontend เรียก API ไม่ได้ |
-| G11 | `VITE_API_URL` | ชี้ `http://localhost:8000/api` | ต้องเป็น `http://100.68.206.79:8000/api` — ค่านี้ถูก **bake ตอน build** ไม่ใช่ runtime จึงต้องส่งเป็น build arg |
+| G10 | `CORS_ORIGINS_STR` | ชี้ `localhost:3000,localhost:5173` | ต้องเพิ่ม `http://100.98.10.101` ไม่งั้น frontend เรียก API ไม่ได้ |
+| G11 | `VITE_API_URL` | ชี้ `http://localhost:8000/api` | ต้องเป็น `http://100.98.10.101:8000/api` — ค่านี้ถูก **bake ตอน build** ไม่ใช่ runtime จึงต้องส่งเป็น build arg |
 | G12 | `backend/storage/` | เก็บไฟล์เอกสารแลปบน filesystem | ต้องเป็น volume ไม่งั้นไฟล์หายทุกครั้งที่ rebuild — และต้อง `--exclude` จาก rsync ที่ใช้ `delete: yes` |
 | G13 | backend ตายถ้า DB ไม่พร้อม | `lifespan` เรียก `sys.exit(1)` เมื่อ `check_db_connection()` fail | compose ต้องใช้ `depends_on: condition: service_healthy` ไม่ใช่ `depends_on` เปล่า |
 | G14 | ชื่อ host ชนชื่อ group | `master`/`webportal` เป็นทั้งชื่อ group และชื่อ host | เปลี่ยนชื่อ host เป็น `master-1` / `webportal-1` |
@@ -106,11 +123,11 @@ all:
     registry:
       hosts:
         registry-host:
-          ansible_host: "100.86.105.18"
+          ansible_host: "100.126.162.14"
     webportal:
       hosts:
         webportal:
-          ansible_host: "100.68.206.79"
+          ansible_host: "100.98.10.101"
   vars:
     ansible_user: "room111"
     ansible_become: yes
@@ -206,8 +223,8 @@ vault_r2_secret_access_key: "..."
 cd ~/document/VirtualLabtest/ansible
 
 # 1. ใส่ SSH key ให้ทั้ง 4 เครื่อง (ทำครั้งเดียว — หลังจากนี้ไม่ต้องใช้ password อีก)
-ssh-keyscan -H 100.81.134.35 100.73.174.96 100.86.105.18 100.68.206.79 >> ~/.ssh/known_hosts
-for ip in 100.81.134.35 100.73.174.96 100.86.105.18 100.68.206.79; do
+ssh-keyscan -H 100.81.134.35 100.73.174.96 100.126.162.14 100.98.10.101 >> ~/.ssh/known_hosts
+for ip in 100.81.134.35 100.73.174.96 100.126.162.14 100.98.10.101; do
   ssh-copy-id room111@$ip
 done
 
@@ -223,8 +240,8 @@ ansible-playbook -i inventory.yml site.yml -l registry -K
 ansible-playbook -i inventory.yml site.yml -l webportal -K --ask-vault-pass
 
 # 5. ตรวจผล
-curl -f http://100.68.206.79:8000/docs   # backend ขึ้น
-curl -f http://100.68.206.79/            # frontend ขึ้น
+curl -f http://100.98.10.101:8000/docs   # backend ขึ้น
+curl -f http://100.98.10.101/            # frontend ขึ้น
 ```
 
 ## 9. คำถามที่ต้องการคำตอบก่อนลงมือ
@@ -236,7 +253,7 @@ curl -f http://100.68.206.79/            # frontend ขึ้น
 ### ปิดแล้ว
 
 - ~~Q1 — R2 credentials?~~ → **ไม่ต้องใช้** โค้ดไม่ได้เรียก R2 เลย ใช้ `STORAGE_ROOT` บน filesystem
-- ~~Q2 — domain?~~ → **ไม่ใช้ domain** เข้าผ่าน Tailscale IP `http://100.68.206.79` ตรงๆ
+- ~~Q2 — domain?~~ → **ไม่ใช้ domain** เข้าผ่าน Tailscale IP `http://100.98.10.101` ตรงๆ
 - ~~Q3 — health endpoint?~~ → **มี** `GET /health` (นอก `API_PREFIX`) เช็ค DB ให้ด้วย
 - ~~Q5 — Tailscale up หรือยัง?~~ → **up ครบทั้ง 4 เครื่องแล้ว** (2026-09-04)
 
@@ -246,7 +263,7 @@ curl -f http://100.68.206.79/            # frontend ขึ้น
 - **R2** — `flannel_iface: tailscale0` แปลว่าทุก node ต้อง Tailscale online **ก่อน** ติดตั้ง k3s ไม่งั้น k3s จะ start ไม่ขึ้น (ตอนนี้ up ครบแล้ว — ความเสี่ยงนี้ปิดไป)
 - **R5** — เข้าผ่าน Tailscale IP แปลว่า **เฉพาะเครื่องใน tailnet เท่านั้นที่เข้าได้** ถ้าต้องให้คนนอก (เช่น นักศึกษาที่ไม่ได้ลง Tailscale) เข้าถึง ต้องเพิ่ม `tailscale funnel` หรือ Cloudflare Tunnel ทีหลัง
 - **R6** — ไม่มี HTTPS (http ล้วน) ยอมรับได้เพราะ traffic วิ่งใน WireGuard tunnel ของ Tailscale ซึ่งเข้ารหัสอยู่แล้ว แต่ browser จะขึ้น "Not secure" และ API ที่ต้องใช้ secure context (clipboard, camera) จะใช้ไม่ได้
-- **R3** — build frontend บนเครื่อง target ใช้ RAM สูง (Vite + TS) ถ้า VM เล็กกว่า 2GB อาจ OOM — ทางแก้คือ build เป็น image แล้ว push เข้า registry `100.86.105.18` แทน
+- **R3** — build frontend บนเครื่อง target ใช้ RAM สูง (Vite + TS) ถ้า VM เล็กกว่า 2GB อาจ OOM — ทางแก้คือ build เป็น image แล้ว push เข้า registry `100.126.162.14` แทน
 - **R4** — Postgres ใน compose ใช้ named volume ถ้า `docker compose down -v` จะลบข้อมูลทิ้ง ต้องระวังใน task ของ Ansible อย่าใส่ `-v`
 
 ## 11. ขอบเขตที่ **ไม่** รวมในรอบนี้
