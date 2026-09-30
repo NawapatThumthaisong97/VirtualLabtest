@@ -46,3 +46,14 @@ output "test_instances" {
     }
   }
 }
+
+# Phase 9
+output "ecr_repository_url" {
+  description = "Normal endpoint (IPv4). Push from the laptop."
+  value       = aws_ecr_repository.hello.repository_url
+}
+
+output "ecr_dualstack_host" {
+  description = "Dual-stack registry host. Pull from the private instances."
+  value       = "${aws_ecr_repository.hello.registry_id}.dkr-ecr.${var.region}.on.aws"
+}
