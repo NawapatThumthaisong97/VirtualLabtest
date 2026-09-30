@@ -13,3 +13,11 @@ output "vpc_ipv6_cidr" {
 output "public_a_subnet_id" {
   value = aws_subnet.public_a.id
 }
+
+# Phase 4
+output "private_subnet_ipv6_cidrs" {
+  value = {
+    private_a = aws_subnet.private_a.ipv6_cidr_block
+    private_b = aws_subnet.private_b.ipv6_cidr_block
+  }
+}
