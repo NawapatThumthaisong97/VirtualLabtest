@@ -10,3 +10,10 @@ variable "aws_profile" {
   description = "Pete's own AWS CLI profile. Never the SkyPilot IAM user."
   type        = string
 }
+
+# Public key only. The private key never leaves the laptop.
+variable "ssh_public_key_path" {
+  description = "Path to the SSH public key for the test instances."
+  type        = string
+  default     = "~/.ssh/id_ed25519.pub"
+}

@@ -35,3 +35,14 @@ output "router_instance_id" {
 output "router_public_ip" {
   value = aws_instance.ts_router.public_ip
 }
+
+# Phase 8
+output "test_instances" {
+  value = {
+    for k, i in aws_instance.test : k => {
+      az   = i.availability_zone
+      ipv4 = i.private_ip
+      ipv6 = i.ipv6_addresses
+    }
+  }
+}
