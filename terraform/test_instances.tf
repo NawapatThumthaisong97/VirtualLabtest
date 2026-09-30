@@ -20,6 +20,7 @@ resource "aws_instance" "test" {
   subnet_id                   = each.value
   vpc_security_group_ids      = [aws_security_group.lab_instances.id]
   key_name                    = aws_key_pair.pete.key_name
+  iam_instance_profile        = aws_iam_instance_profile.lab_ecr_pull.name
   associate_public_ip_address = false
 
   metadata_options {
