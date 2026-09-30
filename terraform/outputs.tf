@@ -26,3 +26,12 @@ output "private_subnet_ipv6_cidrs" {
 output "s3_prefix_list_id" {
   value = aws_vpc_endpoint.s3.prefix_list_id
 }
+
+# Phase 7
+output "router_instance_id" {
+  value = aws_instance.ts_router.id
+}
+
+output "router_public_ip" {
+  value = aws_instance.ts_router.public_ip
+}
