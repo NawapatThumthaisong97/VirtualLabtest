@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
-from app.middlewares.auth import get_current_user
+from app.middlewares.auth import get_current_user, get_current_user_optional
 from app.models.user import User, UserRole
 from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
@@ -95,8 +95,6 @@ def get_course(
 ):
     """ดึงข้อมูล course พร้อม announcement ที่เกี่ยวข้อง"""
     course, announcements = controller.get_course_detail(course_id)
-    if not course:
-        raise NotFoundError(f"Course {course_id} not found")
     return course_detail_response(course, announcements, request)
 
 
@@ -117,19 +115,25 @@ def create_course(
 @router.get("", response_model=list[CourseResponse])
 def get_all_courses(
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
     controller: CourseController = Depends(get_course_controller),
 ):
     """
-    คืนเฉพาะวิชาที่คนล็อกอินเกี่ยวข้องด้วย (ลงเรียนหรือสอน)
-
-    เดิมเส้นนี้คืนทุกวิชาในระบบ นักศึกษาเลยเห็นวิชาที่ตัวเองไม่ได้ลงด้วย
-    admin ยังเห็นทั้งหมดเพราะต้องใช้ดูภาพรวมระบบ
+    คืนรายการวิชา:
+    - ถ้าไม่ได้ login: คืนทุกวิชา (public)
+    - ถ้า login แล้วเป็น admin: คืนทุกวิชา
+    - ถ้า login แล้วเป็น student/instructor: คืนเฉพาะวิชาที่เกี่ยวข้อง
     """
-    if current_user.role is UserRole.ADMIN:
+    if current_user is None:
+        # ไม่ได้ login: แสดงทุกวิชา (public mode)
+        courses = controller.get_all_courses()
+    elif current_user.role is UserRole.ADMIN:
+        # Admin เห็นทุกวิชา
         courses = controller.get_all_courses()
     else:
+        # Student/Instructor เห็นเฉพาะวิชาที่ลงเรียน/สอน
         courses = controller.get_courses_by_student(current_user.id)
+    
     return [course_response(course, request) for course in courses]
 
 
@@ -138,12 +142,9 @@ def get_course_image(
     course_id: UUID,
     controller: CourseController = Depends(get_course_controller),
 ):
+    """ดึงรูปภาพของ course"""
     course = controller.get_course(course_id)
-    if (
-        not course
-        or not course.image_url
-        or course.image_url.startswith(("http://", "https://"))
-    ):
+    if not course.image_url or course.image_url.startswith(("http://", "https://")):
         raise NotFoundError(f"Course image {course_id} not found")
     path = local_storage.resolve(course.image_url)
     if not path.is_file():
@@ -158,6 +159,7 @@ def upload_course_image(
     image: UploadFile = File(...),
     controller: CourseController = Depends(get_course_controller),
 ):
+    """อัปโหลดรูปภาพของ course"""
     if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
         raise HTTPException(
             status_code=400, detail="Only JPEG, PNG, and WebP images are supported"
@@ -165,8 +167,6 @@ def upload_course_image(
     course = controller.course_service.save_course_image(
         course_id, image.filename or "image.bin", image
     )
-    if not course:
-        raise NotFoundError(f"Course {course_id} not found")
     return course_response(course, request)
 
 
@@ -190,11 +190,7 @@ def update_course_announcement_ids(
     controller: CourseController = Depends(get_course_controller),
 ):
     """อัปเดต announcement_ids ของ course โดยใช้ course_id"""
-    updated_course = controller.update_course_announcement_ids(
-        course_id, announcement_ids
-    )
-    if not updated_course:
-        raise NotFoundError(f"Course {course_id} not found")
+    controller.update_course_announcement_ids(course_id, announcement_ids)
 
 
 @router.delete("/{course_id}", status_code=http_status.HTTP_204_NO_CONTENT)
