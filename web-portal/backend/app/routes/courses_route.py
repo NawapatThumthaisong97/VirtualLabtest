@@ -4,7 +4,6 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
-    HTTPException,
     Request,
     UploadFile,
     status as http_status,
@@ -19,6 +18,8 @@ from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
 from app.schemas.course_schema import (
     AnnouncementResponse,
+    AnnouncementCreateRequest,
+    AnnouncementUpdateRequest,
     CourseCreateRequest,
     CourseDetailResponse,
     CourseResponse,
@@ -28,7 +29,7 @@ from app.services.courses_service import CourseService
 from app.controllers.course_controller import CourseController
 from app.middlewares.request_validation import require_non_empty_body
 from app.adapters.local_storage import local_storage
-from app.exceptions.domain import NotFoundError
+from app.exceptions.domain import NotFoundError, ValidationError
 
 router = APIRouter()
 
@@ -49,11 +50,17 @@ def announcement_response(announcement) -> AnnouncementResponse:
     map เอง ไม่ใช้ model_validate เพราะ author_name ไม่ได้อยู่บนตาราง
     announcements ตรง ๆ — ต้องเดินผ่าน relationship ไปหยิบชื่อจาก users
     """
+    try:
+        author_name = announcement.author.name if announcement.author else None
+    except AttributeError:
+        # ถ้า author relationship ไม่ได้ load
+        author_name = None
+    
     return AnnouncementResponse(
         id=announcement.id,
         message=announcement.message,
         created_at=announcement.created_at,
-        author_name=announcement.author.name if announcement.author else None,
+        author_name=author_name,
     )
 
 
@@ -161,9 +168,7 @@ def upload_course_image(
 ):
     """อัปโหลดรูปภาพของ course"""
     if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
-        raise HTTPException(
-            status_code=400, detail="Only JPEG, PNG, and WebP images are supported"
-        )
+        raise ValidationError("Only JPEG, PNG, and WebP images are supported")
     course = controller.course_service.save_course_image(
         course_id, image.filename or "image.bin", image
     )
@@ -207,3 +212,67 @@ def hard_delete_course(
 ):
     """ลบ course ออกจากฐานข้อมูลถาวร"""
     controller.hard_delete_course(course_id)
+
+
+@router.post(
+    "/{course_id}/announcements",
+    response_model=AnnouncementResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(require_non_empty_body)],
+)
+def create_announcement(
+    course_id: UUID,
+    announcement: AnnouncementCreateRequest,
+    current_user: User | None = Depends(get_current_user_optional),
+    controller: CourseController = Depends(get_course_controller),
+):
+    """
+    สร้าง announcement ใหม่สำหรับ course
+    
+    Dev Mode: ถ้าไม่ได้ login จะใช้ hardcoded dev user
+    Production: ต้อง login (oauth2-proxy)
+    
+    Raises:
+        404: Course not found
+        400: Invalid message or author
+        500: Internal server error
+    """
+    # Dev Mode: ใช้ hardcoded user ID (TODO: ลบออกตอนเปิด Auth)
+    if current_user is None:
+        author_id = UUID("0685445d-c06b-4110-ba10-743fdf014639")
+    else:
+        author_id = current_user.id
+    
+    created_announcement = controller.create_announcement(
+        course_id=course_id,
+        message=announcement.message,
+        author_id=author_id
+    )
+    return announcement_response(created_announcement)
+
+
+@router.patch(
+    "/{course_id}/announcements/{announcement_id}",
+    response_model=AnnouncementResponse,
+    dependencies=[Depends(require_non_empty_body)],
+)
+def update_announcement(
+    course_id: UUID,
+    announcement_id: UUID,
+    announcement: AnnouncementUpdateRequest,
+    controller: CourseController = Depends(get_course_controller),
+):
+    """
+    อัปเดต announcement ของ course
+    
+    Raises:
+        404: Course or announcement not found
+        400: Invalid message or announcement doesn't belong to course
+        500: Internal server error
+    """
+    updated_announcement = controller.update_announcement(
+        course_id=course_id,
+        announcement_id=announcement_id,
+        message=announcement.message
+    )
+    return announcement_response(updated_announcement)

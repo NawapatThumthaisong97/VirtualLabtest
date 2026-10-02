@@ -249,4 +249,127 @@ class CourseService:
             raise InternalServerError(
                 f"Failed to update announcement IDs: {str(e)}"
             ) from e
+
+    def create_announcement(
+        self, course_id: UUID, message: str, author_id: UUID
+    ):
+        """
+        สร้าง announcement ใหม่สำหรับ course
+        
+        Raises:
+            CourseNotFoundError: ถ้าหา course ไม่เจอ
+            ValidationError: ถ้า message ไม่ถูกต้อง
+            InternalServerError: ถ้าเกิด error อื่น ๆ
+        """
+        try:
+            # ตรวจสอบว่า course มีอยู่จริง
+            course = self.course_repository.find_by_id(course_id)
+            if not course:
+                raise CourseNotFoundError(f"Course {course_id} not found")
+
+            if not message or not message.strip():
+                raise ValidationError("Announcement message cannot be empty")
+
+            from app.models.announcement import Announcement
+            announcement = Announcement(
+                course_id=course_id,
+                author_id=author_id,
+                message=message.strip()
+            )
+            
+            saved_announcement = self.announcement_repository.create(announcement)
+            self.course_repository.db.commit()
+            
+            # Refresh เพื่อให้ได้ relationship data (author)
+            try:
+                self.course_repository.db.refresh(saved_announcement)
+            except Exception as refresh_error:
+                # ถ้า refresh ล้มเหลว ก็ยังคืน announcement ที่สร้างได้
+                # แต่อาจไม่มี author relationship loaded
+                pass
+            
+            return saved_announcement
+            
+        except (CourseNotFoundError, ValidationError):
+            self.course_repository.db.rollback()
+            raise
+        except IntegrityError as e:
+            self.course_repository.db.rollback()
+            # ตรวจสอบว่า error มาจาก foreign key constraint
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            if 'author_id' in error_msg or 'users' in error_msg:
+                raise ValidationError(f"Invalid author ID: {author_id}") from e
+            elif 'course_id' in error_msg or 'courses' in error_msg:
+                raise CourseNotFoundError(f"Course {course_id} not found") from e
+            raise InternalServerError(
+                f"Failed to create announcement: database constraint violation"
+            ) from e
+        except Exception as e:
+            self.course_repository.db.rollback()
+            raise InternalServerError(
+                f"Failed to create announcement: {str(e)}"
+            ) from e
+
+    def update_announcement(
+        self, course_id: UUID, announcement_id: UUID, message: str
+    ):
+        """
+        อัปเดต announcement
+        
+        Raises:
+            CourseNotFoundError: ถ้าหา course หรือ announcement ไม่เจอ
+            ValidationError: ถ้า message ไม่ถูกต้อง หรือ announcement ไม่ได้อยู่ใน course นี้
+            InternalServerError: ถ้าเกิด error อื่น ๆ
+        """
+        try:
+            # ตรวจสอบว่า course มีอยู่จริง
+            course = self.course_repository.find_by_id(course_id)
+            if not course:
+                raise CourseNotFoundError(f"Course {course_id} not found")
+
+            # ตรวจสอบว่า announcement มีอยู่จริง
+            announcement = self.announcement_repository.find_by_id(announcement_id)
+            if not announcement:
+                raise CourseNotFoundError(f"Announcement {announcement_id} not found")
+
+            # ตรวจสอบว่า announcement อยู่ใน course นี้จริง
+            if announcement.course_id != course_id:
+                raise ValidationError(
+                    f"Announcement {announcement_id} does not belong to course {course_id}"
+                )
+
+            if not message or not message.strip():
+                raise ValidationError("Announcement message cannot be empty")
+
+            announcement.message = message.strip()
+            updated_announcement = self.announcement_repository.update(announcement)
+            self.course_repository.db.commit()
+            
+            # Refresh เพื่อให้ได้ relationship data
+            try:
+                self.course_repository.db.refresh(updated_announcement)
+            except Exception as refresh_error:
+                # ถ้า refresh ล้มเหลว ก็ยังคืน announcement ที่ update ได้
+                pass
+            
+            return updated_announcement
+            
+        except (CourseNotFoundError, ValidationError):
+            self.course_repository.db.rollback()
+            raise
+        except IntegrityError as e:
+            self.course_repository.db.rollback()
+            raise InternalServerError(
+                f"Failed to update announcement: database constraint violation"
+            ) from e
+        except AttributeError as e:
+            self.course_repository.db.rollback()
+            raise InternalServerError(
+                f"Failed to update announcement: invalid attribute access - {str(e)}"
+            ) from e
+        except Exception as e:
+            self.course_repository.db.rollback()
+            raise InternalServerError(
+                f"Failed to update announcement: {str(e)}"
+            ) from e
     

@@ -8,6 +8,8 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60 * 5, // 5 minutes
       gcTime: 1000 * 60 * 10, // 10 minutes (formerly cacheTime)
+      refetchOnWindowFocus: false, // ปิด refetch ตอน focus window (สำหรับ dev)
+      refetchOnMount: false, // ปิด refetch ตอน component mount ถ้ายังมี cache
     },
   },
 });

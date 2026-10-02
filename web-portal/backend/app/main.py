@@ -9,6 +9,7 @@ from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect
 from sqladmin import Admin, ModelView
@@ -222,25 +223,82 @@ async def domain_exception_handler(request, exc: DomainError):
     )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """
+    จับ Pydantic validation errors (เช่น UUID ผิดรูปแบบ, required field หาย)
+    แปลงให้เป็น format เดียวกับระบบ
+    """
+    # ดึง error message แรก (ปกติจะมีหลาย errors)
+    errors = exc.errors()
+    first_error = errors[0] if errors else {}
+    
+    # สร้าง error message ที่อ่านง่าย
+    field_name = " -> ".join(str(loc) for loc in first_error.get("loc", []))
+    error_msg = first_error.get("msg", "Validation error")
+    
+    message = f"Invalid {field_name}: {error_msg}"
+    
+    logger.warning(f"Validation error: {message}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "success": False,
+            "message": message,
+            "data": None,
+            "error": {
+                "code": "validation_error",
+                "message": message,
+                "details": errors,  # รายละเอียดเต็มสำหรับ debug
+            },
+        },
+    )
+
+
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request, exc):
     """จับ database errors"""
     logger.error(f"Database error: {str(exc)}")
-    return JSONResponse(status_code=500, content={"detail": "Database error occurred"})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "success": False,
+            "message": "Database error occurred",
+            "data": None,
+            "error": {"code": "database_error", "message": str(exc)},
+        },
+    )
 
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request, exc):
     """จับ validation errors"""
     logger.warning(f"Validation error: {str(exc)}")
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "success": False,
+            "message": str(exc),
+            "data": None,
+            "error": {"code": "value_error", "message": str(exc)},
+        },
+    )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """จับ unexpected errors"""
     logger.error(f"Unexpected error: {str(exc)}", exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "success": False,
+            "message": "Internal server error",
+            "data": None,
+            "error": {"code": "internal_error", "message": str(exc)},
+        },
+    )
 
 
 # Health Check Endpoint

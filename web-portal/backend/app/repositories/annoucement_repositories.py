@@ -11,7 +11,12 @@ class AnnouncementRepository(BaseRepository[Announcement]):
     model = Announcement
 
     def find_by_id(self, announcement_id: UUID) -> Announcement | None:
-        result = select(self.model).where(self.model.id == announcement_id)
+        """ดึง announcement พร้อม eager load author relationship"""
+        result = (
+            select(self.model)
+            .options(joinedload(self.model.author))
+            .where(self.model.id == announcement_id)
+        )
         return self.db.execute(result).scalar_one_or_none()
 
     def find_by_course_id(self, course_id: UUID) -> list[Announcement]:
@@ -24,3 +29,18 @@ class AnnouncementRepository(BaseRepository[Announcement]):
             .order_by(self.model.created_at.desc())
         )
         return list(self.db.execute(result).scalars().all())
+
+    def create(self, announcement: Announcement) -> Announcement:
+        """สร้าง announcement ใหม่"""
+        self.db.add(announcement)
+        self.db.flush()
+        return announcement
+
+    def update(self, announcement: Announcement) -> Announcement:
+        """อัปเดต announcement"""
+        self.db.flush()
+        return announcement
+
+    def delete(self, announcement: Announcement) -> None:
+        """ลบ announcement"""
+        self.db.delete(announcement)

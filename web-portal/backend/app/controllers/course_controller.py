@@ -96,3 +96,25 @@ class CourseController:
             CourseNotFoundError: จาก service ถ้าหา course ไม่เจอ
         """
         return self.course_service.update_announcement_ids(course_id, announcement_ids)
+
+    def create_announcement(self, course_id: UUID, message: str, author_id: UUID):
+        """
+        สร้าง announcement ใหม่สำหรับ course
+        
+        Raises:
+            CourseNotFoundError: จาก service ถ้าหา course ไม่เจอ
+            ValidationError: จาก service ถ้า message ไม่ถูกต้อง
+        """
+        return self.course_service.create_announcement(course_id, message, author_id)
+
+    def update_announcement(
+        self, course_id: UUID, announcement_id: UUID, message: str
+    ):
+        """
+        อัปเดต announcement
+        
+        Raises:
+            CourseNotFoundError: จาก service ถ้าหา course หรือ announcement ไม่เจอ
+            ValidationError: จาก service ถ้า message ไม่ถูกต้อง
+        """
+        return self.course_service.update_announcement(course_id, announcement_id, message)
