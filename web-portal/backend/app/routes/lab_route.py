@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
 from app.controllers.lab_controller import LabController
-from app.middlewares.auth import get_current_user
+from app.middlewares.auth import get_current_user, get_current_user_optional
 from app.models.lab import LabStatus
 from app.models.user import User
 from app.repositories.lab_repository import LabRepository
@@ -32,18 +32,26 @@ def get_controller(db: Session = Depends(get_db)) -> LabController:
 def list_labs(
     course_id: UUID = Query(..., alias="courseId"),
     status: LabStatus | None = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
     controller: LabController = Depends(get_controller),
 ):
     """
     lab ในวิชา พร้อม progressStatus ของคนที่เรียก
 
-    ต้องล็อกอินเพราะความคืบหน้าเป็นของรายคน ไม่ใช่ข้อมูลกลางของ lab
+    🔧 DEV MODE: ถ้าไม่ได้ login จะใช้ dummy user ID (progress จะว่างเปล่า)
+    Production: ต้อง login เพื่อดูความคืบหน้าของตัวเอง
     """
+    # Dev Mode: ใช้ dummy user ID เพื่อให้ API ทำงานได้โดยไม่ต้อง login
+    # Progress status จะเป็น null ทั้งหมด (ยังไม่เคยทำ lab)
+    if current_user is None:
+        user_id = UUID("00000000-0000-0000-0000-000000000000")
+    else:
+        user_id = current_user.id
+    
     return {
         "success": True,
         "message": "Labs retrieved successfully",
-        "data": controller.get_lab_by_course(course_id, current_user.id, status),
+        "data": controller.get_lab_by_course(course_id, user_id, status),
     }
 
 

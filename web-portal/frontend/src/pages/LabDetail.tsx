@@ -268,7 +268,13 @@ export default function LabDetailPage() {
                         key={i}
                         className={i > 0 ? 'mt-7 border-t border-[#F0EEE7] pt-7' : ''}
                       >
-                        <Page pageNumber={i + 1} width={pageWidth} loading="" />
+                        <Page 
+                          pageNumber={i + 1} 
+                          width={pageWidth} 
+                          loading=""
+                          renderAnnotationLayer={false}
+                          renderTextLayer={false}
+                        />
                       </div>
                     ))}
                 </Document>
