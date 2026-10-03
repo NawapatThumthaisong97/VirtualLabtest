@@ -8,8 +8,8 @@ import axios from 'axios';
 // to the browser as a plain URL (<img>, <iframe>, pdf.js) instead of axios
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
-// 🔧 DEV MODE: Set to false to disable auto-redirect to login on 401
-const ENABLE_AUTO_REDIRECT = false;
+// Auto-redirect to login on 401
+const ENABLE_AUTO_REDIRECT = true;
 
 // Create axios instance
 export const apiClient = axios.create({

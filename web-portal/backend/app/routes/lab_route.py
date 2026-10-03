@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
 from app.controllers.lab_controller import LabController
-from app.middlewares.auth import get_current_user, get_current_user_optional
+from app.middlewares.auth import get_current_user
 from app.models.lab import LabStatus
 from app.models.user import User
 from app.repositories.lab_repository import LabRepository
@@ -32,31 +32,24 @@ def get_controller(db: Session = Depends(get_db)) -> LabController:
 def list_labs(
     course_id: UUID = Query(..., alias="courseId"),
     status: LabStatus | None = Query(None),
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller),
 ):
-    """
-    lab ในวิชา พร้อม progressStatus ของคนที่เรียก
-
-    🔧 DEV MODE: ถ้าไม่ได้ login จะใช้ dummy user ID (progress จะว่างเปล่า)
-    Production: ต้อง login เพื่อดูความคืบหน้าของตัวเอง
-    """
-    # Dev Mode: ใช้ dummy user ID เพื่อให้ API ทำงานได้โดยไม่ต้อง login
-    # Progress status จะเป็น null ทั้งหมด (ยังไม่เคยทำ lab)
-    if current_user is None:
-        user_id = UUID("00000000-0000-0000-0000-000000000000")
-    else:
-        user_id = current_user.id
-    
+    """lab ในวิชา พร้อม progressStatus ของคนที่เรียก (ต้อง login)"""
     return {
         "success": True,
         "message": "Labs retrieved successfully",
-        "data": controller.get_lab_by_course(course_id, user_id, status),
+        "data": controller.get_lab_by_course(course_id, current_user.id, status),
     }
 
 
 @router.get("/{lab_id}", response_model=ApiResponse[LabDetailResponse])
-def get_lab(lab_id: UUID, controller: LabController = Depends(get_controller)):
+def get_lab(
+    lab_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller)
+):
+    """ดึงข้อมูล lab (ต้อง login)"""
     return {
         "success": True,
         "message": "Lab retrieved successfully",
@@ -65,14 +58,12 @@ def get_lab(lab_id: UUID, controller: LabController = Depends(get_controller)):
 
 
 @router.get("/{lab_id}/doc")
-def get_lab_doc(lab_id: UUID, controller: LabController = Depends(get_controller)):
-    """
-    ส่งไฟล์เอกสารแลปออกไปตรง ๆ
-
-    เส้นนี้ไม่ห่อ ApiResponse เหมือนเส้นอื่นเพราะ body เป็นไฟล์ ไม่ใช่ JSON
-    (ห่อไม่ได้ ต้อง base64 ซึ่งไฟล์บวมขึ้น 33% โดยไม่ได้อะไรกลับมา)
-    inline เพื่อให้เบราว์เซอร์เปิดดู ไม่ใช่เด้งดาวน์โหลด
-    """
+def get_lab_doc(
+    lab_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller)
+):
+    """ส่งไฟล์เอกสารแลปออกไปตรง ๆ (ต้อง login)"""
     path = controller.get_lab_doc_path(lab_id)
     media_type, _ = mimetypes.guess_type(path.name)
     return FileResponse(
@@ -88,8 +79,11 @@ def get_lab_doc(lab_id: UUID, controller: LabController = Depends(get_controller
     status_code=http_status.HTTP_201_CREATED,
 )
 def create_lab(
-    payload: LabCreateRequest, controller: LabController = Depends(get_controller)
+    payload: LabCreateRequest,
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller)
 ):
+    """สร้าง lab ใหม่ (ต้อง login)"""
     return {
         "success": True,
         "message": "Lab created successfully",
@@ -105,8 +99,10 @@ def create_lab(
 def update_lab(
     lab_id: UUID,
     payload: LabUpdateRequest,
+    current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller),
 ):
+    """อัปเดต lab (ต้อง login)"""
     return {
         "success": True,
         "message": "Lab updated successfully",
@@ -115,5 +111,10 @@ def update_lab(
 
 
 @router.delete("/{lab_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-def delete_lab(lab_id: UUID, controller: LabController = Depends(get_controller)):
+def delete_lab(
+    lab_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller)
+):
+    """ลบ lab (ต้อง login)"""
     controller.delete_lab(lab_id)

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
-from app.middlewares.auth import get_current_user, get_current_user_optional
+from app.middlewares.auth import get_current_user
 from app.models.user import User, UserRole
 from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
@@ -50,11 +50,7 @@ def announcement_response(announcement) -> AnnouncementResponse:
     map เอง ไม่ใช้ model_validate เพราะ author_name ไม่ได้อยู่บนตาราง
     announcements ตรง ๆ — ต้องเดินผ่าน relationship ไปหยิบชื่อจาก users
     """
-    try:
-        author_name = announcement.author.name if announcement.author else None
-    except AttributeError:
-        # ถ้า author relationship ไม่ได้ load
-        author_name = None
+    author_name = announcement.author.name if announcement.author else None
     
     return AnnouncementResponse(
         id=announcement.id,
@@ -98,9 +94,22 @@ def get_course_controller(db: Session = Depends(get_db)) -> CourseController:
 def get_course(
     course_id: UUID,
     request: Request,
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """ดึงข้อมูล course พร้อม announcement ที่เกี่ยวข้อง"""
+    """ดึงข้อมูล course พร้อม announcement (ต้อง login และมีสิทธิ์เข้าถึง)"""
+    # ตรวจสอบสิทธิ์เข้าถึง
+    has_access = controller.check_course_access(
+        course_id, 
+        current_user.id, 
+        current_user.role, 
+        current_user.name
+    )
+    
+    if not has_access:
+        from app.exceptions.domain import ForbiddenError
+        raise ForbiddenError("You don't have permission to access this course")
+    
     course, announcements = controller.get_course_detail(course_id)
     return course_detail_response(course, announcements, request)
 
@@ -113,32 +122,34 @@ def get_course(
 )
 def create_course(
     course: CourseCreateRequest,
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """สร้าง course ใหม่"""
+    """สร้าง course ใหม่ (ต้อง login และเป็น Instructor หรือ Admin)"""
+    from app.exceptions.domain import ForbiddenError
+    
+    # เฉพาะ Instructor และ Admin สร้าง course ได้
+    if current_user.role not in [UserRole.INSTRUCTOR, UserRole.ADMIN]:
+        raise ForbiddenError("Only instructors and admins can create courses")
+    
     return controller.create_course(course)
 
 
 @router.get("", response_model=list[CourseResponse])
 def get_all_courses(
     request: Request,
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """
-    คืนรายการวิชา:
-    - ถ้าไม่ได้ login: คืนทุกวิชา (public)
-    - ถ้า login แล้วเป็น admin: คืนทุกวิชา
-    - ถ้า login แล้วเป็น student/instructor: คืนเฉพาะวิชาที่เกี่ยวข้อง
-    """
-    if current_user is None:
-        # ไม่ได้ login: แสดงทุกวิชา (public mode)
-        courses = controller.get_all_courses()
-    elif current_user.role is UserRole.ADMIN:
+    """คืนรายการวิชา (ต้อง login)"""
+    if current_user.role is UserRole.ADMIN:
         # Admin เห็นทุกวิชา
         courses = controller.get_all_courses()
+    elif current_user.role is UserRole.INSTRUCTOR:
+        # Instructor เห็นเฉพาะวิชาที่สอน
+        courses = controller.get_courses_by_lecturer(current_user.name)
     else:
-        # Student/Instructor เห็นเฉพาะวิชาที่ลงเรียน/สอน
+        # Student เห็นเฉพาะวิชาที่ลงทะเบียน
         courses = controller.get_courses_by_student(current_user.id)
     
     return [course_response(course, request) for course in courses]
@@ -147,9 +158,10 @@ def get_all_courses(
 @router.get("/{course_id}/image", name="get_course_image")
 def get_course_image(
     course_id: UUID,
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """ดึงรูปภาพของ course"""
+    """ดึงรูปภาพของ course (ต้อง login)"""
     course = controller.get_course(course_id)
     if not course.image_url or course.image_url.startswith(("http://", "https://")):
         raise NotFoundError(f"Course image {course_id} not found")
@@ -163,10 +175,26 @@ def get_course_image(
 def upload_course_image(
     course_id: UUID,
     request: Request,
+    current_user: User = Depends(get_current_user),
     image: UploadFile = File(...),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """อัปโหลดรูปภาพของ course"""
+    """อัปโหลดรูปภาพของ course (ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin)"""
+    from app.exceptions.domain import ForbiddenError
+    
+    # Admin ทำได้ทุกอย่าง
+    if current_user.role != UserRole.ADMIN:
+        # Instructor ต้องเป็นคนสอนวิชานี้
+        if current_user.role != UserRole.INSTRUCTOR:
+            raise ForbiddenError("Only instructors and admins can upload course images")
+        
+        # ตรวจสอบว่าเป็น Instructor ของวิชานี้หรือไม่
+        is_teaching = controller.course_service.course_repository.is_lecturer_teaching(
+            course_id, current_user.name
+        )
+        if not is_teaching:
+            raise ForbiddenError("You can only upload images for courses you teach")
+    
     if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
         raise ValidationError("Only JPEG, PNG, and WebP images are supported")
     course = controller.course_service.save_course_image(
@@ -183,9 +211,25 @@ def upload_course_image(
 def update_course(
     course_id: UUID,
     updated_course: CourseUpdateRequest,
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """อัปเดตข้อมูล course โดยใช้ course_id"""
+    """อัปเดตข้อมูล course (ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin)"""
+    from app.exceptions.domain import ForbiddenError
+    
+    # Admin ทำได้ทุกอย่าง
+    if current_user.role != UserRole.ADMIN:
+        # Instructor ต้องเป็นคนสอนวิชานี้
+        if current_user.role != UserRole.INSTRUCTOR:
+            raise ForbiddenError("Only instructors and admins can update courses")
+        
+        # ตรวจสอบว่าเป็น Instructor ของวิชานี้หรือไม่
+        is_teaching = controller.course_service.course_repository.is_lecturer_teaching(
+            course_id, current_user.name
+        )
+        if not is_teaching:
+            raise ForbiddenError("You can only update courses you teach")
+    
     return controller.update_course(course_id, updated_course)
 
 
@@ -200,17 +244,42 @@ def update_course_announcement_ids(
 
 @router.delete("/{course_id}", status_code=http_status.HTTP_204_NO_CONTENT)
 def soft_delete_course(
-    course_id: UUID, controller: CourseController = Depends(get_course_controller)
+    course_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: CourseController = Depends(get_course_controller)
 ):
-    """ซ่อน course โดยยังเก็บข้อมูลไว้ในฐานข้อมูล"""
+    """ซ่อน course (ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin)"""
+    from app.exceptions.domain import ForbiddenError
+    
+    # Admin ทำได้ทุกอย่าง
+    if current_user.role != UserRole.ADMIN:
+        # Instructor ต้องเป็นคนสอนวิชานี้
+        if current_user.role != UserRole.INSTRUCTOR:
+            raise ForbiddenError("Only instructors and admins can delete courses")
+        
+        # ตรวจสอบว่าเป็น Instructor ของวิชานี้หรือไม่
+        is_teaching = controller.course_service.course_repository.is_lecturer_teaching(
+            course_id, current_user.name
+        )
+        if not is_teaching:
+            raise ForbiddenError("You can only delete courses you teach")
+    
     controller.soft_delete_course(course_id)
 
 
 @router.delete("/{course_id}/hard", status_code=http_status.HTTP_204_NO_CONTENT)
 def hard_delete_course(
-    course_id: UUID, controller: CourseController = Depends(get_course_controller)
+    course_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: CourseController = Depends(get_course_controller)
 ):
-    """ลบ course ออกจากฐานข้อมูลถาวร"""
+    """ลบ course ถาวร (เฉพาะ Admin)"""
+    from app.exceptions.domain import ForbiddenError
+    
+    # เฉพาะ Admin เท่านั้น
+    if current_user.role != UserRole.ADMIN:
+        raise ForbiddenError("Only admins can permanently delete courses")
+    
     controller.hard_delete_course(course_id)
 
 
@@ -223,30 +292,29 @@ def hard_delete_course(
 def create_announcement(
     course_id: UUID,
     announcement: AnnouncementCreateRequest,
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """
-    สร้าง announcement ใหม่สำหรับ course
+    """สร้าง announcement (ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin)"""
+    from app.exceptions.domain import ForbiddenError
     
-    Dev Mode: ถ้าไม่ได้ login จะใช้ hardcoded dev user
-    Production: ต้อง login (oauth2-proxy)
-    
-    Raises:
-        404: Course not found
-        400: Invalid message or author
-        500: Internal server error
-    """
-    # Dev Mode: ใช้ hardcoded user ID (TODO: ลบออกตอนเปิด Auth)
-    if current_user is None:
-        author_id = UUID("0685445d-c06b-4110-ba10-743fdf014639")
-    else:
-        author_id = current_user.id
+    # Admin ทำได้ทุกอย่าง
+    if current_user.role != UserRole.ADMIN:
+        # Instructor ต้องเป็นคนสอนวิชานี้
+        if current_user.role != UserRole.INSTRUCTOR:
+            raise ForbiddenError("Only instructors and admins can create announcements")
+        
+        # ตรวจสอบว่าเป็น Instructor ของวิชานี้หรือไม่
+        is_teaching = controller.course_service.course_repository.is_lecturer_teaching(
+            course_id, current_user.name
+        )
+        if not is_teaching:
+            raise ForbiddenError("You can only create announcements for courses you teach")
     
     created_announcement = controller.create_announcement(
         course_id=course_id,
         message=announcement.message,
-        author_id=author_id
+        author_id=current_user.id
     )
     return announcement_response(created_announcement)
 
@@ -260,16 +328,25 @@ def update_announcement(
     course_id: UUID,
     announcement_id: UUID,
     announcement: AnnouncementUpdateRequest,
+    current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """
-    อัปเดต announcement ของ course
+    """อัปเดต announcement (ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin)"""
+    from app.exceptions.domain import ForbiddenError
     
-    Raises:
-        404: Course or announcement not found
-        400: Invalid message or announcement doesn't belong to course
-        500: Internal server error
-    """
+    # Admin ทำได้ทุกอย่าง
+    if current_user.role != UserRole.ADMIN:
+        # Instructor ต้องเป็นคนสอนวิชานี้
+        if current_user.role != UserRole.INSTRUCTOR:
+            raise ForbiddenError("Only instructors and admins can update announcements")
+        
+        # ตรวจสอบว่าเป็น Instructor ของวิชานี้หรือไม่
+        is_teaching = controller.course_service.course_repository.is_lecturer_teaching(
+            course_id, current_user.name
+        )
+        if not is_teaching:
+            raise ForbiddenError("You can only update announcements for courses you teach")
+    
     updated_announcement = controller.update_announcement(
         course_id=course_id,
         announcement_id=announcement_id,

@@ -10,6 +10,7 @@ import CoursesPage from '../pages/Courses.tsx';
 import CourseDetailPage from '../pages/CourseDetail.tsx';
 import LabDetailPage from '../pages/LabDetail.tsx';
 import LoginPage from '../pages/Login.tsx';
+import InstructorPage from '../pages/Instructor.tsx';
 
 export const router = createBrowserRouter([
   // Full-bleed auth page: no navbar, no footer
@@ -36,6 +37,10 @@ export const router = createBrowserRouter([
       {
         path: '/courses/:courseId',
         element: <CourseDetailPage />,
+      },
+      {
+        path: '/instructor',
+        element: <InstructorPage />,
       },
     ],
   },

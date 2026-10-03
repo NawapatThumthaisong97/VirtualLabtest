@@ -211,12 +211,24 @@ async def domain_exception_handler(request, exc: DomainError):
             break
 
     logger.warning(f"[{exc.code}] {exc.message}")
+    
+    # Generic message based on error type for top-level message
+    generic_messages = {
+        status.HTTP_404_NOT_FOUND: "Resource not found",
+        status.HTTP_403_FORBIDDEN: "Access denied",
+        status.HTTP_401_UNAUTHORIZED: "Authentication required",
+        status.HTTP_409_CONFLICT: "Resource conflict",
+        status.HTTP_400_BAD_REQUEST: "Invalid request",
+        status.HTTP_500_INTERNAL_SERVER_ERROR: "Internal server error",
+    }
+    
+    generic_message = generic_messages.get(status_code, "Request failed")
 
     return JSONResponse(
         status_code=status_code,
         content={
             "success": False,
-            "message": exc.message,
+            "message": generic_message,
             "data": None,
             "error": {"code": exc.code, "message": exc.message},
         },

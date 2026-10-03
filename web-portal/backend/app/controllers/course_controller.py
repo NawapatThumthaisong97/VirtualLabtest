@@ -86,6 +86,10 @@ class CourseController:
         """ดึง courses ที่นักเรียนคนนี้ลงทะเบียน"""
         return self.course_service.get_courses_by_student(student_id)
 
+    def check_course_access(self, course_id: UUID, user_id: UUID, user_role, user_name: str) -> bool:
+        """ตรวจสอบว่า user มีสิทธิ์เข้าถึง course นี้หรือไม่"""
+        return self.course_service.check_course_access(course_id, user_id, user_role, user_name)
+
     def update_course_announcement_ids(
         self, course_id: UUID, announcement_ids: list[UUID]
     ) -> Course:

@@ -192,6 +192,33 @@ class CourseService:
                 f"Failed to fetch courses by student: {str(e)}"
             ) from e
 
+    def check_course_access(self, course_id: UUID, user_id: UUID, user_role, user_name: str) -> bool:
+        """
+        ตรวจสอบว่า user มีสิทธิ์เข้าถึง course นี้หรือไม่
+        
+        Returns:
+            True: ถ้ามีสิทธิ์เข้าถึง
+            False: ถ้าไม่มีสิทธิ์
+        """
+        from app.models.user import UserRole
+        
+        try:
+            # Admin เข้าถึงได้ทุก course
+            if user_role == UserRole.ADMIN:
+                return True
+            
+            # Instructor ต้องเป็นคนสอนวิชานี้
+            if user_role == UserRole.INSTRUCTOR:
+                return self.course_repository.is_lecturer_teaching(course_id, user_name)
+            
+            # Student ต้อง enroll วิชานี้
+            return self.course_repository.is_student_enrolled(course_id, user_id)
+            
+        except Exception as e:
+            raise InternalServerError(
+                f"Failed to check course access: {str(e)}"
+            ) from e
+
     def save_course_image(self, course_id: UUID, filename: str, source) -> Course:
         """
         บันทึกรูปภาพของ course

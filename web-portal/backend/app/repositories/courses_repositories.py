@@ -38,3 +38,21 @@ class CourseRepository(BaseRepository[Course]):
             .order_by(self.model.code)
         )
         return list(self.db.execute(result).scalars().all())
+
+    def is_student_enrolled(self, course_id: UUID, student_id: UUID) -> bool:
+        """ตรวจสอบว่านักศึกษาลงทะเบียนวิชานี้หรือไม่"""
+        from app.models.enrollment import Enrollment
+
+        result = select(Enrollment).where(
+            Enrollment.course_id == course_id,
+            Enrollment.user_id == student_id
+        )
+        return self.db.execute(result).scalar_one_or_none() is not None
+
+    def is_lecturer_teaching(self, course_id: UUID, lecturer_name: str) -> bool:
+        """ตรวจสอบว่าอาจารย์สอนวิชานี้หรือไม่"""
+        result = select(self.model).where(
+            self.model.id == course_id,
+            self.model.lecturer_name == lecturer_name
+        )
+        return self.db.execute(result).scalar_one_or_none() is not None
