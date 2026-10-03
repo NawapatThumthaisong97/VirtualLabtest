@@ -6,17 +6,24 @@ import Card from './Card'
 import SectionHeader from './SectionHeader'
 import { primary, secondary, iconButton } from './styles'
 import type { Announcement } from './types'
+import { coursesService } from '../../services/courses'
+import { useToast } from '../../hooks/useToast'
+import ConfirmModal from '../ConfirmModal'
 
-export default function AnnouncementTab() {
-  const [items, setItems] = useState<Announcement[]>([
-    { 
-      id: 1, 
-      message: 'Please complete the environment check before Lab 01 and review the linked stack and queue notes.', 
-      date: '24 Sep 2026 · 09:30', 
-      published: true 
-    }
-  ])
-  const [editing, setEditing] = useState<number | null>(null)
+interface AnnouncementTabProps {
+  announcements: Announcement[]
+  courseId: string
+  onUpdate?: () => void
+}
+
+export default function AnnouncementTab({ announcements, courseId, onUpdate }: AnnouncementTabProps) {
+  const [items, setItems] = useState<Announcement[]>(announcements)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [announcementToDelete, setAnnouncementToDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const toast = useToast()
   
   const {
     register,
@@ -30,27 +37,102 @@ export default function AnnouncementTab() {
   })
   
   const open = (item?: Announcement) => {
-    setEditing(item?.id ?? 0)
+    setEditing(item?.id ?? '0')
     reset({ message: item?.message ?? '' })
   }
   
-  const onSubmit = (data: { message: string }) => {
+  const onSubmit = async (data: { message: string }) => {
     if (!data.message.trim()) return
     
-    if (editing && editing !== 0) {
-      setItems(items.map((item) => item.id === editing ? { ...item, message: data.message } : item))
-    } else {
-      setItems([{ id: Date.now(), message: data.message, date: 'Just now', published: true }, ...items])
+    setSaving(true)
+    try {
+      if (editing && editing !== '0') {
+        // Update existing announcement
+        const updated = await coursesService.updateAnnouncement(courseId, editing, {
+          message: data.message
+        })
+        setItems(items.map((item) => item.id === editing ? updated : item))
+        toast.success('Announcement updated!', 'Your changes have been saved.')
+      } else {
+        // Create new announcement
+        const created = await coursesService.createAnnouncement(courseId, {
+          message: data.message
+        })
+        setItems([created, ...items])
+        toast.success('Announcement created!', 'Students can now see your announcement.')
+      }
+      
+      setEditing(null)
+      reset()
+      onUpdate?.() // Refresh course detail
+    } catch (error: any) {
+      console.error('Failed to save announcement:', error)
+      toast.error('Failed to save', error.response?.data?.detail || 'Please try again.')
+    } finally {
+      setSaving(false)
     }
-    
-    setEditing(null)
-    reset()
   }
   
-  const remove = (id: number) => setItems(items.filter((item) => item.id !== id))
+  const remove = async (id: string) => {
+    setAnnouncementToDelete(id)
+    setDeleteModalOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!announcementToDelete) return
+    
+    setDeleting(true)
+    try {
+      await coursesService.deleteAnnouncement(courseId, announcementToDelete)
+      setItems(items.filter((item) => item.id !== announcementToDelete))
+      toast.success('Announcement deleted!', 'The announcement has been removed.')
+      setDeleteModalOpen(false)
+      setAnnouncementToDelete(null)
+      onUpdate?.() // Refresh course detail
+    } catch (error: any) {
+      console.error('Failed to delete announcement:', error)
+      toast.error('Failed to delete', error.response?.data?.detail || 'Please try again.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    
+    if (diffMins < 60) return 'Just now'
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)} hours ago`
+    
+    return date.toLocaleDateString('en-GB', { 
+      day: 'numeric', 
+      month: 'short', 
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
   
   return (
-    <Card>
+    <>
+      <ConfirmModal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false)
+          setAnnouncementToDelete(null)
+        }}
+        onConfirm={confirmDelete}
+        title="Delete Announcement"
+        message="Are you sure you want to delete this announcement? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={deleting}
+      />
+      
+      <Card>
       <SectionHeader 
         icon={Bell} 
         title="Announcements" 
@@ -66,7 +148,7 @@ export default function AnnouncementTab() {
         <form onSubmit={handleSubmit(onSubmit)} className="mt-5 rounded-xl border border-blue-200 bg-blue-50/50 p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-800">
-              {editing === 0 ? 'New announcement' : 'Edit announcement'}
+              {editing === '0' ? 'New announcement' : 'Edit announcement'}
             </h3>
             <button 
               type="button"
@@ -114,8 +196,12 @@ export default function AnnouncementTab() {
               >
                 Cancel
               </button>
-              <button type="submit" className={primary}>
-                <Check size={15} /> Save announcement
+              <button type="submit" className={primary} disabled={saving}>
+                {saving ? (
+                  <>Saving...</>
+                ) : (
+                  <><Check size={15} /> Save announcement</>
+                )}
               </button>
             </div>
           </div>
@@ -143,7 +229,7 @@ export default function AnnouncementTab() {
                     Published
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-slate-400">Dr. Narin Sutham · {item.date}</p>
+                <p className="mt-1 text-xs text-slate-400">{item.authorName} · {formatDate(item.createdAt)}</p>
               </div>
               
               <div className="flex gap-2">
@@ -172,5 +258,6 @@ export default function AnnouncementTab() {
         ))}
       </div>
     </Card>
+    </>
   )
 }

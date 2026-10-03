@@ -1,17 +1,19 @@
 export type Tab = 'overview' | 'announcement' | 'labs' | 'students'
 
 export type Announcement = { 
-  id: number
+  id: string
   message: string
-  date: string
-  published: boolean 
+  createdAt: string
+  authorName: string
 }
 
 export type Course = { 
+  id: string
   code: string
   name: string
   lecturer_name: string
-  image_url: string
-  background_key: string
-  icon_key: string
+  image_url: string | null
+  background_key: string | null
+  icon_key: string | null
+  announcements?: Announcement[]
 }

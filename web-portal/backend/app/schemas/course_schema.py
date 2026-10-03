@@ -49,7 +49,7 @@ class CourseCreateRequest(CamelModel):
     image_url: str | None = Field(None, max_length=2048)
     background_key: BackgroundKey | None = None
     icon_key: IconKey | None = None
-    created_by: UUID
+    # created_by จะถูกดึงจาก JWT token ใน route handler
 
 
 class CourseUpdateRequest(CamelModel):

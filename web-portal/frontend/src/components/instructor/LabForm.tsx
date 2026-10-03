@@ -2,48 +2,28 @@ import { useForm } from 'react-hook-form'
 import { Check } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { primary, secondary } from './styles'
-
-const mockLabImages = [
-  { id: '1', name: 'python-datascience:latest' },
-  { id: '2', name: 'node-express:v18' },
-  { id: '3', name: 'java-spring:v3' },
-  { id: '4', name: 'react-dev:latest' },
-]
-
-const mockLabDocuments = [
-  { id: '1', name: 'Lab01-DataStructures.pdf' },
-  { id: '2', name: 'Lab02-Algorithms.pdf' },
-  { id: '3', name: 'Lab03-Database.pdf' },
-  { id: '4', name: 'Lab04-Networks.pdf' },
-]
+import type { Lab } from '../../services/lab'
 
 interface LabFormProps {
+  lab?: Lab | null
   onSubmit: (data: any) => void
   onCancel: () => void
 }
 
-export default function LabForm({ onSubmit, onCancel }: LabFormProps) {
+export default function LabForm({ lab, onSubmit, onCancel }: LabFormProps) {
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm({
     defaultValues: {
-      title: '',
-      order_no: '4',
-      description: '',
-      due_at: '',
-      doc_url: '',
-      image_id: '',
-      status: 'DRAFT',
-      exposed_ports: '8080, 5173, 8443',
-      entrypoint_script: '/bin/bash /run.sh',
-      workdir: '/workspace',
-      env_vars: '',
-      cpu: 'CPU 2',
-      memory: 'RAM 4 GB',
-      disk: 'Disk 50 GB',
-      max_duration: '2 hours',
+      title: lab?.title || '',
+      orderNo: lab?.orderNo?.toString() || '1',
+      description: lab?.description || '',
+      docUrl: lab?.docUrl || '',
+      imageId: lab?.imageId || '',
+      dueAt: lab?.dueAt ? lab.dueAt.substring(0, 16) : '', // datetime-local format
+      status: lab?.status || 'draft',
     },
   })
 
@@ -52,7 +32,9 @@ export default function LabForm({ onSubmit, onCancel }: LabFormProps) {
       <div className="w-full rounded-2xl bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Create lab</h2>
+            <h2 className="text-xl font-bold text-slate-900">
+              {lab ? 'Edit lab' : 'Create lab'}
+            </h2>
             <p className="mt-1 text-sm text-slate-500">
               Set up the lab content, runtime image, and learner resources.
             </p>
@@ -64,7 +46,7 @@ export default function LabForm({ onSubmit, onCancel }: LabFormProps) {
         
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 grid gap-4 md:grid-cols-2">
           {/* Title */}
-          <div>
+          <div className="md:col-span-2">
             <label className="mb-1.5 block text-xs font-semibold text-slate-500">
               Title <span className="text-red-500">*</span>
             </label>
@@ -76,7 +58,7 @@ export default function LabForm({ onSubmit, onCancel }: LabFormProps) {
                   ? 'border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100'
                   : 'border-slate-200 bg-slate-50 focus:border-blue-500 focus:bg-white focus:ring-blue-100'
               )}
-              placeholder="Lab 01 — Introduction"
+              placeholder="Lab 01 — Introduction to Programming"
             />
             {errors.title && (
               <p className="mt-1 text-xs text-red-600">{errors.title.message as string}</p>
@@ -90,159 +72,72 @@ export default function LabForm({ onSubmit, onCancel }: LabFormProps) {
             </label>
             <input
               type="number"
-              {...register('order_no', { required: 'Order number is required', min: 1 })}
+              {...register('orderNo', { required: 'Order number is required', min: { value: 1, message: 'Must be greater than 0' } })}
               className={cn(
                 'h-10 w-full rounded-lg border px-3 text-sm outline-none transition focus:ring-4',
-                errors.order_no
+                errors.orderNo
                   ? 'border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100'
                   : 'border-slate-200 bg-slate-50 focus:border-blue-500 focus:bg-white focus:ring-blue-100'
               )}
+              placeholder="1"
             />
-            {errors.order_no && (
-              <p className="mt-1 text-xs text-red-600">{errors.order_no.message as string}</p>
+            {errors.orderNo && (
+              <p className="mt-1 text-xs text-red-600">{errors.orderNo.message as string}</p>
             )}
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
+            <select 
+              {...register('status')}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            >
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+            </select>
           </div>
           
           {/* Description */}
-          <label className="md:col-span-2 block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-500">Description</span>
+          <div className="md:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Description</label>
             <textarea 
               {...register('description')}
-              className="min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100" 
+              className="min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              placeholder="Brief overview of this lab activity..."
             />
-          </label>
-          
-          {/* Due at */}
+          </div>
+
+          {/* Due Date */}
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Due at</label>
-            <input 
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Due date (optional)</label>
+            <input
               type="datetime-local"
-              {...register('due_at')}
+              {...register('dueAt')}
               className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
             />
           </div>
 
-          {/* Lab Document Dropdown */}
+          {/* Image ID */}
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Lab document</label>
-            <select
-              {...register('doc_url')}
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Lab image ID (optional)</label>
+            <input
+              {...register('imageId')}
               className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-            >
-              <option value="">Select document...</option>
-              {mockLabDocuments.map((doc) => (
-                <option key={doc.id} value={doc.id}>
-                  {doc.name}
-                </option>
-              ))}
-            </select>
+              placeholder="UUID of lab image"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">Reference to lab_images table</p>
           </div>
 
-          {/* Lab Image Dropdown */}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Lab image</label>
-            <select
-              {...register('image_id')}
+          {/* Document URL */}
+          <div className="md:col-span-2">
+            <label className="mb-1.5 block text-xs font-semibold text-slate-500">Document URL (optional)</label>
+            <input
+              {...register('docUrl')}
               className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-            >
-              <option value="">Select image...</option>
-              {mockLabImages.map((img) => (
-                <option key={img.id} value={img.id}>
-                  {img.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          {/* Status */}
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-semibold text-slate-500">Status</span>
-            <select 
-              {...register('status')}
-              className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
-            >
-              <option value="DRAFT">Draft</option>
-              <option value="PUBLISHED">Published</option>
-            </select>
-          </label>
-          
-          {/* Runtime Pod Specification */}
-          <div className="md:col-span-2 rounded-xl border border-slate-200 p-4">
-            <div>
-              <p className="text-sm font-bold text-slate-800">Runtime pod specification</p>
-              <p className="mt-1 text-xs text-slate-500">
-                กำหนดทรัพยากรที่แต่ละ learner จะได้รับเมื่อเปิด Lab
-              </p>
-            </div>
-            
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-500">CPU (vCPU)</span>
-                <select {...register('cpu')} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">
-                  <option>CPU 1</option>
-                  <option>CPU 2</option>
-                  <option>CPU 4</option>
-                  <option>CPU 8</option>
-                </select>
-              </label>
-              
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Memory (RAM)</span>
-                <select {...register('memory')} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">
-                  <option>RAM 2 GB</option>
-                  <option>RAM 4 GB</option>
-                  <option>RAM 8 GB</option>
-                  <option>RAM 16 GB</option>
-                  <option>RAM 32 GB</option>
-                </select>
-              </label>
-              
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Ephemeral disk</span>
-                <select {...register('disk')} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">
-                  <option>Disk 20 GB</option>
-                  <option>Disk 50 GB</option>
-                  <option>Disk 80 GB</option>
-                  <option>Disk 100 GB</option>
-                </select>
-              </label>
-            </div>
-            
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-500">Max session duration</span>
-                <select {...register('max_duration')} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold">
-                  <option>2 hours</option>
-                  <option>4 hours</option>
-                  <option>8 hours</option>
-                  <option>24 hours</option>
-                </select>
-              </label>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">Exposed ports</label>
-                <input {...register('exposed_ports')} className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100" />
-              </div>
-            </div>
-            
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">Entrypoint script</label>
-                <input {...register('entrypoint_script')} className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100" />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold text-slate-500">Working directory</label>
-                <input {...register('workdir')} className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100" />
-              </div>
-            </div>
-            
-            <label className="mt-4 block">
-              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Environment variables (optional)</span>
-              <textarea 
-                {...register('env_vars')}
-                placeholder={'KEY=value\nANOTHER_KEY=value'} 
-                className="min-h-20 w-full rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" 
-              />
-            </label>
+              placeholder="https://example.com/lab-guide.pdf or S3 key"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">Link to lab instructions or materials</p>
           </div>
         </form>
 
@@ -251,7 +146,7 @@ export default function LabForm({ onSubmit, onCancel }: LabFormProps) {
             Cancel
           </button>
           <button className={primary} onClick={handleSubmit(onSubmit)} type="button">
-            <Check size={15} /> Create lab
+            <Check size={15} /> {lab ? 'Save changes' : 'Create lab'}
           </button>
         </div>
       </div>

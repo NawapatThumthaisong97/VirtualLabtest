@@ -20,7 +20,18 @@ class CourseRepository(BaseRepository[Course]):
         return self.db.execute(result).scalar_one_or_none()
 
     def find_by_lecturer(self, lecturer_name: str) -> list[Course]:
-        result = select(self.model).where(self.model.lecturer_name == lecturer_name)
+        result = select(self.model).where(
+            self.model.lecturer_name == lecturer_name,
+            self.model.deleted_at.is_(None)
+        )
+        return list(self.db.execute(result).scalars().all())
+
+    def find_by_creator(self, creator_id: UUID) -> list[Course]:
+        """ดึงวิชาที่สร้างโดย user นี้"""
+        result = select(self.model).where(
+            self.model.created_by == creator_id,
+            self.model.deleted_at.is_(None)
+        )
         return list(self.db.execute(result).scalars().all())
 
     def find_by_student(self, student_id: UUID) -> list[Course]:

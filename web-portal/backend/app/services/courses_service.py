@@ -167,7 +167,7 @@ class CourseService:
 
     def get_courses_by_lecturer(self, lecturer_name: str) -> list[Course]:
         """
-        ดึง courses ที่สอนโดยอาจารย์คนนี้
+        ดึง courses ที่สอนโดยอาจารย์คนนี้ (ตาม lecturer_name)
         
         Raises:
             ValidationError: ถ้า lecturer_name ไม่ถูกต้อง
@@ -181,6 +181,34 @@ class CourseService:
         except Exception as e:
             raise InternalServerError(
                 f"Failed to fetch courses by lecturer: {str(e)}"
+            ) from e
+
+    def get_courses_by_instructor(self, instructor_id: UUID, instructor_name: str) -> list[Course]:
+        """
+        ดึง courses ที่ instructor สร้างเองหรือสอน
+        - วิชาที่สร้างเอง (created_by = instructor_id)
+        - วิชาที่มีชื่อใน lecturer_name = instructor_name
+        
+        Returns:
+            list[Course]: รายการ courses (ไม่ซ้ำ)
+        """
+        try:
+            # ดึงวิชาที่สร้างเอง
+            created_courses = self.course_repository.find_by_creator(instructor_id)
+            
+            # ดึงวิชาที่มีชื่อใน lecturer_name
+            teaching_courses = self.course_repository.find_by_lecturer(instructor_name)
+            
+            # รวมกันและลบซ้ำ (ใช้ course.id เป็น key)
+            course_dict = {course.id: course for course in created_courses}
+            for course in teaching_courses:
+                if course.id not in course_dict:
+                    course_dict[course.id] = course
+            
+            return list(course_dict.values())
+        except Exception as e:
+            raise InternalServerError(
+                f"Failed to fetch courses by instructor: {str(e)}"
             ) from e
 
     def get_courses_by_student(self, student_id: UUID) -> list[Course]:
@@ -207,8 +235,15 @@ class CourseService:
             if user_role == UserRole.ADMIN:
                 return True
             
-            # Instructor ต้องเป็นคนสอนวิชานี้
+            # Instructor เข้าถึงได้ถ้า:
+            # 1. เป็นผู้สร้าง course (created_by)
+            # 2. หรือเป็นคนสอน (lecturer_name)
             if user_role == UserRole.INSTRUCTOR:
+                # ดึง course มาเช็ค created_by
+                course = self.course_repository.find_by_id(course_id)
+                if course and course.created_by == user_id:
+                    return True
+                # เช็คว่าเป็นคนสอนหรือไม่
                 return self.course_repository.is_lecturer_teaching(course_id, user_name)
             
             # Student ต้อง enroll วิชานี้

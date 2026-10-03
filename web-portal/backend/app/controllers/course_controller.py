@@ -32,14 +32,20 @@ class CourseController:
         """
         return self.course_service.get_course_detail(course_id)
 
-    def create_course(self, course: CourseCreateRequest) -> Course:
+    def create_course(self, course: CourseCreateRequest, created_by_user_id: UUID) -> Course:
         """
         สร้าง course ใหม่
+        
+        Args:
+            course: CourseCreateRequest - ข้อมูล course
+            created_by_user_id: UUID - User ID จาก JWT token
         
         Raises:
             ConflictError: จาก service ถ้ามี course ซ้ำ
         """
-        return self.course_service.create_course(Course(**course.model_dump()))
+        course_model = Course(**course.model_dump())
+        course_model.created_by = created_by_user_id
+        return self.course_service.create_course(course_model)
 
     def get_all_courses(self) -> list[Course]:
         """ดึงข้อมูล course ทั้งหมด"""
@@ -75,12 +81,23 @@ class CourseController:
 
     def get_courses_by_lecturer(self, lecturer_name: str) -> list[Course]:
         """
-        ดึง courses ที่สอนโดยอาจารย์คนนี้
+        ดึง courses ที่สอนโดยอาจารย์คนนี้ (ตาม lecturer_name)
         
         Raises:
             ValidationError: จาก service ถ้า lecturer_name ไม่ถูกต้อง
         """
         return self.course_service.get_courses_by_lecturer(lecturer_name)
+
+    def get_courses_by_instructor(self, instructor_id: UUID, instructor_name: str) -> list[Course]:
+        """
+        ดึง courses ที่ instructor สร้างเองหรือสอน
+        - วิชาที่สร้างเอง (created_by)
+        - วิชาที่มีชื่อใน lecturer_name
+        
+        Returns:
+            list[Course]: รายการ courses (ไม่ซ้ำ)
+        """
+        return self.course_service.get_courses_by_instructor(instructor_id, instructor_name)
 
     def get_courses_by_student(self, student_id: UUID) -> list[Course]:
         """ดึง courses ที่นักเรียนคนนี้ลงทะเบียน"""

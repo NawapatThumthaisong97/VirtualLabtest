@@ -25,7 +25,8 @@
     "recharts": "^3.9.2",
     "swiper": "^14.0.5",
     "tailwind-merge": "^3.6.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",

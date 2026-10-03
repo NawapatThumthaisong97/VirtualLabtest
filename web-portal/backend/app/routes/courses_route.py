@@ -132,7 +132,8 @@ def create_course(
     if current_user.role not in [UserRole.INSTRUCTOR, UserRole.ADMIN]:
         raise ForbiddenError("Only instructors and admins can create courses")
     
-    return controller.create_course(course)
+    # ใช้ user ID จาก JWT token แทนการรับจาก client
+    return controller.create_course(course, created_by_user_id=current_user.id)
 
 
 @router.get("", response_model=list[CourseResponse])
@@ -146,8 +147,8 @@ def get_all_courses(
         # Admin เห็นทุกวิชา
         courses = controller.get_all_courses()
     elif current_user.role is UserRole.INSTRUCTOR:
-        # Instructor เห็นเฉพาะวิชาที่สอน
-        courses = controller.get_courses_by_lecturer(current_user.name)
+        # Instructor เห็นวิชาที่สร้างเองหรือวิชาที่สอน (lecturer_name)
+        courses = controller.get_courses_by_instructor(current_user.id, current_user.name)
     else:
         # Student เห็นเฉพาะวิชาที่ลงทะเบียน
         courses = controller.get_courses_by_student(current_user.id)
@@ -248,23 +249,53 @@ def soft_delete_course(
     current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller)
 ):
-    """ซ่อน course (ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin)"""
-    from app.exceptions.domain import ForbiddenError
+    """
+    ลบ course (soft delete หรือ hard delete ขึ้นอยู่กับเงื่อนไข)
+    - ถ้าไม่มี student enroll และไม่มี lab -> hard delete
+    - ถ้ามี student enroll หรือมี lab -> ห้ามลบ (409 Conflict)
+    """
+    from app.exceptions.domain import ForbiddenError, ConflictError
     
-    # Admin ทำได้ทุกอย่าง
+    # Admin และ Instructor ที่สร้าง course หรือสอนวิชานี้เท่านั้น
     if current_user.role != UserRole.ADMIN:
-        # Instructor ต้องเป็นคนสอนวิชานี้
         if current_user.role != UserRole.INSTRUCTOR:
             raise ForbiddenError("Only instructors and admins can delete courses")
         
-        # ตรวจสอบว่าเป็น Instructor ของวิชานี้หรือไม่
-        is_teaching = controller.course_service.course_repository.is_lecturer_teaching(
-            course_id, current_user.name
+        # ตรวจสอบสิทธิ์เข้าถึง (ต้องเป็นผู้สร้างหรือผู้สอน)
+        has_access = controller.check_course_access(
+            course_id, 
+            current_user.id, 
+            current_user.role, 
+            current_user.name
         )
-        if not is_teaching:
-            raise ForbiddenError("You can only delete courses you teach")
+        if not has_access:
+            raise ForbiddenError("You can only delete courses you created or teach")
     
-    controller.soft_delete_course(course_id)
+    # ตรวจสอบว่ามี enrollment หรือ lab หรือไม่
+    course_repo = controller.course_service.course_repository
+    
+    # เช็คว่ามี student enroll หรือไม่
+    from app.models.enrollment import Enrollment
+    from sqlalchemy import select, exists
+    
+    has_enrollments = course_repo.db.execute(
+        select(exists().where(Enrollment.course_id == course_id))
+    ).scalar()
+    
+    # เช็คว่ามี labs หรือไม่
+    from app.models.lab import Lab
+    has_labs = course_repo.db.execute(
+        select(exists().where(Lab.course_id == course_id))
+    ).scalar()
+    
+    if has_enrollments or has_labs:
+        raise ConflictError(
+            "Cannot delete course with enrolled students or existing labs. "
+            "Please remove all enrollments and labs before deleting."
+        )
+    
+    # ถ้าไม่มี enrollment และไม่มี lab -> hard delete เลย
+    controller.hard_delete_course(course_id)
 
 
 @router.delete("/{course_id}/hard", status_code=http_status.HTTP_204_NO_CONTENT)
@@ -353,3 +384,37 @@ def update_announcement(
         message=announcement.message
     )
     return announcement_response(updated_announcement)
+
+
+@router.delete(
+    "/{course_id}/announcements/{announcement_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+)
+def delete_announcement(
+    course_id: UUID,
+    announcement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: CourseController = Depends(get_course_controller),
+):
+    """ลบ announcement (Hard Delete) - ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin"""
+    from app.exceptions.domain import ForbiddenError
+    
+    # Admin ทำได้ทุกอย่าง
+    if current_user.role != UserRole.ADMIN:
+        # Instructor ต้องเป็นคนสอนวิชานี้ หรือเป็นผู้สร้าง course
+        if current_user.role != UserRole.INSTRUCTOR:
+            raise ForbiddenError("Only instructors and admins can delete announcements")
+        
+        # ตรวจสอบสิทธิ์เข้าถึง course
+        has_access = controller.check_course_access(
+            course_id, 
+            current_user.id, 
+            current_user.role, 
+            current_user.name
+        )
+        if not has_access:
+            raise ForbiddenError("You can only delete announcements for courses you have access to")
+    
+    # Hard delete announcement
+    controller.course_service.announcement_repository.delete(announcement_id)
+    controller.course_service.announcement_repository.db.commit()

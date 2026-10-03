@@ -59,7 +59,8 @@ export default function CreateCourseModal({ isOpen, onClose, onSubmit }: CreateC
       reset()
       onClose()
     } catch (error) {
-      console.error('Failed to create course:', error)
+      // Error already handled by parent component (Instructor.tsx)
+      // Just keep the modal open for user to fix the issue
     }
   }
 
