@@ -57,3 +57,8 @@ output "ecr_dualstack_host" {
   description = "Dual-stack registry host. Pull from the private instances."
   value       = "${aws_ecr_repository.hello.registry_id}.dkr-ecr.${var.region}.on.aws"
 }
+
+# Phase 13
+output "ecr_music_lab_ide_url" {
+  value = aws_ecr_repository.music_lab_ide.repository_url
+}
