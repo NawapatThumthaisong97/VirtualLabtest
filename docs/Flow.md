@@ -70,7 +70,7 @@ sequenceDiagram
         SV->>ECR: get_authorization_token()
     end
     SV->>DB: INSERT session (PENDING)
-    SV->>SKY: sky.launch → stream_and_get → endpoints
+    SV->>SKY: sky.launch → stream_and_get → รอ job RUNNING → endpoints
     alt launch พัง
         SV->>DB: UPDATE FAILED + ended_at
         SV->>SKY: sky.down (ลบเงียบ ๆ)
@@ -124,6 +124,7 @@ helper ที่ใช้ร่วมกัน
 - `_lab_envs()` — `lab_image.env_vars` แปลงเป็น `str` ทุกค่า + `APP_ENV=staging`
   (copy ใหม่ ไม่แก้ dict ของ ORM เหมือนโค้ดเดิม)
 - `_autostop()` — `idle_minutes = lifespan_minutes` (default 60), `down: true`, `wait_for: none`
+  (`none` = ลบเมื่อครบเวลาโดยไม่รอ job/SSH → `lifespan_minutes` คืออายุสูงสุดของ lab)
 
 #### K3s — `_build_k8s_task()`
 SkyPilot รัน image ของ lab เป็น pod ตรง ๆ (container mode)
@@ -164,13 +165,15 @@ run: |
     -e IDE_PASSWORD=musiclab -e APP_ENV=staging <image> /bin/bash -c '/bin/bash /run.sh'
 ```
 
+- `entrypoint_script` ว่าง → ไม่ต่อคำสั่ง ใช้ ENTRYPOINT/CMD ของ image เอง (จำเป็นกับ image ที่ตั้ง
+  ENTRYPOINT ไว้ เช่น code-server `vlab/music-lab-ide` ถ้าต่อคำสั่งจะกลายเป็น argument ของมัน)
 - entrypoint ส่งเป็นก้อนเดียวผ่าน `bash -c` ถ้าต่อท้ายตรง ๆ แล้ว entrypoint มีหลายบรรทัด
   บรรทัดที่ 2 เป็นต้นไปจะไปรันบน VM แทนที่จะรันใน container
 
 - ไม่ตั้ง `ECR_REGISTRY_HOST` หรือ `AWS_LAB_AMI` → `ClusterOperationError` ทันที
 - env ของ lab ไปเป็น `-e` ของ `docker run` ไม่ใส่ `envs:` เพราะ `envs:` อยู่บน VM ไม่เข้า container
 - ทุก argument ผ่าน `shlex.quote`
-- `docker run` รัน foreground → SkyPilot นับว่า job ยังรัน autostop เริ่มนับ idle หลัง lab ปิดเท่านั้น
+- `docker run` รัน foreground → job อยู่ใน RUNNING ตลอดที่ lab เปิด
 - registry ต้องเป็นชื่อ dual-stack (`...dkr-ecr.<region>.on.aws`) เพราะ private subnet ออกได้แค่ IPv6
 
 ### 3.5 ECR token (AWS เท่านั้น)
@@ -186,10 +189,13 @@ run: |
    (`sky_job_id`, `endpoints` ยังเป็น `NULL`)
 2. `sky.launch()` → `sky.stream_and_get()` (รอจนเสร็จ: K3s วัดได้ 160–280 วินาที,
    AWS ~2.5 นาที HTTP request ค้างรอตลอด)
-3. `sky.endpoints()` → แปลงเป็น `{"8080": "http://..."}`
-4. `UPDATE` เป็น `RUNNING` + `sky_job_id` + `endpoints`
+3. `_wait_job_running()` เรียก `sky.job_status()` ทุก 5 วินาที จนพ้น `INIT`/`PENDING`/`SETTING_UP`
+   (timeout 10 นาที) ต้องเป็น `RUNNING` เท่านั้น เพราะ `sky.launch` คืนตั้งแต่ส่ง job ส่วน `setup:`
+   (docker login + pull) รันต่อทีหลัง ถ้าไม่รอ pull ที่พังจะถูกบันทึกเป็น RUNNING (เจอจริงบน AWS)
+4. `sky.endpoints()` → แปลงเป็น `{"8080": "http://..."}`
+5. `UPDATE` เป็น `RUNNING` + `sky_job_id` + `endpoints`
 
-ถ้าข้อ 2–3 พัง: `UPDATE` เป็น `FAILED` + `ended_at` → `_down_quietly()` (`sky.down` แล้วรอ
+ถ้าข้อ 2–4 พัง: `UPDATE` เป็น `FAILED` + `ended_at` → `_down_quietly()` (`sky.down` แล้วรอ
 ถ้าไม่มี cluster ก็ข้าม ถ้าลบไม่ได้แค่ print warning) → `ClusterOperationError` (500)
 
 เหตุผลที่บันทึกก่อน launch: ถ้า launch พังกลางทาง ยังรู้ชื่อ cluster ไว้ตามลบ บน AWS cluster
@@ -252,9 +258,11 @@ run: |
 | `ECR_REGISTRY_HOST` | AWS | `.env` (ต้องตั้ง, dual-stack) |
 | AWS credential | AWS | boto3 chain ของ backend + ฝั่ง SkyPilot API server |
 
-## 8. ผลเทส (2026-10-11, K3s ที่บ้าน: master 100.125.244.48 + worker-pete)
+## 8. ผลเทส
 
-เทสผ่าน API จริงกับ backend ในเครื่อง + SkyPilot 0.12.3.post1 (AWS ยังไม่ได้เทส launch จริง)
+### K3s (2026-10-11, ที่บ้าน: master 100.125.244.48 + worker-pete)
+
+เทสผ่าน API จริงกับ backend ในเครื่อง + SkyPilot 0.12.3.post1
 
 | เคส | ผล |
 |---|---|
@@ -274,10 +282,34 @@ run: |
 - k3s ไม่ได้ taint master ไว้ pod ของ lab จึงไปลง master ได้ด้วย ถ้าไม่ต้องการต้องใส่ taint
   `node-role.kubernetes.io/control-plane:NoSchedule`
 
+### AWS (2026-10-11, VPC `vlab-ecr-pull`, lab เทส `vlab/music-lab-ide:lab-01` พอร์ต 8080)
+
+SkyPilot API server ในเครื่อง ใช้ IAM user `Skypilot-IAM` (เพิ่ม inline policy `ecr-pull-lab`
+ให้ขอ ECR token + pull `vlab/music-lab-ide`) ทั้งสำหรับ launch และสำหรับ backend ขอ token
+
+| เคส | ผล |
+|---|---|
+| launch | ✅ 201 ใน 84–86 วินาที `is_cloud=true` endpoint `http://10.10.2.x:8080` (private IP เข้าผ่าน Tailscale router) |
+| EC2 | ✅ `m7i-flex.large`, private-a, ไม่มี public IP, SG `vlab-lab-instances`, role `vlab-lab-ecr-pull` |
+| เปิด IDE | ✅ 302 → `/login` (code-server ใช้ `PASSWORD` จาก env ของ lab) |
+| กด Start ซ้ำตอน PENDING | ✅ 409 |
+| `ECR_TOKEN` ใน log (`sky logs`, provision log, API server, backend) | ✅ ไม่พบ |
+| DELETE | ✅ 11 วินาที EC2 terminate |
+| pull ไม่ผ่าน (tag ไม่มี) | ✅ 500 `FAILED_SETUP` + `FAILED` + EC2 ถูกลบ (ก่อนเพิ่ม `_wait_job_running`: ได้ 201 RUNNING และ EC2 ค้าง) |
+| autostop `down` (lifespan 3 นาที) | ❌ ผ่านไป 10 นาที EC2 ยัง running (สาเหตุด้านล่าง) |
+
+**autostop ลบเครื่องไม่ได้:** skylet บนเครื่องสั่ง terminate ด้วย role `vlab-lab-ecr-pull` ซึ่งไม่มีสิทธิ์ EC2
+(`UnauthorizedOperation` แม้แต่ `ec2:DescribeInstances`) ทางไป EC2 API แบบ dual-stack
+(`ec2.ap-southeast-1.api.aws`) ใช้ได้ ส่วน endpoint IPv4 timeout ผลคือถ้า user ไม่กดปิด lab
+EC2 จะเปิดค้างไปเรื่อย ๆ **ห้ามใช้ AWS กับผู้ใช้จริงจนกว่าจะแก้**
+
 ## 9. ที่ยังค้าง
 
 | เรื่อง | รายละเอียด |
 |---|---|
 | race ของ 2 request พร้อมกันจริง ๆ | ทั้งคู่ผ่านการเช็กก่อนที่อีกตัวจะ INSERT (มีมาตั้งแต่ก่อน PR) ต้องใช้ unique index หรือ lock ถ้าจะกันให้ขาด |
-| launch AWS จริง | ยังไม่ได้เทส ต้องเตรียม ECR repo, router เปิดพอร์ต, AWS credential ก่อน |
+| autostop บน AWS | เพิ่มสิทธิ์ EC2 (`DescribeInstances`, `TerminateInstances` จำกัดเฉพาะเครื่องที่ SkyPilot สร้าง) ให้ role `vlab-lab-ecr-pull` แล้วเทสซ้ำ และเช็กว่า skylet ใช้ endpoint dual-stack |
+| lab ที่ใช้ 5173 / 8443 บน AWS | router (`vlab-ts-router`) เปิด egress แค่ 8080 ต้องเพิ่มใน `lab_access.tf` |
+| เทส K3s ซ้ำหลังเพิ่ม `_wait_job_running` | ยังไม่ได้ทำ registry ที่บ้าน (`100.127.74.48:5001`) ค้าง pull ไม่ได้ (`ErrImagePull`) path พังทำงานถูก (`FAILED` ไม่มี pod ค้าง) |
+| `skypilot/music-lab` บน AWS | ยังไม่มีใน ECR (เทสแค่ `vlab/music-lab-ide`) |
 | PENDING เกิน 20 นาทีแต่ launch ยังไม่จบจริง | จะถูกลบทิ้งตอนมีคนกด Start ใหม่ ถ้า image ใหญ่จน pull นานเกิน ต้องขยาย `PENDING_TIMEOUT` |
