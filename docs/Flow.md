@@ -154,7 +154,7 @@ resources:
   infra: aws/ap-southeast-1         # AWS_REGION
   instance_type: m7i-flex.large     # AWS_INSTANCE_TYPE
   disk_size: 30                     # AWS_DISK_SIZE
-  image_id: ami-097929ad492bfc681   # AWS_LAB_AMI
+  image_id: ami-0da9046ec7f57f3af   # AWS_LAB_AMI (vlab-bake-0.12.3.post1-r2)
   ports: [8080, 5173, 8443]
   autostop: {idle_minutes: 60, down: true, wait_for: none}
 setup: |
@@ -296,19 +296,25 @@ SkyPilot API server ในเครื่อง ใช้ IAM user `Skypilot-IAM
 | `ECR_TOKEN` ใน log (`sky logs`, provision log, API server, backend) | ✅ ไม่พบ |
 | DELETE | ✅ 11 วินาที EC2 terminate |
 | pull ไม่ผ่าน (tag ไม่มี) | ✅ 500 `FAILED_SETUP` + `FAILED` + EC2 ถูกลบ (ก่อนเพิ่ม `_wait_job_running`: ได้ 201 RUNNING และ EC2 ค้าง) |
-| autostop `down` (lifespan 3 นาที) | ❌ ผ่านไป 10 นาที EC2 ยัง running (สาเหตุด้านล่าง) |
+| autostop `down` (lifespan 1 นาที, AMI r2) | ✅ 201 เวลา 21:20:39 → EC2 `shutting-down` 21:22:09 (รอบแรกที่ใช้ AMI เดิมลบไม่ได้ ดูด้านล่าง) |
 
-**autostop ลบเครื่องไม่ได้:** skylet บนเครื่องสั่ง terminate ด้วย role `vlab-lab-ecr-pull` ซึ่งไม่มีสิทธิ์ EC2
-(`UnauthorizedOperation` แม้แต่ `ec2:DescribeInstances`) ทางไป EC2 API แบบ dual-stack
-(`ec2.ap-southeast-1.api.aws`) ใช้ได้ ส่วน endpoint IPv4 timeout ผลคือถ้า user ไม่กดปิด lab
-EC2 จะเปิดค้างไปเรื่อย ๆ **ห้ามใช้ AWS กับผู้ใช้จริงจนกว่าจะแก้**
+**autostop เคยลบเครื่องไม่ได้ (แก้แล้ว):** skylet สั่ง terminate ด้วย role ของเครื่อง (`vlab-lab-ecr-pull`)
+ติด 3 จุด แก้ใน branch `infra/ecr-pull-experiment`
+1. ทางเน็ต: skylet ตั้ง `AWS_CONFIG_FILE=/dev/null` เลยไม่ใช้ dual-stack ใน `~/.aws/config` แล้วค้างที่ EC2 API IPv4
+   → AMI `ami-0da9046ec7f57f3af` (`vlab-bake-0.12.3.post1-r2`) ใส่ `AWS_USE_DUALSTACK_ENDPOINT=true` ใน `/etc/environment`
+2. สิทธิ์อ่าน: `terminate_instances` เรียก `DescribeVpcs` / `DescribeSecurityGroups` ก่อนลบ
+3. สิทธิ์ลบ: role มีแค่ ECR → เพิ่ม `TerminateInstances` / `StopInstances` เฉพาะ tag `skypilot-cluster-name`
+   (2–3 อยู่ใน `terraform/lab_autostop.tf`)
+
+**ข้อจำกัด:** หลัง autostop ลบเครื่อง session ใน DB ยังเป็น `RUNNING` จนกว่าจะมีคนกด Start (ไปเจอตอนเช็ก
+`sky.status`) หรือ DELETE (`ClusterDoesNotExist` → `cluster_stopped: false`)
 
 ## 9. ที่ยังค้าง
 
 | เรื่อง | รายละเอียด |
 |---|---|
 | race ของ 2 request พร้อมกันจริง ๆ | ทั้งคู่ผ่านการเช็กก่อนที่อีกตัวจะ INSERT (มีมาตั้งแต่ก่อน PR) ต้องใช้ unique index หรือ lock ถ้าจะกันให้ขาด |
-| autostop บน AWS | เพิ่มสิทธิ์ EC2 (`DescribeInstances`, `TerminateInstances` จำกัดเฉพาะเครื่องที่ SkyPilot สร้าง) ให้ role `vlab-lab-ecr-pull` แล้วเทสซ้ำ และเช็กว่า skylet ใช้ endpoint dual-stack |
+| session ค้าง RUNNING หลัง autostop | backend ไม่รู้ว่าเครื่องถูกลบเอง ต้องมีตัว sync สถานะ (กำลังออกแบบ) |
 | lab ที่ใช้ 5173 / 8443 บน AWS | router (`vlab-ts-router`) เปิด egress แค่ 8080 ต้องเพิ่มใน `lab_access.tf` |
 | เทส K3s ซ้ำหลังเพิ่ม `_wait_job_running` | ยังไม่ได้ทำ registry ที่บ้าน (`100.127.74.48:5001`) ค้าง pull ไม่ได้ (`ErrImagePull`) path พังทำงานถูก (`FAILED` ไม่มี pod ค้าง) |
 | `skypilot/music-lab` บน AWS | ยังไม่มีใน ECR (เทสแค่ `vlab/music-lab-ide`) |
