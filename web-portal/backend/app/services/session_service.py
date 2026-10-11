@@ -1,6 +1,6 @@
 from uuid import UUID
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 import os
 import re
@@ -28,6 +28,9 @@ from app.exceptions.domain import (
     SessionAlreadyExistsError,
     ClusterOperationError,
 )
+
+# session ที่ PENDING นานกว่านี้ถือว่าค้าง (launch จริง: K3s ~5 นาที, AWS ~2.5 นาที)
+PENDING_TIMEOUT = timedelta(minutes=20)
 
 
 class SessionService:
@@ -159,13 +162,18 @@ class SessionService:
                 f"sudo docker pull {shlex.quote(image)}\n"
             ),
             # foreground: SkyPilot ถือว่า job ยังรันอยู่ autostop จะนับ idle หลัง lab ปิดเท่านั้น
-            "run": f"{docker_run} {shlex.quote(image)} {entrypoint}\n",
+            # ส่ง entrypoint เป็นก้อนเดียวผ่าน bash -c ถ้าต่อท้ายตรง ๆ แล้ว entrypoint มีหลายบรรทัด
+            # บรรทัดที่ 2 เป็นต้นไปจะไปรันบน VM แทนที่จะรันใน container
+            "run": f"{docker_run} {shlex.quote(image)} /bin/bash -c {shlex.quote(entrypoint)}\n",
         }
 
     def _cluster_name(self, lab_image: LabImage) -> str:
         # ชื่อ cluster ของ SkyPilot ต้องเป็นตัวเล็ก ตัวเลข และ '-' ขึ้นต้นด้วยตัวอักษร
         slug = re.sub(r"[^a-z0-9-]+", "-", lab_image.repository.split("/")[-1].lower()).strip("-")
-        return f"{slug or 'lab'}-{int(time.time())}"
+        if not slug[:1].isalpha():
+            # เช่น repo "2048-game" SkyPilot ไม่รับชื่อที่ขึ้นต้นด้วยตัวเลข
+            slug = f"lab-{slug}".rstrip("-")
+        return f"{slug}-{int(time.time())}"
 
     def create_session(self, user_id: UUID, lab_id: UUID) -> dict:
         """สร้าง session ใหม่ - launch pod และบันทึกลง database"""
@@ -189,8 +197,23 @@ class SessionService:
             )
             .first()
         )
-        
-     
+
+        # PENDING = launch รอบก่อนยังไม่จบ ห้ามไปถาม sky.status เพราะช่วงไม่กี่วินาทีแรก
+        # SkyPilot ยังไม่มี record ของ cluster โค้ดข้างล่างจะเข้าใจว่า cluster หายแล้ว
+        # ตั้ง STOPPED แล้วปล่อย launch ซ้อน (เทสกับ K3s จริงได้ 2 pod ของ user เดียวกัน)
+        if existing_session and existing_session.status == SessionStatus.PENDING:
+            if not self._is_stale_pending(existing_session):
+                raise SessionAlreadyExistsError(
+                    f"Session is still starting. Session ID: {existing_session.id}, Cluster: {existing_session.sky_cluster_name}"
+                )
+            # ค้างเกิน timeout = backend ตายกลาง launch ไม่มีใครมาอัปเดต record นี้แล้ว
+            existing_session.status = SessionStatus.FAILED
+            existing_session.ended_at = datetime.utcnow()
+            self.db.commit()
+            if existing_session.sky_cluster_name:
+                self._down_quietly(existing_session.sky_cluster_name)
+            existing_session = None
+
         if existing_session and existing_session.sky_cluster_name:
         
             try:
@@ -306,6 +329,14 @@ class SessionService:
             "status": "running",
             "started_at": new_session.started_at,
         }
+
+    def _is_stale_pending(self, session: SessionModel) -> bool:
+        if not session.started_at:
+            return True
+        started_at = session.started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - started_at > PENDING_TIMEOUT
 
     def _down_quietly(self, cluster_name: str) -> None:
         """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
