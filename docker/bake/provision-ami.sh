@@ -40,6 +40,10 @@ sudo /tmp/aws/install --update
 rm -rf /tmp/aws /tmp/awscli.zip
 mkdir -p "$HOME/.aws"
 printf '[default]\nregion = ap-southeast-1\nuse_dualstack_endpoint = true\n' > "$HOME/.aws/config"
+# ตอน autostop skylet ตั้ง AWS_CONFIG_FILE=/dev/null (sky/skylet/events.py:387) เลยไม่อ่าน
+# ~/.aws/config ข้างบน boto3 จะไปหา EC2 API แบบ IPv4 ซึ่งออกจาก private subnet ไม่ได้ แล้วค้าง
+# (เครื่องไม่ถูกลบ) env ใน /etc/environment ยังอยู่ เพราะ pam_env ใส่ให้ทุก ssh session รวมถึง skylet
+echo 'AWS_USE_DUALSTACK_ENDPOINT=true' | sudo tee -a /etc/environment
 
 echo "== Miniconda (Python 3.10) =="
 curl -fsSL "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh" \
@@ -69,6 +73,7 @@ echo "== check =="
 aws --version
 docker --version
 command -v patch
+grep -x 'AWS_USE_DUALSTACK_ENDPOINT=true' /etc/environment
 "$SKY_REMOTE_PYTHON_ENV/bin/python" -c \
   "import sky, ray; print('sky', sky.__version__, 'ray', ray.__version__)"
 echo "provision done"

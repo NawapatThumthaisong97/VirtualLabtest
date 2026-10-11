@@ -1339,6 +1339,13 @@ sky logs --provision <cluster> 2>/dev/null | grep -iE "Installed [0-9]+ package|
      ส่วน EC2 API แบบ dual-stack (`ec2.ap-southeast-1.api.aws`) ไปถึง (endpoint IPv4 timeout)
    - แก้ใน Phase 17 (`terraform/lab_autostop.tf`): `DescribeInstances` + `Terminate/StopInstances` เฉพาะ instance ที่มี tag `skypilot-cluster-name`
    - instance ที่ SkyPilot สร้างตั้ง metadata hop limit = 1 container ของ lab จึงเอา credential ของ role นี้ไม่ได้
+   - หลัง apply Phase 17 แล้วเทสซ้ำ: role มีสิทธิ์แล้ว แต่**ยังลบไม่ได้** skylet ค้าง `SYN-SENT` ไป `ec2.ap-southeast-1.amazonaws.com` (IPv4)
+     เพราะตอน autostop skylet ตั้ง `AWS_CONFIG_FILE=/dev/null` (`sky/skylet/events.py:387`) จึงไม่อ่าน
+     `use_dualstack_endpoint` ใน `~/.aws/config` ที่ bake ไว้
+   - ยืนยันบนเครื่อง: `AWS_CONFIG_FILE=/dev/null` อย่างเดียว → timeout, เพิ่ม `AWS_USE_DUALSTACK_ENDPOINT=true` → ไป
+     `ec2.ap-southeast-1.api.aws` และ `DescribeInstances` ผ่าน
+   - แก้ใน bake: เขียน `AWS_USE_DUALSTACK_ENDPOINT=true` ลง `/etc/environment` (pam_env ใส่ให้ทุก ssh session รวมถึง skylet)
+     **ต้อง bake AMI ใหม่** แล้วเปลี่ยน `AWS_LAB_AMI` ของ backend
 
 **อื่น ๆ**
 
