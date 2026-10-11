@@ -32,6 +32,11 @@ from app.exceptions.domain import (
 # session ที่ PENDING นานกว่านี้ถือว่าค้าง (launch จริง: K3s ~5 นาที, AWS ~2.5 นาที)
 PENDING_TIMEOUT = timedelta(minutes=20)
 
+# รอ job ของ lab ผ่าน setup จนเป็น RUNNING (AWS: docker login + pull ~10 วินาที)
+JOB_START_TIMEOUT = timedelta(minutes=10)
+JOB_POLL_SECONDS = 5
+JOB_STARTING_STATUSES = {None, "INIT", "PENDING", "SETTING_UP"}
+
 
 class SessionService:
     """Service สำหรับ business logic ของ Session"""
@@ -84,6 +89,8 @@ class SessionService:
         return envs
 
     def _autostop(self, lab_image: LabImage) -> dict:
+        # wait_for: none = ลบ cluster เมื่อครบ idle_minutes โดยไม่รอ job หรือ SSH
+        # lifespan_minutes จึงเป็นอายุสูงสุดของ lab ไม่ใช่เวลานับหลังเลิกใช้
         return {
             "idle_minutes": lab_image.lifespan_minutes or 60,
             "down": True,
@@ -141,7 +148,11 @@ class SessionService:
         if lab_image.workdir:
             docker_args += ["-w", lab_image.workdir]
         docker_run = "sudo docker run " + " ".join(shlex.quote(a) for a in docker_args)
-        entrypoint = lab_image.entrypoint_script or "/bin/bash /run.sh"
+        # entrypoint ว่าง = ใช้ ENTRYPOINT/CMD ของ image เอง เช่น code-server ที่ตั้ง ENTRYPOINT ไว้
+        # ถ้าต่อคำสั่งท้าย docker run จะกลายเป็น argument ของ ENTRYPOINT นั้นแล้วพัง
+        # (K3s ใช้ไม่ได้แบบนี้ เพราะ SkyPilot แทน command ของ pod เอง ต้องมี run เสมอ)
+        entrypoint = (lab_image.entrypoint_script or "").strip()
+        command = f" /bin/bash -c {shlex.quote(entrypoint)}" if entrypoint else ""
 
         resources: dict[str, Any] = {
             "infra": f"aws/{settings.AWS_REGION}",
@@ -161,10 +172,10 @@ class SessionService:
                 f'echo "$ECR_TOKEN" | sudo docker login -u AWS --password-stdin {registry}\n'
                 f"sudo docker pull {shlex.quote(image)}\n"
             ),
-            # foreground: SkyPilot ถือว่า job ยังรันอยู่ autostop จะนับ idle หลัง lab ปิดเท่านั้น
+            # foreground: job อยู่ใน RUNNING ตลอดที่ lab เปิด (_wait_job_running ใช้สถานะนี้)
             # ส่ง entrypoint เป็นก้อนเดียวผ่าน bash -c ถ้าต่อท้ายตรง ๆ แล้ว entrypoint มีหลายบรรทัด
             # บรรทัดที่ 2 เป็นต้นไปจะไปรันบน VM แทนที่จะรันใน container
-            "run": f"{docker_run} {shlex.quote(image)} /bin/bash -c {shlex.quote(entrypoint)}\n",
+            "run": f"{docker_run} {shlex.quote(image)}{command}\n",
         }
 
     def _cluster_name(self, lab_image: LabImage) -> str:
@@ -299,6 +310,7 @@ class SessionService:
         try:
             request_id = sky.launch(task, cluster_name=cluster_name)
             job_id, handle = sky.stream_and_get(request_id)
+            self._wait_job_running(cluster_name, job_id)
             endpoints = sky.get(sky.endpoints(cluster=cluster_name))
         except Exception as e:
             new_session.status = SessionStatus.FAILED
@@ -329,6 +341,23 @@ class SessionService:
             "status": "running",
             "started_at": new_session.started_at,
         }
+
+    def _wait_job_running(self, cluster_name: str, job_id: int) -> None:
+        """sky.launch คืนตั้งแต่ส่ง job ส่วน setup ไปรันต่อเองทีหลัง ถ้าไม่รอ setup ที่พัง
+        (เช่น docker pull tag ที่ไม่มี) จะถูกบันทึกเป็น RUNNING ทั้งที่ job เป็น FAILED_SETUP
+        และเครื่องค้างอยู่ (เทสกับ AWS จริงแล้ว) raise แล้ว create_session จะลบ cluster ให้เอง
+        """
+        deadline = time.monotonic() + JOB_START_TIMEOUT.total_seconds()
+        while True:
+            status = sky.get(sky.job_status(cluster_name, [job_id])).get(job_id)
+            status = getattr(status, "value", status)
+            if status == "RUNNING":
+                return
+            if status not in JOB_STARTING_STATUSES:
+                raise ClusterOperationError(f"Lab job {job_id} did not start: {status}")
+            if time.monotonic() > deadline:
+                raise ClusterOperationError(f"Lab job {job_id} still {status} after {JOB_START_TIMEOUT}")
+            time.sleep(JOB_POLL_SECONDS)
 
     def _is_stale_pending(self, session: SessionModel) -> bool:
         if not session.started_at:
