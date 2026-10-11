@@ -177,18 +177,140 @@ skylet เช็กทุก 1 นาทีและต้องปิด Ray �
 
 ---
 
-## 6. ขั้นต่อไป
+## 6. Session sync — ให้ DB รู้ว่าเครื่องหายแล้ว (เสนอ ยังไม่ทำ)
 
-autostop ใช้ได้แล้ว งานที่เหลือ
+ปัญหา: autostop (หรือ pod/EC2 ตายเอง) ลบเครื่องไปแล้ว แต่ `sessions.status` ยังเป็น `RUNNING`
+เพราะไม่มีใครบอก backend
 
-- **session ใน DB ไม่รู้ว่าเครื่องโดน autostop ลบ** ค้าง RUNNING จนมีคนกด Start ใหม่หรือ DELETE (กำลังออกแบบ)
-- เปิดพอร์ต 5173 / 8443 ที่ router ถ้าจะใช้ lab ที่มีหลายพอร์ต (`lab_access.tf`)
-- push `skypilot/music-lab` ขึ้น ECR ถ้าจะให้ lab OOP ไป AWS
-- rule `0.0.0.0/0` ที่ SkyPilot เพิ่มใน SG ของ lab
-- `terraform apply` บน Windows ให้ state ตรงกับของจริง (ถ้าใส่ policy ผ่าน Console)
-- ลบ root access key ออกจาก ThinkPad
+```mermaid
+flowchart TD
+    TICK(["ทุก 1 นาที<br/>(งานพื้นหลังใน backend)"]) --> Q["SELECT sessions<br/>WHERE status IN (PENDING, RUNNING)"]
+    Q --> EMPTY{"มีไหม?"}
+    EMPTY -->|"ไม่มี"| DONE(["จบรอบ"])
+    EMPTY -->|"มี"| SKY["sky.status(ทุก cluster, refresh)<br/>SkyPilot ถาม EC2 / K8s ให้เอง<br/>(เรียกครั้งเดียวต่อรอบ)"]
+    SKY --> EACH{"แต่ละ session"}
+
+    EACH -->|"RUNNING + cluster ยังอยู่"| KEEP["ไม่ทำอะไร"]
+    EACH -->|"RUNNING + cluster หายแล้ว"| STOP["status = STOPPED<br/>ended_at = now<br/>end_reason = EXPIRED หรือ LOST"]
+    EACH -->|"PENDING เกิน 20 นาที"| FAILP["status = FAILED<br/>end_reason = STALE_PENDING<br/>sky.down (เก็บกวาด)"]
+    EACH -->|"PENDING ยังไม่เกิน"| KEEP
+
+    STOP --> DONE
+    FAILP --> DONE
+    KEEP --> DONE
+
+    style STOP fill:#ffd
+    style FAILP fill:#fdd
+```
+
+- `EXPIRED` = หายหลัง `expires_at` (autostop ตามเวลา) / `LOST` = หายก่อนเวลา (เครื่องหรือ pod ตายเอง)
+- หน้าเว็บนับถอยหลังจาก `expires_at` ได้เลย ไม่ต้องรอ reconciler
+- ทางเลือกอื่น: EventBridge + SQS (ราคาแทบฟรี แต่ได้แค่ AWS และต้องดูแล infra เพิ่ม) เก็บไว้เป็นทางด่วนในอนาคต
 
 ---
+
+## 7. Database — แก้อะไรไปแล้ว / จะแก้อะไร
+
+```mermaid
+erDiagram
+    labs ||--o{ sessions : "lab_id"
+    lab_images ||--o{ labs : "image_id"
+    sessions ||--o{ usage_records : "session_id"
+
+    labs {
+        uuid id PK
+        uuid image_id FK
+        enum run_target "ใหม่ PR88: KUBERNETES / AWS"
+    }
+    lab_images {
+        uuid id PK
+        string repository
+        string tag
+        int lifespan_minutes "อายุสูงสุดของ lab"
+        string entrypoint_script "ว่าง = ใช้ ENTRYPOINT ของ image (AWS)"
+    }
+    sessions {
+        uuid id PK
+        enum status "PENDING / RUNNING / STOPPED / FAILED"
+        bool is_cloud "PR88: true ถ้าไป AWS"
+        string sky_cluster_name
+        int sky_job_id
+        jsonb endpoints
+        timestamptz started_at
+        timestamptz ended_at
+        timestamptz expires_at "มีอยู่แล้ว แต่ยังไม่มีใครใส่ค่า"
+        enum end_reason "เสนอ: ใหม่"
+    }
+    usage_records {
+        bigint id PK
+        uuid session_id FK
+        bool is_cloud_burst "มีอยู่แล้ว ยังไม่ได้ใช้"
+        numeric est_cost_thb
+    }
+```
+
+| ตาราง | เปลี่ยน | สถานะ | migration |
+|---|---|---|---|
+| `labs` | `run_target` (enum `runtarget`) | ✅ PR #88 | `CREATE TYPE` + `ALTER TABLE ADD COLUMN` (ไม่ต้อง drop) |
+| `sessions` | ไม่เปลี่ยน schema แต่ตอนนี้มีแถว `PENDING` / `FAILED` จริง และ `is_cloud = true` | ✅ PR #88 | – |
+| `sessions` | ใส่ค่า `expires_at = started_at + lifespan_minutes` ตอน launch | 💡 เสนอ | ไม่ต้อง (มี column แล้ว) |
+| `sessions` | `end_reason` enum: `USER_DELETE`, `EXPIRED`, `LOST`, `LAUNCH_FAILED`, `STALE_PENDING` | 💡 เสนอ | `CREATE TYPE` + `ADD COLUMN` nullable |
+
+---
+
+## 8. ควรเก็บสถานะเครื่องลง DB ไหม
+
+**เก็บแค่ "การเปลี่ยนสถานะ" ไม่เก็บ "ผลการเช็กทุกครั้ง"**
+
+| ข้อมูล | เก็บที่ไหน | เหตุผล |
+|---|---|---|
+| สถานะปัจจุบันของ session | `sessions.status` (มีแล้ว) | หน้าเว็บต้องใช้ |
+| จบเมื่อไหร่ ทำไม | `sessions.ended_at` + `end_reason` | 1 ค่าต่อ session ใช้ทำรายงานได้ เช่น "ครบเวลา 80% กดปิดเอง 15% ตายเอง 5%" |
+| ผลการเช็กของ reconciler ทุกนาที | **ไม่เก็บ** | ส่วนใหญ่คือ "ยังอยู่" ซ้ำไปเรื่อย ๆ — 100 lab × 60 รอบ/ชม. = 6,000 แถว/ชม. ไม่มีใครอ่าน |
+| log ของเครื่อง (skylet, setup, docker) | **ไม่เก็บใน DB** ปล่อยไว้ที่ SkyPilot (`sky logs`) | ข้อความยาว เยอะ หายไปพร้อมเครื่องก็ไม่เป็นไร ถ้าต้องการเก็บยาวค่อยส่งไป CloudWatch / Loki |
+| เหตุผลตอน launch พัง | log ของ backend (มีแล้ว) | ถ้าอยากโชว์ผู้ใช้ เก็บข้อความสั้น ๆ ใน `sessions` ได้ |
+
+ปริมาณที่เก็บจริง: **1 แถวต่อ 1 session** อัปเดต 2–3 ครั้งตลอดชีวิต (PENDING → RUNNING → STOPPED) ไม่ได้เยอะ
+
+---
+
+## 9. ลำดับงานถัดไป
+
+```mermaid
+flowchart TD
+    subgraph NOW["ตอนนี้ (ทำได้เลย)"]
+        A1["merge PR #88<br/>(K3s/AWS เลือกราย lab)"]
+        A2["terraform apply บน Windows<br/>ให้ state ตรงกับ Console"]
+    end
+
+    subgraph NEXT["ถัดไป (ต้องรีวิว doc ก่อน)"]
+        B1["docs/SESSION_SYNC.md<br/>ออกแบบ reconciler + end_reason"]
+        B2["โค้ด: ใส่ expires_at ตอน launch"]
+        B3["โค้ด: reconciler ทุก 1 นาที"]
+        B4["migration: sessions.end_reason"]
+        B5["frontend: นับถอยหลังจาก expires_at"]
+    end
+
+    subgraph LATER["ก่อนเปิดให้นักศึกษาใช้ AWS จริง"]
+        C1["router เปิดพอร์ต 5173 / 8443"]
+        C2["push skypilot/music-lab ขึ้น ECR"]
+        C3["ตัดสินใจเรื่อง rule 0.0.0.0/0 ใน SG"]
+        C4["backend ใช้ AWS_PROFILE แยก<br/>(ไม่ตกไปใช้ root)"]
+        C5["launch แบบ async<br/>(HTTP ไม่ต้องค้าง ~90 วิ)"]
+    end
+
+    subgraph HOUSE["เก็บกวาด"]
+        D1["ลบ root access key ออกจาก ThinkPad"]
+        D2["เทส K3s ซ้ำตอน registry ที่บ้านกลับมา"]
+        D3["stop router ตอนไม่ได้เทส"]
+    end
+
+    A1 --> B1 --> B2 --> B3
+    B1 --> B4 --> B3
+    B2 --> B5
+    B3 --> C1
+    C1 --> C2 --> C3 --> C4 --> C5
+```
 
 ## ไฟล์ / branch ที่เกี่ยวข้อง
 
