@@ -10,8 +10,14 @@
 
 data "aws_iam_policy_document" "lab_autostop" {
   # Describe* does not support resource-level permissions.
+  # terminate_instances also looks up the VPC by name and its security groups
+  # (sky/provision/aws/instance.py) before terminating.
   statement {
-    actions   = ["ec2:DescribeInstances"]
+    actions = [
+      "ec2:DescribeInstances",
+      "ec2:DescribeVpcs",
+      "ec2:DescribeSecurityGroups",
+    ]
     resources = ["*"]
   }
 
