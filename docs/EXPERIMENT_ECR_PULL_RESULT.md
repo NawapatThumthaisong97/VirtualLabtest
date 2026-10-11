@@ -1349,6 +1349,13 @@ sky logs --provision <cluster> 2>/dev/null | grep -iE "Installed [0-9]+ package|
    - เลือกวิธี patch AMI เดิม (เพิ่มบรรทัดเดียว) แทน interface endpoint ของ EC2 เพราะ endpoint คิดเงินต่อ AZ ต่อเดือน
    - ถ้าวันหน้าปิด IPv6 ขาออกแล้วใช้ Squid: `HTTPS_PROXY` / `NO_PROXY` ต้องอยู่ใน `/etc/environment` ของ AMI ด้วย
      เหตุผลเดียวกัน (skylet เริ่มก่อน `setup:` ของ task) ไม่งั้น autostop จะค้างอีก
+   - patch AMI แล้ว: `ami-0da9046ec7f57f3af` (`vlab-bake-0.12.3.post1-r2`) = AMI เดิม + บรรทัดใน `/etc/environment`
+     host key ของเครื่องที่บูตจาก r2 ไม่ซ้ำกับเครื่อง builder (cloud-init สร้างใหม่)
+   - เทสด้วย r2 แล้วเจอจุดที่ 3: `UnauthorizedOperation` ที่ `DescribeVpcs` เพราะ `terminate_instances`
+     หา VPC จากชื่อและดู SG ก่อนลบ → เพิ่ม `DescribeVpcs` / `DescribeSecurityGroups` ใน `lab_autostop.tf`
+   - **ผล: ใช้ได้** lifespan 1 นาที ได้ 201 เวลา 21:20:39 → EC2 `shutting-down` 21:22:09
+     (skylet เช็กทุก 1 นาทีและปิด Ray ก่อน จึงช้ากว่า lifespan ราว 1–1.5 นาที)
+   - ข้อจำกัดที่เหลือ: session ใน DB ของ web portal ยังเป็น RUNNING หลังเครื่องถูกลบ
 
 **อื่น ๆ**
 
