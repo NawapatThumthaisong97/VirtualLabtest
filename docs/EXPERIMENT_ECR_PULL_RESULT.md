@@ -1346,6 +1346,9 @@ sky logs --provision <cluster> 2>/dev/null | grep -iE "Installed [0-9]+ package|
      `ec2.ap-southeast-1.api.aws` และ `DescribeInstances` ผ่าน
    - แก้ใน bake: เขียน `AWS_USE_DUALSTACK_ENDPOINT=true` ลง `/etc/environment` (pam_env ใส่ให้ทุก ssh session รวมถึง skylet)
      **ต้อง bake AMI ใหม่** แล้วเปลี่ยน `AWS_LAB_AMI` ของ backend
+   - เลือกวิธี patch AMI เดิม (เพิ่มบรรทัดเดียว) แทน interface endpoint ของ EC2 เพราะ endpoint คิดเงินต่อ AZ ต่อเดือน
+   - ถ้าวันหน้าปิด IPv6 ขาออกแล้วใช้ Squid: `HTTPS_PROXY` / `NO_PROXY` ต้องอยู่ใน `/etc/environment` ของ AMI ด้วย
+     เหตุผลเดียวกัน (skylet เริ่มก่อน `setup:` ของ task) ไม่งั้น autostop จะค้างอีก
 
 **อื่น ๆ**
 
