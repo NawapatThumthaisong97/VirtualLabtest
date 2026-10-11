@@ -57,7 +57,10 @@ sequenceDiagram
     FE->>SV: POST /sessions (user_id, lab_id)
     SV->>DB: หา user, lab
     SV->>DB: หา session RUNNING/PENDING ของ user+lab
-    opt มี session เดิม
+    opt มี session PENDING
+        Note over SV: ยังไม่เกิน 20 นาที → 409<br/>เกิน → ตั้ง FAILED + sky.down แล้วไปต่อ
+    end
+    opt มี session RUNNING
         SV->>SKY: sky.status(cluster เดิม)
         Note over SV: ไม่เจอ/STOPPED/error → ตั้ง STOPPED แล้วไปต่อ<br/>ยังอยู่ → 409 SessionAlreadyExists
     end
@@ -84,7 +87,20 @@ sequenceDiagram
 
 ### 3.2 กันเปิดซ้ำ
 หา session ของ `user_id + lab_id` ที่สถานะ `RUNNING` **หรือ `PENDING`** (PENDING เพิ่มใน PR นี้)
-และยังไม่ถูก soft delete ถ้าเจอและมี `sky_cluster_name` จะถาม SkyPilot ว่า cluster ยังอยู่ไหม
+และยังไม่ถูก soft delete
+
+**ถ้าเป็น `PENDING`** (launch รอบก่อนยังไม่จบ) ไม่ถาม SkyPilot เลย
+
+| อายุ session (`started_at`) | ทำอะไร |
+|---|---|
+| ไม่เกิน `PENDING_TIMEOUT` (20 นาที) | ตอบ 409 `SessionAlreadyExistsError` ("Session is still starting") |
+| เกิน 20 นาที | ถือว่าค้าง (backend ตายกลาง launch) ตั้ง `FAILED` + `_down_quietly()` แล้วสร้างใหม่ต่อ |
+
+ที่ห้ามถาม `sky.status` ตอน PENDING เพราะช่วงไม่กี่วินาทีแรกของ launch SkyPilot ยังไม่มี
+record ของ cluster ถ้าถามจะได้ "ไม่มี record" แล้วถูกตีความว่า cluster หายไปแล้ว
+(เทสกับ K3s จริงก่อนแก้: กด Start ซ้ำตอน t=2s ได้ 2 pod ของ user เดียวกัน)
+
+**ถ้าเป็น `RUNNING`** และมี `sky_cluster_name` จะถาม SkyPilot ว่า cluster ยังอยู่ไหม
 
 | ผล `sky.status` | ทำอะไร |
 |---|---|
@@ -97,6 +113,8 @@ sequenceDiagram
 - ไม่มี `lab.image_id` → `LabImageMissingError` (400) / หา `LabImage` ไม่เจอ → 404
 - `_cluster_name()`: เอาส่วนท้ายของ `repository` ทำเป็นตัวเล็ก แทนตัวที่ไม่ใช่ `a-z0-9-` ด้วย `-`
   แล้วต่อ unix time เช่น `skypilot/music-lab` → `music-lab-1791702290`
+  ถ้าไม่ได้ขึ้นต้นด้วยตัวอักษรจะเติม `lab-` ข้างหน้า (`org/2048-game` → `lab-2048-game-<ts>`)
+  เพราะ SkyPilot ไม่รับชื่อ cluster ที่ขึ้นต้นด้วยตัวเลข
 
 ### 3.4 สร้าง task config
 `create_fastapi_task()` คืน `dict` แล้วส่งเข้า `sky.Task.from_yaml_config()` ตรง ๆ
@@ -143,8 +161,11 @@ setup: |
   sudo docker pull <ECR_REGISTRY_HOST>/skypilot/music-lab:lab-01
 run: |
   sudo docker run --rm --name lab -p 8080:8080 -p 5173:5173 -p 8443:8443 \
-    -e IDE_PASSWORD=musiclab -e APP_ENV=staging <image> /bin/bash /run.sh
+    -e IDE_PASSWORD=musiclab -e APP_ENV=staging <image> /bin/bash -c '/bin/bash /run.sh'
 ```
+
+- entrypoint ส่งเป็นก้อนเดียวผ่าน `bash -c` ถ้าต่อท้ายตรง ๆ แล้ว entrypoint มีหลายบรรทัด
+  บรรทัดที่ 2 เป็นต้นไปจะไปรันบน VM แทนที่จะรันใน container
 
 - ไม่ตั้ง `ECR_REGISTRY_HOST` หรือ `AWS_LAB_AMI` → `ClusterOperationError` ทันที
 - env ของ lab ไปเป็น `-e` ของ `docker run` ไม่ใส่ `envs:` เพราะ `envs:` อยู่บน VM ไม่เข้า container
@@ -163,8 +184,8 @@ run: |
 ### 3.6 บันทึก PENDING → launch → RUNNING
 1. `INSERT` session `status=PENDING`, `sky_cluster_name`, `is_cloud`, `started_at`
    (`sky_job_id`, `endpoints` ยังเป็น `NULL`)
-2. `sky.launch()` → `sky.stream_and_get()` (รอจนเสร็จ: K3s ไม่กี่สิบวินาที, AWS ~2.5 นาที
-   HTTP request ค้างรอตลอด)
+2. `sky.launch()` → `sky.stream_and_get()` (รอจนเสร็จ: K3s วัดได้ 160–280 วินาที,
+   AWS ~2.5 นาที HTTP request ค้างรอตลอด)
 3. `sky.endpoints()` → แปลงเป็น `{"8080": "http://..."}`
 4. `UPDATE` เป็น `RUNNING` + `sky_job_id` + `endpoints`
 
@@ -197,7 +218,7 @@ run: |
             INSERT
               │
               ▼
-          PENDING ──launch พัง──▶ FAILED
+          PENDING ──launch พัง / ค้างเกิน 20 นาที──▶ FAILED
               │
        launch สำเร็จ
               ▼
@@ -231,12 +252,32 @@ run: |
 | `ECR_REGISTRY_HOST` | AWS | `.env` (ต้องตั้ง, dual-stack) |
 | AWS credential | AWS | boto3 chain ของ backend + ฝั่ง SkyPilot API server |
 
-## 8. ข้อที่ยังมีปัญหา (จากการเทส offline 2026-10-11)
+## 8. ผลเทส (2026-10-11, K3s ที่บ้าน: master 100.125.244.48 + worker-pete)
 
-| # | เรื่อง | รายละเอียด |
-|---|---|---|
-| 1 | AWS: entrypoint หลายบรรทัด | `run` เอา entrypoint ไปต่อท้าย `docker run` ตรง ๆ ถ้ามีหลายบรรทัด บรรทัดแรกเข้า container ที่เหลือรันบน VM (ฝั่ง K3s ไม่มีปัญหานี้) |
-| 2 | ชื่อ cluster ขึ้นต้นด้วยตัวเลข | repo เช่น `org/2048-game` ได้ `2048-game-<ts>` ซึ่ง SkyPilot ปฏิเสธ (regex ต้องขึ้นต้นด้วยตัวอักษร) |
-| 3 | ตัวกัน PENDING ไม่แน่น | session PENDING มีชื่อ cluster เสมอ เลยไปเข้า `sky.status` ถ้ายังไม่มี record ของ cluster (launch ยังอยู่ในคิว) หรือเรียก status แล้ว error จะถูกตั้งเป็น `STOPPED` แล้วปล่อยให้ launch ซ้ำได้ และถ้า backend ตายระหว่าง launch จะเหลือ PENDING ค้าง |
-| 4 | race ของ 2 request พร้อมกัน | ทั้งคู่ผ่านการเช็กก่อนที่อีกตัวจะ INSERT (มีมาตั้งแต่ก่อน PR) |
-| 5 | `DB_DIAGRAM.md` | เขียนค่าเป็นตัวเล็ก แต่ใน DB เก็บ `KUBERNETES`/`AWS` |
+เทสผ่าน API จริงกับ backend ในเครื่อง + SkyPilot 0.12.3.post1 (AWS ยังไม่ได้เทส launch จริง)
+
+| เคส | ผล |
+|---|---|
+| migrate `labs.run_target` | ✅ lab เดิมได้ `KUBERNETES` ทุกตัว |
+| launch lab (OOP, `skypilot/music-lab:lab-01`) | ✅ 201 ใน 160–280 วินาที PENDING → RUNNING ได้ endpoints 3 พอร์ตเข้าได้จริง |
+| กด Start ซ้ำตอน t=3s (PENDING) | ✅ 409 ทันที (ก่อนแก้: ได้ cluster ซ้อนเป็น 2 pod) |
+| session PENDING ค้างเกิน 20 นาที | ✅ ถูกตั้ง `FAILED` แล้ว launch ใหม่ได้ |
+| launch พัง (provision ไม่ได้ / pod Failed ตอน setup) | ✅ `FAILED` + `ended_at`, 500 `cluster_operation_error`, cluster ถูกลบ |
+| DELETE ตอน RUNNING | ✅ รอ `sky.down` เสร็จ (~17 วินาที) `cluster_stopped: true` pod หายจริง |
+| DELETE ตอน cluster ถูกลบไปแล้ว | ✅ 200 `cluster_stopped: false` (`ClusterDoesNotExist` ผ่าน `sky.get` ได้จริง) |
+| builder offline (YAML K3s เทียบของเดิม, quote env, AWS config + secret) | ✅ |
+
+ข้อสังเกตจากการเทส
+
+- venv ที่ลง `kubernetes` 36.x จะ launch ไม่ได้ (`No module named 'kubernetes.client.models.dict[str, str]'`)
+  ต้องลงตาม `requirement.txt` (`<36`)
+- k3s ไม่ได้ taint master ไว้ pod ของ lab จึงไปลง master ได้ด้วย ถ้าไม่ต้องการต้องใส่ taint
+  `node-role.kubernetes.io/control-plane:NoSchedule`
+
+## 9. ที่ยังค้าง
+
+| เรื่อง | รายละเอียด |
+|---|---|
+| race ของ 2 request พร้อมกันจริง ๆ | ทั้งคู่ผ่านการเช็กก่อนที่อีกตัวจะ INSERT (มีมาตั้งแต่ก่อน PR) ต้องใช้ unique index หรือ lock ถ้าจะกันให้ขาด |
+| launch AWS จริง | ยังไม่ได้เทส ต้องเตรียม ECR repo, router เปิดพอร์ต, AWS credential ก่อน |
+| PENDING เกิน 20 นาทีแต่ launch ยังไม่จบจริง | จะถูกลบทิ้งตอนมีคนกด Start ใหม่ ถ้า image ใหญ่จน pull นานเกิน ต้องขยาย `PENDING_TIMEOUT` |

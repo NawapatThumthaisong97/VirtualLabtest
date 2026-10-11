@@ -59,7 +59,7 @@ erDiagram
     uuid image_id FK "อ้าง lab_images"
     timestamptz due_at
     text status "draft | published"
-    text run_target "kubernetes | aws (ที่ launch session)"
+    text run_target "KUBERNETES | AWS (ที่ launch session)"
     timestamptz created_at
   }
 
