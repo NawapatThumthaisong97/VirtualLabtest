@@ -23,6 +23,7 @@
 14. ECR repo `vlab/music-lab-ide` + launch แบบ container mode (`image_id: docker:`)
 15. Launch แบบ VM mode (pull + `docker run` เอง) + เปิด router ให้เข้าพอร์ต 8080 ของ lab
 16. สร้าง AMI `vlab-bake-0.12.3.post1` จาก bake แล้ว launch VM mode เทียบเวลา
+17. ให้ role ของ lab instance สั่ง terminate ตัวเองได้ (autostop `down: true`)
 
 
 **Code / คำสั่ง**
@@ -1333,6 +1334,11 @@ sky logs --provision <cluster> 2>/dev/null | grep -iE "Installed [0-9]+ package|
    - launch พังหลังสร้าง EC2 แล้ว → cluster กำพร้า (เสียเงิน) ต้องบันทึก session ก่อน launch และ `sky.down` เมื่อพัง
    - `sky.down()` คืน request_id แต่ไม่ได้รอผล → ต้อง `sky.get()`
 8. **autostop `down: true`** บน AWS ต้องเช็กว่า EC2 สั่งลบตัวเองได้ (สิทธิ์ EC2 ใน `vlab-lab-ecr-pull` + ทางไป EC2 API แบบ dual-stack)
+   - เทสจาก web portal แล้ว (PR #88, lifespan 3 นาที): **ลบไม่ได้** ผ่านไป 10 นาทีเครื่องยัง running
+     skylet log หยุดที่ `Terminating head node.` และ role ได้ `UnauthorizedOperation` แม้แต่ `ec2:DescribeInstances`
+     ส่วน EC2 API แบบ dual-stack (`ec2.ap-southeast-1.api.aws`) ไปถึง (endpoint IPv4 timeout)
+   - แก้ใน Phase 17 (`terraform/lab_autostop.tf`): `DescribeInstances` + `Terminate/StopInstances` เฉพาะ instance ที่มี tag `skypilot-cluster-name`
+   - instance ที่ SkyPilot สร้างตั้ง metadata hop limit = 1 container ของ lab จึงเอา credential ของ role นี้ไม่ได้
 
 **อื่น ๆ**
 
