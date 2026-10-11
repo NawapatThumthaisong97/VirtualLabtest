@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # AWS (lab ที่ run_target = aws) ค่าตาม VPC vlab-ecr-pull ใน infra/ecr-pull-experiment
     AWS_REGION: str = "ap-southeast-1"
-    AWS_LAB_AMI: Optional[str] = None          # AMI bake เช่น vlab-bake-0.12.3.post1
+    AWS_LAB_AMI: Optional[str] = None          # AMI bake เช่น vlab-bake-0.12.3.post1-r2
     AWS_INSTANCE_TYPE: str = "m7i-flex.large"  # บัญชี free plan สร้างได้แค่บางชนิด
     AWS_DISK_SIZE: int = 30                    # ไม่ใส่ SkyPilot จะใช้ 256 GB
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
