@@ -1,16 +1,18 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
+from decimal import Decimal, ROUND_UP
 import os
+import re
 import sky
 import yaml
-import time
 
 from app.models.session import Session as SessionModel, SessionStatus, ServiceType
 from app.models.user import User
-from app.models.lab import Lab
-from app.models.lab_image import LabImage
+from app.models.enrollment import Enrollment, RoleInCourse
+from app.models.lab import Lab, LabStatus
+from app.models.lab_image import ImageStatus, LabImage
 from app.repositories.session_repository import SessionRepository
 from app.repositories.lab_repository import LabRepository
 from app.repositories.lab_image_repository import LabImageRepository
@@ -22,7 +24,9 @@ from app.exceptions.domain import (
     LabImageMissingError,
     SessionAlreadyExistsError,
     ClusterOperationError,
+    ForbiddenError,
 )
+from app.services.quota_reservation_service import QuotaReservationService
 
 
 class SessionService:
@@ -33,12 +37,14 @@ class SessionService:
         db: Session,
         session_repository: SessionRepository,
         lab_repository: LabRepository,
-        lab_image_repository: LabImageRepository
+        lab_image_repository: LabImageRepository,
+        quota_reservation_service: QuotaReservationService | None = None,
     ):
         self.db = db
         self.session_repository = session_repository
         self.lab_repository = lab_repository
         self.lab_image_repository = lab_image_repository
+        self.quota_reservation_service = quota_reservation_service or QuotaReservationService(db)
 
     def get_all_sessions(
         self, user_id: Optional[UUID] = None, status: Optional[SessionStatus] = None
@@ -117,8 +123,20 @@ run: |
             raise UserNotFoundError(f"User with id {user_id} not found")
         
         lab = self.lab_repository.find_by_id(lab_id)
-        if not lab:
+        if not lab or lab.deleted_at is not None or lab.status != LabStatus.PUBLISHED:
             raise LabNotFoundError(f"Lab with id {lab_id} not found")
+
+        enrollment = (
+            self.db.query(Enrollment.user_id)
+            .filter(
+                Enrollment.user_id == user_id,
+                Enrollment.course_id == lab.course_id,
+                Enrollment.role_in_course == RoleInCourse.STUDENT,
+            )
+            .first()
+        )
+        if enrollment is None:
+            raise ForbiddenError("ต้องลงทะเบียนในวิชานี้ก่อนเริ่ม lab")
         
         existing_session = (
             self.db.query(SessionModel)
@@ -150,7 +168,7 @@ run: |
                     cluster_status = cluster_records[0].get('status')
                     from sky import ClusterStatus
                     
-                    if cluster_status in [ClusterStatus.STOPPED, ClusterStatus.AUTOSTOPPING]:
+                    if cluster_status == ClusterStatus.STOPPED:
                         # Cluster หยุดแล้ว → อัพเดท status เป็น STOPPED
                         existing_session.status = SessionStatus.STOPPED
                         existing_session.ended_at = datetime.utcnow()
@@ -159,12 +177,9 @@ run: |
                         existing_session = None
                 
             except Exception as e:
-                
-                print(f"[Warning] Failed to check cluster status: {e}")
-                existing_session.status = SessionStatus.STOPPED
-                existing_session.ended_at = datetime.utcnow()
-                self.db.commit()
-                existing_session = None
+                raise ClusterOperationError(
+                    "Could not verify the existing cluster state; refusing to start a duplicate"
+                ) from e
         
         if existing_session:
             raise SessionAlreadyExistsError(
@@ -175,10 +190,14 @@ run: |
             raise LabImageMissingError(f"Lab {lab_id} does not have an image assigned")
         
         lab_image = self.lab_image_repository.find_by_id(lab.image_id)
-        if not lab_image:
+        if (
+            not lab_image
+            or lab_image.status != ImageStatus.APPROVED
+            or lab_image.course_id != lab.course_id
+        ):
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
-        cluster_name = f"music-lab-{int(time.time())}"
+        cluster_name = f"music-lab-{uuid4().hex[:12]}"
        
         
 
@@ -189,37 +208,53 @@ run: |
         )
 
         task = sky.Task.from_yaml_config(yaml.safe_load(task_yaml))
-
-        request_id = sky.launch(
-            task,
-            cluster_name=cluster_name,
+        compute_hours, storage_mb = self._quota_requirements(lab_image)
+        reservation_ids = self.quota_reservation_service.reserve_personal_cluster(
+            user_id, compute_hours, storage_mb
         )
+        is_cluster_launch_attempted = False
+        try:
+            is_cluster_launch_attempted = True
+            request_id = sky.launch(task, cluster_name=cluster_name)
+            job_id, _ = sky.stream_and_get(request_id)
+            endpoints = sky.get(sky.endpoints(cluster=cluster_name))
 
-        job_id, handle = sky.stream_and_get(request_id)
-        endpoints = sky.get(sky.endpoints(cluster=cluster_name))
-        
-        formatted_endpoints = {
-            str(port): f"http://{url}" if not url.startswith("http") else url
-            for port, url in endpoints.items()
-        }
+            formatted_endpoints = {
+                str(port): f"http://{url}" if not url.startswith("http") else url
+                for port, url in endpoints.items()
+            }
 
-        new_session = SessionModel(
-            user_id=user_id,
-            lab_id=lab_id,
-            lab_image_id=lab_image.id, 
-            service_type=ServiceType.LAB,
-            sky_cluster_name=cluster_name,
-            sky_job_id=job_id,
-            endpoints=formatted_endpoints, 
-            status=SessionStatus.RUNNING,
-            started_at=datetime.utcnow(),
-            is_remote=False,
-            is_cloud=False,
-        )
-        
-        self.db.add(new_session)
-        self.db.commit()
-        self.db.refresh(new_session)
+            new_session = SessionModel(
+                user_id=user_id,
+                lab_id=lab_id,
+                lab_image_id=lab_image.id,
+                service_type=ServiceType.LAB,
+                sky_cluster_name=cluster_name,
+                sky_job_id=job_id,
+                endpoints=formatted_endpoints,
+                status=SessionStatus.RUNNING,
+                started_at=datetime.utcnow(),
+                is_remote=False,
+                is_cloud=False,
+            )
+
+            self.db.add(new_session)
+            self.quota_reservation_service.mark_committed(reservation_ids)
+            self.db.commit()
+            self.db.refresh(new_session)
+        except Exception as error:
+            self.db.rollback()
+            if is_cluster_launch_attempted:
+                try:
+                    sky.down(cluster_name)
+                except Exception as cleanup_error:
+                    raise ClusterOperationError(
+                        "Cluster provisioning failed and cleanup could not be verified; quota remains reserved"
+                    ) from cleanup_error
+            self.quota_reservation_service.release(reservation_ids)
+            if isinstance(error, ClusterOperationError):
+                raise
+            raise ClusterOperationError("Cluster provisioning failed") from error
 
         return {
             "session_id": new_session.id,
@@ -233,6 +268,20 @@ run: |
             "started_at": new_session.started_at,
         }
 
+    @staticmethod
+    def _quota_requirements(lab_image: LabImage) -> tuple[Decimal, int]:
+        cpu_match = re.match(r"\s*(\d+(?:\.\d+)?)", lab_image.cpu_requirement)
+        if cpu_match is None:
+            raise LabImageMissingError("Lab image has an invalid CPU requirement")
+
+        cpu_count = Decimal(cpu_match.group(1))
+        lifespan_hours = Decimal(lab_image.lifespan_minutes or 60) / Decimal(60)
+        compute_hours = (cpu_count * lifespan_hours).quantize(
+            Decimal("0.01"), rounding=ROUND_UP
+        )
+        storage_mb = max(int(lab_image.disk_size or 0) * 1024, 1)
+        return compute_hours, storage_mb
+
     def delete_session(self, session_id: UUID) -> dict:
         """ลบ session - stop cluster (ถ้ายังรัน) และ soft delete"""
         
@@ -240,7 +289,7 @@ run: |
         if not session:
             raise SessionNotFoundError(f"Session with id {session_id} not found")
         
-        cluster_stopped = False
+        is_cluster_stopped = False
         if session.status == SessionStatus.RUNNING:
             # RUNNING แต่ไม่มี sky_cluster_name = record ค้าง ไม่ใช่ cluster ที่รันอยู่จริง
             # เกิดได้จาก seed, จาก create ที่พังกลางทางก่อนบันทึกชื่อ cluster, หรือ
@@ -254,7 +303,7 @@ run: |
             if session.sky_cluster_name:
                 try:
                     sky.down(session.sky_cluster_name)
-                    cluster_stopped = True
+                    is_cluster_stopped = True
                 except Exception as e:
                     raise ClusterOperationError(
                         f"Failed to stop cluster {session.sky_cluster_name}: {str(e)}"
@@ -269,7 +318,7 @@ run: |
         return {
             "session_id": session_id,
             "cluster_name": session.sky_cluster_name,
-            "cluster_stopped": cluster_stopped,
-            "message": "Session deleted successfully" if not cluster_stopped 
+            "isClusterStopped": is_cluster_stopped,
+            "message": "Session deleted successfully" if not is_cluster_stopped
                       else "Session stopped and deleted successfully"
         }

@@ -6,11 +6,13 @@ Entry point for the FastAPI backend
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqladmin import Admin, ModelView
 
 from app.configs import settings, check_db_connection
@@ -39,6 +41,7 @@ from app.exceptions.domain import (
 )
 from app.middlewares.admin_auth import AdminAuth
 from app.routes import api_router
+from app.schemas.response import ApiResponse, ErrorDetail
 from app.utils.logger import logger
 
 
@@ -192,6 +195,14 @@ STATUS_MAP = {
 }
 
 
+def error_response_content(code: str, message: str) -> dict:
+    return ApiResponse[None](
+        success=False,
+        message=message,
+        error=ErrorDetail(code=code, message=message),
+    ).model_dump(by_alias=True, exclude_none=True)
+
+
 @app.exception_handler(DomainError)
 async def domain_exception_handler(request, exc: DomainError):
     """
@@ -213,12 +224,28 @@ async def domain_exception_handler(request, exc: DomainError):
 
     return JSONResponse(
         status_code=status_code,
-        content={
-            "success": False,
-            "message": exc.message,
-            "data": None,
-            "error": {"code": exc.code, "message": exc.message},
-        },
+        content=error_response_content(exc.code, exc.message),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request, exc: RequestValidationError):
+    logger.warning("Request validation failed")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=error_response_content(
+            "validation_error", "Request validation failed"
+        ),
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc: StarletteHTTPException):
+    message = str(exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response_content("http_error", message),
+        headers=exc.headers,
     )
 
 
@@ -226,21 +253,33 @@ async def domain_exception_handler(request, exc: DomainError):
 async def sqlalchemy_exception_handler(request, exc):
     """จับ database errors"""
     logger.error(f"Database error: {str(exc)}")
-    return JSONResponse(status_code=500, content={"detail": "Database error occurred"})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_response_content("database_error", "Database error occurred"),
+    )
 
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request, exc):
     """จับ validation errors"""
     logger.warning(f"Validation error: {str(exc)}")
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    message = str(exc)
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=error_response_content("validation_error", message),
+    )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """จับ unexpected errors"""
     logger.error(f"Unexpected error: {str(exc)}", exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_response_content(
+            "internal_server_error", "Internal server error"
+        ),
+    )
 
 
 # Health Check Endpoint
@@ -272,7 +311,14 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 
 # Setup SQLAdmin
 admin = Admin(
-    app, engine, authentication_backend=AdminAuth(secret_key=settings.SECRET_KEY)
+    app,
+    engine,
+    authentication_backend=AdminAuth(
+        secret_key=settings.ADMIN_SESSION_SECRET_KEY,
+        session_cookie="virtual_lab_admin_session",
+        same_site="strict",
+        https_only=True,
+    ),
 )
 
 # Add model views to admin

@@ -1,0 +1,227 @@
+from collections.abc import Callable
+from uuid import UUID
+
+from sqlalchemy.orm import Session as DbSession, aliased
+
+from app.models.enrollment import Enrollment, RoleInCourse
+from app.models.courses import Course
+from app.models.lab import Lab
+from app.models.rbac import Permission, Role, RolePermission, UserRoleAssignment
+from app.models.session import Session as ComputeSession
+from app.models.user import User
+
+
+GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION = {
+    ("clusters", "*"): "clusters:manage:global",
+    ("kubernetes", "*"): "kubernetes:cluster_admin:global",
+    ("network", "policies"): "network:policies:manage:global",
+    ("network", "tailscale"): "network:tailscale:manage:global",
+    ("network", "egress_allowlist"): "network:egress_allowlist:manage:global",
+    ("storage", "images"): "storage:registry:manage:global",
+    ("storage", "registry"): "storage:registry:manage:global",
+    ("storage", "data"): "storage:r2:manage:global",
+    ("storage", "datasets"): "storage:r2:manage:global",
+    ("storage", "r2"): "storage:r2:manage:global",
+    ("storage", "quotas"): "storage:quotas:manage:global",
+}
+
+
+class RBACService:
+    def has_permission(self, db: DbSession, user_id: UUID, permission_code: str) -> bool:
+        resource_domain, permission_name = permission_code.split(":", maxsplit=1)
+        matching_role = (
+            db.query(Role.id)
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .join(RolePermission, RolePermission.role_id == Role.id)
+            .join(Permission, Permission.id == RolePermission.permission_id)
+            .filter(
+                UserRoleAssignment.user_id == user_id,
+                UserRoleAssignment.deleted_at.is_(None),
+                Role.is_active.is_(True),
+                Role.deleted_at.is_(None),
+                Permission.resource_domain == resource_domain,
+                Permission.permission_name == permission_name,
+                Permission.is_active.is_(True),
+                Permission.deleted_at.is_(None),
+                RolePermission.deleted_at.is_(None),
+            )
+            .first()
+        )
+        return matching_role is not None
+
+    def has_global_permission(
+        self,
+        db: DbSession,
+        user_id: UUID,
+        permission_code: str,
+    ) -> bool:
+        permission_parts = permission_code.split(":")
+        if len(permission_parts) < 2:
+            return False
+        resource_domain, permission_family = permission_parts[:2]
+        global_code = GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION.get(
+            (resource_domain, permission_family)
+        ) or GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION.get((resource_domain, "*"))
+        return global_code is not None and self.has_permission(
+            db, user_id, global_code
+        )
+
+
+ResourceScopeChecker = Callable[[DbSession, UUID, str, UUID | None], bool]
+
+
+class ResourceContextPolicy:
+    def __init__(
+        self,
+        scope_checkers: dict[str, ResourceScopeChecker] | None = None,
+    ) -> None:
+        self.scope_checkers = scope_checkers or {}
+
+    def allows(
+        self,
+        db: DbSession,
+        user: User,
+        resource_domain: str,
+        scope: str,
+        resource_id: str,
+        course_id: UUID | None = None,
+        action: str | None = None,
+    ) -> bool:
+        checker = self.scope_checkers.get(f"{resource_domain}:{scope}")
+        if checker is not None:
+            return checker(db, user.id, resource_id, course_id)
+
+        if scope == "self" and resource_domain in {"clusters", "kubernetes", "network"}:
+            return self._owns_cluster_or_session(db, user.id, resource_id)
+
+        if scope == "assigned" and resource_domain in {"kubernetes", "network"}:
+            other_session = aliased(ComputeSession)
+            has_conflicting_owner = (
+                db.query(other_session.id)
+                .filter(
+                    other_session.sky_cluster_name == ComputeSession.sky_cluster_name,
+                    other_session.deleted_at.is_(None),
+                    other_session.user_id != ComputeSession.user_id,
+                )
+                .exists()
+            )
+            return (
+                db.query(ComputeSession.id)
+                .join(Lab, Lab.id == ComputeSession.lab_id)
+                .join(Enrollment, Enrollment.course_id == Lab.course_id)
+                .filter(
+                    ComputeSession.sky_cluster_name == resource_id,
+                    ComputeSession.deleted_at.is_(None),
+                    Lab.deleted_at.is_(None),
+                    Enrollment.user_id == user.id,
+                    Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
+                    ~has_conflicting_owner,
+                )
+                .first()
+                is not None
+            )
+
+        if scope == "course" and resource_domain in {"clusters", "storage"}:
+            if course_id is None:
+                return False
+            if resource_domain == "storage":
+                try:
+                    resource_course_id = UUID(resource_id)
+                except ValueError:
+                    return False
+                if resource_course_id != course_id:
+                    return False
+                return (
+                    db.query(Course.id)
+                    .join(Enrollment, Enrollment.course_id == Course.id)
+                    .filter(
+                        Course.id == course_id,
+                        Course.deleted_at.is_(None),
+                        Enrollment.user_id == user.id,
+                        Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
+                    )
+                    .first()
+                    is not None
+                )
+            if action == "create":
+                return (
+                    db.query(Enrollment.user_id)
+                    .filter(
+                        Enrollment.course_id == course_id,
+                        Enrollment.user_id == user.id,
+                        Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
+                    )
+                    .first()
+                    is not None
+                )
+            if resource_domain == "clusters":
+                other_session = aliased(ComputeSession)
+                has_conflicting_owner = (
+                    db.query(other_session.id)
+                    .filter(
+                        other_session.sky_cluster_name
+                        == ComputeSession.sky_cluster_name,
+                        other_session.deleted_at.is_(None),
+                        other_session.user_id != ComputeSession.user_id,
+                    )
+                    .exists()
+                )
+                return (
+                    db.query(ComputeSession.id)
+                    .join(Lab, Lab.id == ComputeSession.lab_id)
+                    .join(Enrollment, Enrollment.course_id == Lab.course_id)
+                    .filter(
+                        ComputeSession.sky_cluster_name == resource_id,
+                        ComputeSession.deleted_at.is_(None),
+                        Lab.deleted_at.is_(None),
+                        Lab.course_id == course_id,
+                        Enrollment.user_id == user.id,
+                        Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
+                        ~has_conflicting_owner,
+                    )
+                    .first()
+                    is not None
+                )
+            return False
+
+        return False
+
+    def _owns_cluster_or_session(
+        self,
+        db: DbSession,
+        user_id: UUID,
+        resource_id: str,
+    ) -> bool:
+        try:
+            session_id = UUID(resource_id)
+        except ValueError:
+            return self._has_exclusive_cluster_owner(db, user_id, resource_id)
+        return (
+            db.query(ComputeSession.id)
+            .filter(
+                ComputeSession.id == session_id,
+                ComputeSession.user_id == user_id,
+                ComputeSession.deleted_at.is_(None),
+            )
+            .first()
+            is not None
+        )
+
+    @staticmethod
+    def _has_exclusive_cluster_owner(
+        db: DbSession,
+        user_id: UUID | None,
+        cluster_name: str,
+    ) -> bool:
+        owners = (
+            db.query(ComputeSession.user_id)
+            .filter(
+                ComputeSession.sky_cluster_name == cluster_name,
+                ComputeSession.deleted_at.is_(None),
+            )
+            .distinct()
+            .all()
+        )
+        if len(owners) != 1:
+            return False
+        return user_id is None or owners[0][0] == user_id

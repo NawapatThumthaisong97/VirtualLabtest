@@ -2,23 +2,24 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.base import CamelModel
 from app.models.session import ServiceType, SessionStatus
 
 
-class CreateSessionRequest(BaseModel):
+class CreateSessionRequest(CamelModel):
     """Request schema สำหรับสร้าง session ใหม่"""
-    lab_id: UUID = Field(..., description="Lab ID ที่ต้องการสร้าง session")
-    user_id: Optional[UUID] = Field(None, description="User ID (optional)")
-    
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
             "example": {
-                "lab_id": "550e8400-e29b-41d4-a716-446655440000",
-                "user_id": "660e8400-e29b-41d4-a716-446655440001"
+                "labId": "550e8400-e29b-41d4-a716-446655440000",
             }
-        }
+        },
+    )
+
+    lab_id: UUID = Field(..., description="Lab ID ที่ต้องการสร้าง session")
 
 
 class CreateSessionResponse(BaseModel):
