@@ -193,9 +193,12 @@ run: |
    (timeout 10 นาที) ต้องเป็น `RUNNING` เท่านั้น เพราะ `sky.launch` คืนตั้งแต่ส่ง job ส่วน `setup:`
    (docker login + pull) รันต่อทีหลัง ถ้าไม่รอ pull ที่พังจะถูกบันทึกเป็น RUNNING (เจอจริงบน AWS)
 4. `sky.endpoints()` → แปลงเป็น `{"8080": "http://..."}`
-5. `UPDATE` เป็น `RUNNING` + `sky_job_id` + `endpoints`
+5. `UPDATE` เป็น `RUNNING` + `sky_job_id` + `endpoints` + `expires_at = now + lifespan_minutes`
+   (response ส่ง `expires_at` กลับไปให้หน้าเว็บนับถอยหลัง)
 
-ถ้าข้อ 2–4 พัง: `UPDATE` เป็น `FAILED` + `ended_at` → `_down_quietly()` (`sky.down` แล้วรอ
+ถ้าข้อ 2–4 พัง: `UPDATE` เป็น `FAILED` + `ended_at` + `end_reason = LAUNCH_FAILED` → ถ้ามี job แล้ว
+เก็บท้าย log ของ job 50 บรรทัด (`sky.tail_logs`) ลง log ของ backend ก่อน เพราะลบ cluster แล้วดูไม่ได้อีก →
+`_down_quietly()` (`sky.down` แล้วรอ
 ถ้าไม่มี cluster ก็ข้าม ถ้าลบไม่ได้แค่ print warning) → `ClusterOperationError` (500)
 
 เหตุผลที่บันทึกก่อน launch: ถ้า launch พังกลางทาง ยังรู้ชื่อ cluster ไว้ตามลบ บน AWS cluster
@@ -211,7 +214,7 @@ run: |
    │     │       ├─ สำเร็จ              → cluster_stopped = true
    │     │       ├─ ClusterDoesNotExist → ข้าม (autostop ลบไปแล้ว)
    │     │       └─ error อื่น          → 500 (ไม่ลบ session)
-   │     └─ ตั้ง STOPPED + ended_at
+   │     └─ ตั้ง STOPPED + ended_at + end_reason = USER_DELETE
    │
    └─ soft delete (deleted_at)
 ```
@@ -224,12 +227,33 @@ run: |
             INSERT
               │
               ▼
-          PENDING ──launch พัง / ค้างเกิน 20 นาที──▶ FAILED
-              │
+          PENDING ──launch พัง──────────────▶ FAILED (LAUNCH_FAILED)
+              │    ──ค้างเกิน 20 นาที──────────▶ FAILED (STALE_PENDING)
        launch สำเร็จ
               ▼
-          RUNNING ──DELETE / ตรวจเจอว่า cluster หาย──▶ STOPPED
+          RUNNING ──DELETE──────────────────▶ STOPPED (USER_DELETE)
+                  ──cluster หายหลัง expires_at─▶ STOPPED (EXPIRED)
+                  ──cluster หายก่อน expires_at─▶ STOPPED (LOST)
 ```
+
+(ในวงเล็บคือ `sessions.end_reason`)
+
+### 5.1 Reconciler — ปิด session ที่เครื่องหายไปเอง
+
+`app/services/session_reconciler.py` เป็นงานพื้นหลังที่ start ใน `lifespan` ของ FastAPI รันทุก
+`SESSION_RECONCILE_INTERVAL_SECONDS` (default 60, 0 = ปิด) แล้วเรียก `SessionService.reconcile_sessions()`
+
+1. หา session ที่ `PENDING` / `RUNNING` และยังไม่ถูก soft delete
+2. `PENDING` เกิน 20 นาที → `FAILED` + `STALE_PENDING` + ลบ cluster
+3. `RUNNING` ที่มีชื่อ cluster → `sky.status(ทุกชื่อ, refresh=AUTO)` **ครั้งเดียวต่อรอบ**
+   - ไม่เจอ หรือ `STOPPED` → `STOPPED` + `EXPIRED` (หลัง `expires_at`) / `LOST` (ก่อน)
+   - `AUTOSTOPPING` ยังไม่นับ เคยเห็นค้างสถานะนี้ตอน autostop ลบเครื่องไม่สำเร็จ
+4. `sky.status` เรียกไม่ได้ → ข้ามรอบ ไม่แตะ session `RUNNING` (ไม่รู้จริงว่าเครื่องยังอยู่ไหม)
+
+- `refresh=AUTO` จำเป็น ถ้าไม่ refresh SkyPilot API server จะยังเห็นเครื่องที่ skylet ลบตัวเองไปแล้วเป็น `UP`
+- session ที่ไม่มีชื่อ cluster (เช่นจาก seed) ข้าม ไม่ใช่ของที่ launch จริง
+- กัน backend หลายตัวทำซ้อนด้วย Postgres advisory lock (`pg_try_advisory_lock`) บน connection แยก
+- เรียก SkyPilot แบบ blocking ใน `asyncio.to_thread` ไม่ให้ event loop ค้าง
 
 ## 6. ใช้ cluster ไหน
 
@@ -306,15 +330,24 @@ SkyPilot API server ในเครื่อง ใช้ IAM user `Skypilot-IAM
 3. สิทธิ์ลบ: role มีแค่ ECR → เพิ่ม `TerminateInstances` / `StopInstances` เฉพาะ tag `skypilot-cluster-name`
    (2–3 อยู่ใน `terraform/lab_autostop.tf`)
 
-**ข้อจำกัด:** หลัง autostop ลบเครื่อง session ใน DB ยังเป็น `RUNNING` จนกว่าจะมีคนกด Start (ไปเจอตอนเช็ก
-`sky.status`) หรือ DELETE (`ClusterDoesNotExist` → `cluster_stopped: false`)
+**session หลัง autostop:** reconciler ปิดให้เป็น `STOPPED` / `EXPIRED` เอง (ดูผลเทส reconciler ด้านล่าง)
+
+### Reconciler (2026-10-13, AWS, รอบละ 20 วินาที)
+
+| เคส | ผล |
+|---|---|
+| PENDING ค้าง 30 นาที (ใส่ใน DB เอง) | ✅ รอบแรก → `FAILED` / `STALE_PENDING` ไม่ต้องรอใครกด Start |
+| session seed `RUNNING` ไม่มีชื่อ cluster | ✅ ข้าม ไม่แตะ |
+| lab lifespan 1 นาที | ✅ 201 มี `expires_at` (02:38:02) → reconciler ตั้ง `STOPPED` / `EXPIRED` เวลา 02:39:02 EC2 terminate |
+| pull ไม่ผ่าน (tag ไม่มี) | ✅ `FAILED` / `LAUNCH_FAILED` และ log ของ backend มีท้าย log ของ setup (`failed to resolve reference ... no-such-tag`) |
+| K3s | ⏳ ยังไม่ได้เทส registry และ worker ที่บ้าน offline |
 
 ## 9. ที่ยังค้าง
 
 | เรื่อง | รายละเอียด |
 |---|---|
 | race ของ 2 request พร้อมกันจริง ๆ | ทั้งคู่ผ่านการเช็กก่อนที่อีกตัวจะ INSERT (มีมาตั้งแต่ก่อน PR) ต้องใช้ unique index หรือ lock ถ้าจะกันให้ขาด |
-| session ค้าง RUNNING หลัง autostop | backend ไม่รู้ว่าเครื่องถูกลบเอง ต้องมีตัว sync สถานะ (กำลังออกแบบ) |
+| reconciler กับ K3s | ยังไม่ได้เทส (registry / worker ที่บ้าน offline) logic ชุดเดียวกับ AWS |
 | lab ที่ใช้ 5173 / 8443 บน AWS | router (`vlab-ts-router`) เปิด egress แค่ 8080 ต้องเพิ่มใน `lab_access.tf` |
 | เทส K3s ซ้ำหลังเพิ่ม `_wait_job_running` | ยังไม่ได้ทำ registry ที่บ้าน (`100.127.74.48:5001`) ค้าง pull ไม่ได้ (`ErrImagePull`) path พังทำงานถูก (`FAILED` ไม่มี pod ค้าง) |
 | `skypilot/music-lab` บน AWS | ยังไม่มีใน ECR (เทสแค่ `vlab/music-lab-ide`) |

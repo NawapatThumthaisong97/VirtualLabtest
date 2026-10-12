@@ -129,11 +129,11 @@ flowchart TD
 
     END1 --> DOWN1["SkyPilot ลบ EC2<br/>(ใช้ Skypilot-IAM)<br/>✅ ~11 วิ"]
     END2 --> DOWN2["skylet บน EC2 ลบตัวเอง<br/>(ใช้ role ของเครื่อง)<br/>✅ ~1.5 นาทีหลังครบเวลา"]
-    DOWN2 --> STALE["⚠️ session ใน DB ยัง RUNNING<br/>(ไม่มีใครบอก backend)"]
+    DOWN2 --> STALE["reconciler (ทุก 1 นาที)<br/>ตั้ง session = STOPPED / EXPIRED"]
 
     style FAIL fill:#fdd
     style DOWN2 fill:#dfd
-    style STALE fill:#ffd
+    style STALE fill:#dfd
     style DOWN1 fill:#dfd
     style RUNNING fill:#dfd
 ```
@@ -177,10 +177,11 @@ skylet เช็กทุก 1 นาทีและต้องปิด Ray �
 
 ---
 
-## 6. Session sync — ให้ DB รู้ว่าเครื่องหายแล้ว (เสนอ ยังไม่ทำ)
+## 6. Session sync — ให้ DB รู้ว่าเครื่องหายแล้ว (✅ ทำแล้ว)
 
-ปัญหา: autostop (หรือ pod/EC2 ตายเอง) ลบเครื่องไปแล้ว แต่ `sessions.status` ยังเป็น `RUNNING`
-เพราะไม่มีใครบอก backend
+ปัญหาเดิม: autostop (หรือ pod/EC2 ตายเอง) ลบเครื่องไปแล้ว แต่ `sessions.status` ยังเป็น `RUNNING`
+เพราะไม่มีใครบอก backend → แก้ด้วย reconciler ใน backend (`app/services/session_reconciler.py`)
+รายละเอียดและผลเทสอยู่ใน `docs/Flow.md` หัวข้อ 5.1
 
 ```mermaid
 flowchart TD
@@ -238,8 +239,8 @@ erDiagram
         jsonb endpoints
         timestamptz started_at
         timestamptz ended_at
-        timestamptz expires_at "มีอยู่แล้ว แต่ยังไม่มีใครใส่ค่า"
-        enum end_reason "เสนอ: ใหม่"
+        timestamptz expires_at "ใส่ตอน launch เสร็จ = now + lifespan"
+        enum end_reason "ใหม่: USER_DELETE / EXPIRED / LOST / LAUNCH_FAILED / STALE_PENDING"
     }
     usage_records {
         bigint id PK
@@ -253,8 +254,8 @@ erDiagram
 |---|---|---|---|
 | `labs` | `run_target` (enum `runtarget`) | ✅ PR #88 | `CREATE TYPE` + `ALTER TABLE ADD COLUMN` (ไม่ต้อง drop) |
 | `sessions` | ไม่เปลี่ยน schema แต่ตอนนี้มีแถว `PENDING` / `FAILED` จริง และ `is_cloud = true` | ✅ PR #88 | – |
-| `sessions` | ใส่ค่า `expires_at = started_at + lifespan_minutes` ตอน launch | 💡 เสนอ | ไม่ต้อง (มี column แล้ว) |
-| `sessions` | `end_reason` enum: `USER_DELETE`, `EXPIRED`, `LOST`, `LAUNCH_FAILED`, `STALE_PENDING` | 💡 เสนอ | `CREATE TYPE` + `ADD COLUMN` nullable |
+| `sessions` | ใส่ค่า `expires_at = now + lifespan_minutes` ตอน launch เสร็จ | ✅ | ไม่ต้อง (มี column แล้ว) |
+| `sessions` | `end_reason` enum: `USER_DELETE`, `EXPIRED`, `LOST`, `LAUNCH_FAILED`, `STALE_PENDING` | ✅ | `CREATE TYPE` + `ADD COLUMN` nullable (คำสั่งใน `DB_DIAGRAM.md` ข้อ 4) |
 
 ---
 
@@ -283,12 +284,16 @@ flowchart TD
         A2["terraform apply บน Windows<br/>ให้ state ตรงกับ Console"]
     end
 
-    subgraph NEXT["ถัดไป (ต้องรีวิว doc ก่อน)"]
-        B1["docs/SESSION_SYNC.md<br/>ออกแบบ reconciler + end_reason"]
-        B2["โค้ด: ใส่ expires_at ตอน launch"]
-        B3["โค้ด: reconciler ทุก 1 นาที"]
-        B4["migration: sessions.end_reason"]
+    subgraph DONE2["✅ ทำแล้ว (2026-10-13)"]
+        B2["expires_at ตอน launch"]
+        B3["reconciler ทุก 1 นาที"]
+        B4["sessions.end_reason"]
+        B6["เก็บท้าย log ตอน launch พัง"]
+    end
+
+    subgraph NEXT["ถัดไป"]
         B5["frontend: นับถอยหลังจาก expires_at"]
+        B7["pytest ของเส้น session<br/>(mock sky.*)"]
     end
 
     subgraph LATER["ก่อนเปิดให้นักศึกษาใช้ AWS จริง"]
@@ -305,10 +310,9 @@ flowchart TD
         D3["stop router ตอนไม่ได้เทส"]
     end
 
-    A1 --> B1 --> B2 --> B3
-    B1 --> B4 --> B3
+    A1 --> B7
     B2 --> B5
-    B3 --> C1
+    B7 --> C1
     C1 --> C2 --> C3 --> C4 --> C5
 ```
 

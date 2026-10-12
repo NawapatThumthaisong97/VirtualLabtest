@@ -101,7 +101,8 @@ erDiagram
     text status "pending - provisioning - running - stopped/succeeded/failed"
     timestamptz started_at
     timestamptz ended_at
-    timestamptz expires_at "countdown ใน Lab Hub"
+    timestamptz expires_at "countdown ใน Lab Hub (ใส่ตอน launch เสร็จ = now + lifespan_minutes)"
+    text end_reason "USER_DELETE | EXPIRED | LOST | LAUNCH_FAILED | STALE_PENDING"
   }
 
   usage_records {
@@ -198,6 +199,17 @@ docker exec virtual_lab_db psql -U postgres -d virtual_lab   -c "UPDATE labs SET
 
 เก็บเป็นชื่อ enum ตัวพิมพ์ใหญ่ (`KUBERNETES`/`AWS`) เหมือน enum ตัวอื่นในโปรเจกต์ เพราะ
 SQLAlchemy เก็บชื่อ ไม่ใช่ value ส่วนข้อ 1–2 ยังต้อง drop ตามข้างล่าง
+
+**4. `sessions.end_reason`** — คอลัมน์ใหม่ บอกว่า session จบเพราะอะไร (NULL = ยังไม่จบ หรือจบก่อนมีคอลัมน์นี้)
+reconciler ในตัว backend ใช้ตั้งค่า `EXPIRED` / `LOST` / `STALE_PENDING` เอง **ไม่ต้อง drop DB**:
+
+```bash
+docker exec virtual_lab_db psql -U postgres -d virtual_lab \
+  -c "CREATE TYPE sessionendreason AS ENUM ('USER_DELETE', 'EXPIRED', 'LOST', 'LAUNCH_FAILED', 'STALE_PENDING');" \
+  -c "ALTER TABLE sessions ADD COLUMN end_reason sessionendreason;"
+```
+
+ย้อนกลับ: `ALTER TABLE sessions DROP COLUMN end_reason; DROP TYPE sessionendreason;`
 
 **ใครที่มี DB อยู่ในเครื่องแล้วต้อง drop ทิ้งแล้วสร้างใหม่** ไม่งั้นจะ error ตอน
 insert session เพราะค่าเก่ายังค้างอยู่ใน enum type ของ Postgres — ต่างจากการเพิ่ม
