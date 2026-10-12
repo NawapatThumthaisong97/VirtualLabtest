@@ -2,6 +2,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
+import io
 import os
 import re
 import shlex
@@ -12,7 +13,7 @@ from sky.exceptions import ClusterDoesNotExist
 from app.adapters.ecr_adapter import get_ecr_token
 from app.configs.settings import settings
 
-from app.models.session import Session as SessionModel, SessionStatus, ServiceType
+from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.user import User
 from app.models.lab import Lab, RunTarget
 from app.models.lab_image import LabImage
@@ -28,6 +29,7 @@ from app.exceptions.domain import (
     SessionAlreadyExistsError,
     ClusterOperationError,
 )
+from app.utils.logger import logger
 
 # session ที่ PENDING นานกว่านี้ถือว่าค้าง (launch จริง: K3s ~5 นาที, AWS ~2.5 นาที)
 PENDING_TIMEOUT = timedelta(minutes=20)
@@ -36,6 +38,9 @@ PENDING_TIMEOUT = timedelta(minutes=20)
 JOB_START_TIMEOUT = timedelta(minutes=10)
 JOB_POLL_SECONDS = 5
 JOB_STARTING_STATUSES = {None, "INIT", "PENDING", "SETTING_UP"}
+
+# ตอน launch พัง เก็บท้าย log ของ job ไว้ก่อนลบ cluster (ลบแล้ว sky logs ดูไม่ได้อีก)
+FAILED_LOG_TAIL_LINES = 50
 
 
 class SessionService:
@@ -218,45 +223,40 @@ class SessionService:
                     f"Session is still starting. Session ID: {existing_session.id}, Cluster: {existing_session.sky_cluster_name}"
                 )
             # ค้างเกิน timeout = backend ตายกลาง launch ไม่มีใครมาอัปเดต record นี้แล้ว
-            existing_session.status = SessionStatus.FAILED
-            existing_session.ended_at = datetime.utcnow()
-            self.db.commit()
+            self._end_session(existing_session, SessionStatus.FAILED, SessionEndReason.STALE_PENDING)
             if existing_session.sky_cluster_name:
                 self._down_quietly(existing_session.sky_cluster_name)
             existing_session = None
 
         if existing_session and existing_session.sky_cluster_name:
-        
+
             try:
                 request_id = sky.status(cluster_names=[existing_session.sky_cluster_name])
                 cluster_records = sky.get(request_id)
-                
+
                 if not cluster_records:
-    
-                    existing_session.status = SessionStatus.STOPPED
-                    existing_session.ended_at = datetime.utcnow()
-                    self.db.commit()
-        
+
+                    self._end_session(existing_session, SessionStatus.STOPPED,
+                                      self._gone_reason(existing_session))
+
                     existing_session = None
                 else:
-                
+
                     cluster_status = cluster_records[0].get('status')
                     from sky import ClusterStatus
-                    
+
                     if cluster_status in [ClusterStatus.STOPPED, ClusterStatus.AUTOSTOPPING]:
                         # Cluster หยุดแล้ว → อัพเดท status เป็น STOPPED
-                        existing_session.status = SessionStatus.STOPPED
-                        existing_session.ended_at = datetime.utcnow()
-                        self.db.commit()
-                        
+                        self._end_session(existing_session, SessionStatus.STOPPED,
+                                          self._gone_reason(existing_session))
+
                         existing_session = None
-                
+
             except Exception as e:
-                
+
                 print(f"[Warning] Failed to check cluster status: {e}")
-                existing_session.status = SessionStatus.STOPPED
-                existing_session.ended_at = datetime.utcnow()
-                self.db.commit()
+                # ไม่รู้จริงว่า cluster ยังอยู่ไหม เลยไม่ใส่ end_reason
+                self._end_session(existing_session, SessionStatus.STOPPED, None)
                 existing_session = None
         
         if existing_session:
@@ -307,15 +307,19 @@ class SessionService:
         self.db.commit()
         self.db.refresh(new_session)
 
+        job_id = None
         try:
             request_id = sky.launch(task, cluster_name=cluster_name)
             job_id, handle = sky.stream_and_get(request_id)
             self._wait_job_running(cluster_name, job_id)
             endpoints = sky.get(sky.endpoints(cluster=cluster_name))
         except Exception as e:
-            new_session.status = SessionStatus.FAILED
-            new_session.ended_at = datetime.utcnow()
-            self.db.commit()
+            self._end_session(new_session, SessionStatus.FAILED, SessionEndReason.LAUNCH_FAILED)
+            if job_id is not None:
+                logger.warning(
+                    f"[launch failed] {cluster_name} job {job_id} log tail:\n"
+                    f"{self._job_log_tail(cluster_name, job_id)}"
+                )
             self._down_quietly(cluster_name)
             raise ClusterOperationError(f"Failed to launch cluster {cluster_name}: {e}")
 
@@ -327,6 +331,10 @@ class SessionService:
         new_session.sky_job_id = job_id
         new_session.endpoints = formatted_endpoints
         new_session.status = SessionStatus.RUNNING
+        # autostop เริ่มนับตอน launch เสร็จ (wait_for: none) หน้าเว็บใช้นับถอยหลังได้
+        new_session.expires_at = datetime.utcnow() + timedelta(
+            minutes=lab_image.lifespan_minutes or 60
+        )
         self.db.commit()
         self.db.refresh(new_session)
 
@@ -340,6 +348,7 @@ class SessionService:
             "endpoints": formatted_endpoints,
             "status": "running",
             "started_at": new_session.started_at,
+            "expires_at": new_session.expires_at,
         }
 
     def _wait_job_running(self, cluster_name: str, job_id: int) -> None:
@@ -366,6 +375,84 @@ class SessionService:
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=timezone.utc)
         return datetime.now(timezone.utc) - started_at > PENDING_TIMEOUT
+
+    def _end_session(
+        self,
+        session: SessionModel,
+        status: SessionStatus,
+        reason: Optional[SessionEndReason],
+    ) -> None:
+        session.status = status
+        session.ended_at = datetime.utcnow()
+        session.end_reason = reason
+        self.db.commit()
+
+    def _gone_reason(self, session: SessionModel) -> SessionEndReason:
+        """cluster หายหลัง expires_at = autostop ตามเวลา ก่อนหน้านั้น = เครื่อง/pod ตายเอง"""
+        expires_at = session.expires_at
+        if expires_at is None:
+            return SessionEndReason.LOST
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) >= expires_at:
+            return SessionEndReason.EXPIRED
+        return SessionEndReason.LOST
+
+    def _job_log_tail(self, cluster_name: str, job_id: int) -> str:
+        buf = io.StringIO()
+        try:
+            sky.tail_logs(cluster_name, job_id, follow=False,
+                          tail=FAILED_LOG_TAIL_LINES, output_stream=buf)
+        except Exception as e:
+            return f"(cannot fetch job log: {e})"
+        # ตัดรหัสสีของ terminal ที่ SkyPilot ใส่มา ไม่งั้นอ่านใน log file ลำบาก
+        return re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+
+    def reconcile_sessions(self) -> dict:
+        """ปิด session ที่เครื่องหายไปแล้วแต่ DB ยังไม่รู้ (autostop, pod/EC2 ตายเอง) และ
+        PENDING ที่ค้างเกิน timeout ให้ session_reconciler เรียกเป็นระยะ
+
+        เรียก sky.status ครั้งเดียวต่อรอบ ถ้าเรียกไม่ได้ (API server ล่ม) จะไม่แตะ session
+        RUNNING เลย เพราะไม่รู้จริงว่าเครื่องยังอยู่ไหม
+        """
+        active = (
+            self.db.query(SessionModel)
+            .filter(
+                SessionModel.status.in_([SessionStatus.RUNNING, SessionStatus.PENDING]),
+                SessionModel.deleted_at.is_(None),
+            )
+            .all()
+        )
+        result = {"checked": len(active), "stopped": [], "failed": []}
+
+        for session in active:
+            if session.status == SessionStatus.PENDING and self._is_stale_pending(session):
+                self._end_session(session, SessionStatus.FAILED, SessionEndReason.STALE_PENDING)
+                if session.sky_cluster_name:
+                    self._down_quietly(session.sky_cluster_name)
+                result["failed"].append(session.sky_cluster_name)
+
+        # ไม่มีชื่อ cluster = record ที่ไม่ได้มาจาก launch จริง (เช่น seed) ไม่ใช่งานของ reconciler
+        running = [
+            s for s in active
+            if s.status == SessionStatus.RUNNING and s.sky_cluster_name
+        ]
+        if not running:
+            return result
+
+        # AUTO = refresh เฉพาะ cluster ที่ตั้ง autostop ไว้ ซึ่ง lab ทุกตัวตั้ง ไม่ refresh
+        # แล้ว API server จะยังเห็นเครื่องที่ skylet ลบตัวเองไปแล้วเป็น UP อยู่
+        records = sky.get(sky.status(
+            cluster_names=[s.sky_cluster_name for s in running],
+            refresh=sky.StatusRefreshMode.AUTO,
+        ))
+        alive = {r.get("name"): r.get("status") for r in records}
+        for session in running:
+            # AUTOSTOPPING ยังไม่นับว่าหาย เคยเห็นค้างสถานะนี้ตอน autostop ลบเครื่องไม่สำเร็จ
+            if alive.get(session.sky_cluster_name) in (None, sky.ClusterStatus.STOPPED):
+                self._end_session(session, SessionStatus.STOPPED, self._gone_reason(session))
+                result["stopped"].append(session.sky_cluster_name)
+        return result
 
     def _down_quietly(self, cluster_name: str) -> None:
         """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
@@ -407,9 +494,7 @@ class SessionService:
                         f"Failed to stop cluster {session.sky_cluster_name}: {str(e)}"
                     )
 
-            session.status = SessionStatus.STOPPED
-            session.ended_at = datetime.utcnow()
-            self.db.commit()
+            self._end_session(session, SessionStatus.STOPPED, SessionEndReason.USER_DELETE)
 
         self.session_repository.soft_delete(session)
         

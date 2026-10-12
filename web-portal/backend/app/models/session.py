@@ -27,6 +27,22 @@ class SessionStatus(enum.Enum):
     FAILED = "failed"
 
 
+class SessionEndReason(enum.Enum):
+    """session จบเพราะอะไร (NULL = ยังไม่จบ หรือจบก่อนมี column นี้)
+
+    - USER_DELETE: ผู้ใช้กดปิดเอง
+    - EXPIRED: cluster หายหลัง expires_at (autostop ตาม lifespan_minutes)
+    - LOST: cluster หายก่อนเวลา (pod / EC2 ตายเอง)
+    - LAUNCH_FAILED: launch หรือ setup ไม่ผ่าน
+    - STALE_PENDING: PENDING ค้างเกิน timeout (backend ตายกลาง launch)
+    """
+    USER_DELETE = "user_delete"
+    EXPIRED = "expired"
+    LOST = "lost"
+    LAUNCH_FAILED = "launch_failed"
+    STALE_PENDING = "stale_pending"
+
+
 class Session(Base):
     __tablename__ = "sessions"
     
@@ -46,6 +62,7 @@ class Session(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    end_reason = Column(Enum(SessionEndReason), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # Relationships

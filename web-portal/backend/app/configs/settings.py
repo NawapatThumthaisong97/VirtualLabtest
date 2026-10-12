@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
 
+    # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
+    SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
