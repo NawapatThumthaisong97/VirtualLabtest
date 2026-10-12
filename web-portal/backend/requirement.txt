@@ -47,6 +47,7 @@ python-dotenv==1.0.1          # โหลด .env files
 # Development Tools
 pytest==8.3.4                 # Testing framework
 pytest-asyncio==0.25.0        # Async testing support
+pytest-md-report==0.8.0       # ตารางสรุปผลเทส
 black==24.10.0                # Code formatter
 flake8==7.1.1                 # Code linter
 mypy==1.13.0                  # Type checker
