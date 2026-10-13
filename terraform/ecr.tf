@@ -1,13 +1,16 @@
-resource "aws_ecr_repository" "hello" {
-  name = "vlab/hello"
+# ECR repositories for lab images
+
+# Phase 13: lab image for SkyPilot docker mode (moved from the on-prem registry).
+resource "aws_ecr_repository" "music_lab_ide" {
+  name = "vlab/music-lab-ide"
 
   image_scanning_configuration {
     scan_on_push = true
   }
 }
 
-resource "aws_ecr_lifecycle_policy" "hello" {
-  repository = aws_ecr_repository.hello.name
+resource "aws_ecr_lifecycle_policy" "music_lab_ide" {
+  repository = aws_ecr_repository.music_lab_ide.name
 
   policy = jsonencode({
     rules = [{

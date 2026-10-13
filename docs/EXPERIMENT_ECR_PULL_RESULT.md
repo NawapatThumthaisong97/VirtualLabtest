@@ -28,6 +28,19 @@
 
 **Code / คำสั่ง**
 
+> **ไฟล์ Terraform ถูกจัดใหม่แล้ว (2026-10-13)** โค้ดด้านล่างคือที่เขียนไว้ตอนทดลองแต่ละ Phase ตอนนี้ block เดิมทุกตัว
+> (ชื่อ resource เดิม เนื้อหาเดิม) ย้ายไปอยู่ตามชนิด:
+>
+> | ไฟล์ตอนนี้ | มาจาก |
+> |---|---|
+> | `network.tf` | `vpc.tf`, `gateways.tf`, `subnets_public.tf`, `subnets_private.tf`, `endpoints.tf` |
+> | `security_groups.tf` | `security_groups.tf` + `lab_access.tf` |
+> | `router.tf` | `router.tf` (ไม่รวม data ที่ใช้ร่วม) |
+> | `data.tf` | AMI Ubuntu, `ec2_assume` (จาก `router.tf`), `caller_identity` (จาก `lab_autostop.tf`) |
+> | `lab_iam.tf` | `iam_test.tf` + `lab_autostop.tf` |
+> | `ecr.tf` | `ecr_lab.tf` (`vlab/music-lab-ide`) |
+> | `experiment.tf` | `test_instances.tf` + `ecr.tf` เดิม (`vlab/hello`) |
+
 <details>
 <summary><b>📄 Terraform ทุกไฟล์ (กดเปิดทีละไฟล์)</b></summary>
 
@@ -1337,7 +1350,7 @@ sky logs --provision <cluster> 2>/dev/null | grep -iE "Installed [0-9]+ package|
    - เทสจาก web portal แล้ว (PR #88, lifespan 3 นาที): **ลบไม่ได้** ผ่านไป 10 นาทีเครื่องยัง running
      skylet log หยุดที่ `Terminating head node.` และ role ได้ `UnauthorizedOperation` แม้แต่ `ec2:DescribeInstances`
      ส่วน EC2 API แบบ dual-stack (`ec2.ap-southeast-1.api.aws`) ไปถึง (endpoint IPv4 timeout)
-   - แก้ใน Phase 17 (`terraform/lab_autostop.tf`): `DescribeInstances` + `Terminate/StopInstances` เฉพาะ instance ที่มี tag `skypilot-cluster-name`
+   - แก้ใน Phase 17 (`terraform/lab_autostop.tf` ตอนนี้อยู่ใน `lab_iam.tf`): `DescribeInstances` + `Terminate/StopInstances` เฉพาะ instance ที่มี tag `skypilot-cluster-name`
    - instance ที่ SkyPilot สร้างตั้ง metadata hop limit = 1 container ของ lab จึงเอา credential ของ role นี้ไม่ได้
    - หลัง apply Phase 17 แล้วเทสซ้ำ: role มีสิทธิ์แล้ว แต่**ยังลบไม่ได้** skylet ค้าง `SYN-SENT` ไป `ec2.ap-southeast-1.amazonaws.com` (IPv4)
      เพราะตอน autostop skylet ตั้ง `AWS_CONFIG_FILE=/dev/null` (`sky/skylet/events.py:387`) จึงไม่อ่าน
@@ -1352,7 +1365,7 @@ sky logs --provision <cluster> 2>/dev/null | grep -iE "Installed [0-9]+ package|
    - patch AMI แล้ว: `ami-0da9046ec7f57f3af` (`vlab-bake-0.12.3.post1-r2`) = AMI เดิม + บรรทัดใน `/etc/environment`
      host key ของเครื่องที่บูตจาก r2 ไม่ซ้ำกับเครื่อง builder (cloud-init สร้างใหม่)
    - เทสด้วย r2 แล้วเจอจุดที่ 3: `UnauthorizedOperation` ที่ `DescribeVpcs` เพราะ `terminate_instances`
-     หา VPC จากชื่อและดู SG ก่อนลบ → เพิ่ม `DescribeVpcs` / `DescribeSecurityGroups` ใน `lab_autostop.tf`
+     หา VPC จากชื่อและดู SG ก่อนลบ → เพิ่ม `DescribeVpcs` / `DescribeSecurityGroups` ใน `lab_autostop.tf` (ตอนนี้ `lab_iam.tf`)
    - **ผล: ใช้ได้** lifespan 1 นาที ได้ 201 เวลา 21:20:39 → EC2 `shutting-down` 21:22:09
      (skylet เช็กทุก 1 นาทีและปิด Ray ก่อน จึงช้ากว่า lifespan ราว 1–1.5 นาที)
    - ข้อจำกัดที่เหลือ: session ใน DB ของ web portal ยังเป็น RUNNING หลังเครื่องถูกลบ

@@ -1,31 +1,4 @@
-# Ubuntu 24.04 amd64 from Canonical. Phase 8 test instances reuse this.
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"]
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-}
-
-# --- IAM for SSM (break-glass access, no SSH port) ---------------------------
-
-data "aws_iam_policy_document" "ec2_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["ec2.amazonaws.com"]
-    }
-  }
-}
+# Tailscale subnet router (the only way into the private subnets)
 
 resource "aws_iam_role" "ts_router" {
   name               = "vlab-ts-router"

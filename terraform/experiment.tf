@@ -1,3 +1,6 @@
+# Experiment only (ECR pull test): test instances A/B and vlab/hello
+# Not used by the web portal. Delete this file when the experiment is over.
+
 resource "aws_key_pair" "pete" {
   key_name   = "vlab-ecr-pull-pete"
   public_key = file(pathexpand(var.ssh_public_key_path))
@@ -36,4 +39,31 @@ resource "aws_instance" "test" {
   tags = {
     Name = "vlab-test-${each.key}"
   }
+}
+
+resource "aws_ecr_repository" "hello" {
+  name = "vlab/hello"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "hello" {
+  repository = aws_ecr_repository.hello.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep last 10 images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 10
+      }
+      action = {
+        type = "expire"
+      }
+    }]
+  })
 }
