@@ -13,6 +13,18 @@ class LabStatus(enum.Enum):
     PUBLISHED = "published"
 
 
+class RunTarget(enum.Enum):
+    """ที่ที่ SkyPilot จะ launch session ของ lab นี้
+
+    - KUBERNETES: K3s on-prem (เดิม) SkyPilot รัน image เป็น pod ตรง ๆ
+    - AWS: EC2 ใน private subnet แบบ VM mode คือบูตจาก AMI ที่ bake SkyPilot runtime
+      ไว้แล้ว แล้วค่อย docker run image จาก ECR เอง (container mode ช้ากว่ามาก
+      เพราะ SkyPilot ต้องลง runtime ใน container ใหม่ทุกครั้ง ดู EXPERIMENT_ECR_PULL_RESULT.md)
+    """
+    KUBERNETES = "kubernetes"
+    AWS = "aws"
+
+
 class Lab(Base):
 
     __tablename__ = "labs"
@@ -26,6 +38,13 @@ class Lab(Base):
     image_id = Column(UUID(as_uuid=True), ForeignKey("lab_images.id", ondelete="RESTRICT"), nullable=True)
     due_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(Enum(LabStatus), default=LabStatus.DRAFT, nullable=False)
+    # server_default ทำให้ ALTER TABLE เติมค่าให้ row เก่าเอง (SQLAlchemy เก็บชื่อ enum ไม่ใช่ value)
+    run_target = Column(
+        Enum(RunTarget),
+        default=RunTarget.KUBERNETES,
+        server_default=RunTarget.KUBERNETES.name,
+        nullable=False,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now() , nullable=True )
     deleted_at = Column(DateTime(timezone=True), nullable=True , index=True)

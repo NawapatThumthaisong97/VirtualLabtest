@@ -1,0 +1,132 @@
+"""
+Fixture ที่ใช้ร่วมกันทุกเทส + ตารางสรุปผลรายเคสท้ายการรัน
+
+เทสกลุ่ม builder ไม่ต่อ DB และไม่เรียก SkyPilot จริง แค่สร้าง task config แล้วตรวจผล
+
+ตารางสรุป: Group = บรรทัดแรกของ docstring ของ class, Case = บรรทัดแรกของ docstring ของเทส
+(ไม่มี docstring จะใช้ชื่อ class / ฟังก์ชันแทน) ปิดได้ด้วย `pytest --no-case-table`
+"""
+from collections import Counter
+
+import pytest
+
+from app.configs.settings import settings
+from app.models.lab_image import LabImage
+from app.services.session_service import SessionService
+
+ECR_HOST = "123456789012.dkr-ecr.ap-southeast-1.on.aws"
+AMI = "ami-0123456789abcdef0"
+REGISTRY = "10.0.0.1:5001"
+
+
+@pytest.fixture
+def service():
+    # builder ไม่ใช้ db / repository เลยส่ง None ได้
+    return SessionService(db=None, session_repository=None,
+                          lab_repository=None, lab_image_repository=None)
+
+
+@pytest.fixture
+def make_image():
+    """สร้าง LabImage (ไม่ลง DB) ค่าตั้งต้นเหมือน lab music-lab ที่ใช้อยู่จริง"""
+    def _make(**overrides) -> LabImage:
+        fields = dict(
+            repository="skypilot/music-lab",
+            tag="lab-01",
+            cpu_requirement="2+",
+            memory_requirement="4+",
+            disk_size=50,
+            lifespan_minutes=60,
+            exposed_ports=[8080, 5173, 8443],
+            entrypoint_script="/bin/bash /run.sh",
+            workdir=None,
+            env_vars={"IDE_PASSWORD": "musiclab"},
+        )
+        fields.update(overrides)
+        return LabImage(**fields)
+    return _make
+
+
+@pytest.fixture(autouse=True)
+def fixed_settings(monkeypatch):
+    """ไม่ให้ผลเทสขึ้นกับ .env ของแต่ละเครื่อง"""
+    monkeypatch.setenv("DOCKER_REGISTRY_HOST", REGISTRY)
+    monkeypatch.setattr(settings, "AWS_REGION", "ap-southeast-1")
+    monkeypatch.setattr(settings, "AWS_LAB_AMI", AMI)
+    monkeypatch.setattr(settings, "AWS_INSTANCE_TYPE", "m7i-flex.large")
+    monkeypatch.setattr(settings, "AWS_DISK_SIZE", 30)
+    monkeypatch.setattr(settings, "ECR_REGISTRY_HOST", ECR_HOST)
+
+
+# ---------------------------------------------------------------- ตารางสรุปผล
+
+_RESULT_COLORS = {
+    "passed": {"green": True},
+    "failed": {"red": True, "bold": True},
+    "error": {"red": True, "bold": True},
+    "skipped": {"yellow": True},
+    "xfailed": {"yellow": True},
+    "xpassed": {"yellow": True},
+}
+_results: dict[str, tuple[str, str, str]] = {}  # nodeid -> (group, case, outcome)
+
+
+def _first_line(doc):
+    lines = (doc or "").strip().splitlines()
+    return lines[0].strip() if lines else ""
+
+
+def pytest_addoption(parser):
+    parser.addoption("--no-case-table", action="store_true",
+                     help="ไม่แสดงตารางสรุปผลรายเคสท้ายการรัน")
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    report = (yield).get_result()
+    case = _first_line(item.function.__doc__) or item.name
+    if getattr(item, "callspec", None):
+        case += f" [{item.callspec.id}]"
+    report.case = case
+    report.group = _first_line(item.cls.__doc__) or item.cls.__name__ if item.cls else item.module.__name__
+
+
+def pytest_runtest_logreport(report):
+    if not hasattr(report, "case"):
+        return
+    if report.when == "call":
+        if hasattr(report, "wasxfail"):
+            outcome = "xfailed" if report.skipped else "xpassed"
+        else:
+            outcome = report.outcome
+    elif report.failed:
+        outcome = "error"  # setup / teardown พัง
+    elif report.skipped and report.when == "setup":
+        outcome = "skipped"
+    else:
+        return
+    _results[report.nodeid] = (report.group, report.case, outcome)
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    if config.getoption("--no-case-table") or not _results:
+        return
+    headers = ("#", "Group", "Case", "Result")
+    rows = [(str(i), group, case, outcome.upper())
+            for i, (group, case, outcome) in enumerate(_results.values(), 1)]
+    widths = [max(len(h), *(len(r[k]) for r in rows)) for k, h in enumerate(headers)]
+
+    def line(cells):
+        return "| " + " | ".join(c.ljust(w) for c, w in zip(cells, widths)) + " |"
+
+    tr = terminalreporter
+    tr.section("test cases")
+    tr.write_line(line(headers), bold=True)
+    tr.write_line("|" + "|".join("-" * (w + 2) for w in widths) + "|")
+    for row, (_, _, outcome) in zip(rows, _results.values()):
+        tr.write_line(line(row), **_RESULT_COLORS[outcome])
+
+    counts = Counter(outcome for _, _, outcome in _results.values())
+    worst = next((o for o in ("error", "failed", "xpassed", "xfailed", "skipped") if counts[o]), "passed")
+    summary = ", ".join(f"{n} {o}" for o, n in counts.most_common())
+    tr.write_line(f"TOTAL {len(_results)}: {summary}", **{**_RESULT_COLORS[worst], "bold": True})

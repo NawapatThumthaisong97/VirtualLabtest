@@ -3,6 +3,7 @@ FastAPI Main Application
 Entry point for the FastAPI backend
 """
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
@@ -18,6 +19,7 @@ from sqladmin import Admin, ModelView
 
 from app.configs import settings, check_db_connection
 from app.configs.db import engine
+from app.services.session_reconciler import run_reconciler
 from app.models import (
     User,
     Course,
@@ -151,12 +153,26 @@ async def lifespan(app: FastAPI):
         logger.error("Cannot connect to database. Server will not start.")
         sys.exit(1)  # ออกจากโปรแกรมถ้าเชื่อมต่อ DB ไม่สำเร็จ
 
+    reconciler_stop = asyncio.Event()
+    reconciler_task = None
+    if settings.SESSION_RECONCILE_INTERVAL_SECONDS > 0:
+        reconciler_task = asyncio.create_task(
+            run_reconciler(settings.SESSION_RECONCILE_INTERVAL_SECONDS, reconciler_stop)
+        )
+
     logger.info("Application started successfully!")
 
     yield  # Server กำลังทำงาน
 
     # Shutdown
     logger.info("Shutting down application...")
+    if reconciler_task:
+        reconciler_stop.set()
+        # รอบที่กำลังเรียก SkyPilot อยู่หยุดกลางทางไม่ได้ (อยู่ใน thread) รอสั้น ๆ แล้วปล่อย
+        try:
+            await asyncio.wait_for(reconciler_task, timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("Session reconciler did not stop within 10s")
 
 
 # สร้าง FastAPI app
