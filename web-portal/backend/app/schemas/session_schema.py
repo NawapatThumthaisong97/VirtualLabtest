@@ -4,12 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-<<<<<<< HEAD
 from app.schemas.base import CamelModel
-from app.models.session import ServiceType, SessionStatus
-=======
 from app.models.session import ServiceType, SessionStatus, SessionEndReason
->>>>>>> origin/feature/sky-aws-launch
 
 
 class CreateSessionRequest(CamelModel):
