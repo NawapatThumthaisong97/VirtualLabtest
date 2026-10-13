@@ -1,13 +1,16 @@
 from uuid import UUID
-from typing import Optional, Any
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Body, status as http_status
+from fastapi import APIRouter, Depends, Query, status as http_status
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
 from app.controllers.session_controller import SessionController
+from app.middlewares.auth import get_current_user
+from app.middlewares.rbac import verify_permission
 from app.middlewares.request_validation import require_non_empty_body
 from app.models.session import SessionStatus
+from app.models.user import User
 from app.repositories.session_repository import SessionRepository
 from app.repositories.lab_repository import LabRepository
 from app.repositories.lab_image_repository import LabImageRepository
@@ -19,8 +22,10 @@ from app.schemas.session_schema import (
 )
 from app.schemas.response import ApiResponse
 from app.services.session_service import SessionService
+from app.services.rbac_service import ResourceContextPolicy
 
 router = APIRouter()
+session_context_policy = ResourceContextPolicy()
 
 
 def get_controller(db: Session = Depends(get_db)) -> SessionController:
@@ -31,25 +36,43 @@ def get_controller(db: Session = Depends(get_db)) -> SessionController:
     return SessionController(service)
 
 
-@router.get("/sessions", response_model=ApiResponse[list[SessionResponse]])
+@router.get(
+    "/sessions",
+    response_model=ApiResponse[list[SessionResponse]],
+    dependencies=[
+        Depends(
+            verify_permission("clusters:read:self", allow_collection=True)
+        )
+    ],
+)
 def list_sessions(
-    user_id: Optional[UUID] = Query(None, alias="userId"),
     status: Optional[SessionStatus] = Query(None),
+    current_user: User = Depends(get_current_user),
     controller: SessionController = Depends(get_controller),
 ):
     """
     ดึง sessions ทั้งหมด
-    - Query parameter: userId (optional) - filter ตาม user
+    - Results are always restricted to the authenticated user
     - Query parameter: status (optional) - filter ตาม status
     """
     return {
         "success": True,
         "message": "Sessions retrieved successfully",
-        "data": controller.get_all_sessions(user_id=user_id, status=status),
+        "data": controller.get_all_sessions(user_id=current_user.id, status=status),
     }
 
 
-@router.get("/sessions/{session_id}", response_model=ApiResponse[SessionDetailResponse])
+@router.get(
+    "/sessions/{session_id}",
+    response_model=ApiResponse[SessionDetailResponse],
+    dependencies=[
+        Depends(
+            verify_permission(
+                "clusters:read:self", context_policy=session_context_policy
+            )
+        )
+    ],
+)
 def get_session(
     session_id: UUID,
     controller: SessionController = Depends(get_controller),
@@ -66,30 +89,40 @@ def get_session(
     "/sessions",
     response_model=ApiResponse[CreateSessionResponse],
     status_code=http_status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(
+            verify_permission("clusters:create:self")
+        )
+    ],
 )
 def create_session(
     request: CreateSessionRequest,
+    current_user: User = Depends(get_current_user),
     controller: SessionController = Depends(get_controller),
 ):
     """
     สร้าง session ใหม่
-    - Body: { "lab_id": "UUID", "user_id": "UUID (optional)" }
+    - Body: { "lab_id": "UUID" }; the authenticated user's ID is used
     - Return: session information with endpoints
     """
-    # ถ้าไม่มี userId ใช้ default UUID
-    user_id = request.user_id or UUID("00000000-0000-0000-0000-000000000000")
-    
     return {
         "success": True,
         "message": "Session created successfully",
-        "data": controller.create_session(user_id, request.lab_id),
+        "data": controller.create_session(current_user.id, request.lab_id),
     }
 
 
 @router.delete(
     "/sessions/{session_id}",
     response_model=ApiResponse[dict],
-    status_code=http_status.HTTP_200_OK
+    status_code=http_status.HTTP_200_OK,
+    dependencies=[
+        Depends(
+            verify_permission(
+                "clusters:delete:self", context_policy=session_context_policy
+            )
+        )
+    ],
 )
 def delete_session(
     session_id: UUID,

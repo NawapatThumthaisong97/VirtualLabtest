@@ -1,11 +1,13 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from app.controllers.kubernetes_controller import KubernetesController
-from kubernetes.client.rest import ApiException
+from app.middlewares.rbac import verify_permission
 import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(verify_permission("kubernetes:cluster_admin:global"))]
+)
 
 @router.get("/cluster-info")
 async def get_cluster_info():

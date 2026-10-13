@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
 from app.middlewares.auth import get_current_user
+from app.middlewares.rbac import verify_permission
 from app.models.user import User, UserRole
 from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
@@ -29,9 +30,15 @@ from app.services.courses_service import CourseService
 from app.controllers.course_controller import CourseController
 from app.middlewares.request_validation import require_non_empty_body
 from app.adapters.local_storage import local_storage
+<<<<<<< HEAD
 from app.exceptions.domain import NotFoundError, ValidationError
+=======
+from app.exceptions.domain import NotFoundError
+from app.services.rbac_service import ResourceContextPolicy
+>>>>>>> origin/feature/RBAC
 
 router = APIRouter()
+course_storage_policy = ResourceContextPolicy()
 
 
 def course_response(course, request: Request) -> CourseResponse:
@@ -172,7 +179,18 @@ def get_course_image(
     return FileResponse(path)
 
 
-@router.post("/{course_id}/image", response_model=CourseResponse)
+@router.post(
+    "/{course_id}/image",
+    response_model=CourseResponse,
+    dependencies=[
+        Depends(
+            verify_permission(
+                "storage:images:push:course",
+                context_policy=course_storage_policy,
+            )
+        )
+    ],
+)
 def upload_course_image(
     course_id: UUID,
     request: Request,
