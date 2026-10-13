@@ -196,6 +196,7 @@ ansible/group_vars/all.yml
 
 # Terraform plugin cache
 .terraform.lock.hcl
+!terraform/.terraform.lock.hcl
 # ^^ Intentionally NOT ignored — commit this for reproducible provider versions
 
 # Local plan files
