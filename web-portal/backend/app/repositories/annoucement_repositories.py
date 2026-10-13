@@ -41,6 +41,8 @@ class AnnouncementRepository(BaseRepository[Announcement]):
         self.db.flush()
         return announcement
 
-    def delete(self, announcement: Announcement) -> None:
-        """ลบ announcement"""
-        self.db.delete(announcement)
+    def delete(self, announcement_id: UUID) -> None:
+        """ลบ announcement (Hard Delete)"""
+        announcement = self.find_by_id(announcement_id)
+        if announcement:
+            self.db.delete(announcement)

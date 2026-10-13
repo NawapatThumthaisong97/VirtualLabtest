@@ -32,6 +32,16 @@ PERMISSIONS = {
     "storage:r2:manage:global": "Manage all R2 buckets and datasets.",
     "storage:registry:manage:global": "Manage the global registry.",
     "storage:quotas:manage:global": "Manage global storage and compute quotas.",
+    # Course Management Permissions
+    "courses:read:self": "View courses you're enrolled in or teaching.",
+    "courses:create:self": "Create new courses (Instructor only).",
+    "courses:update:course": "Update course information for courses you teach.",
+    "courses:delete:course": "Delete courses you created or teach.",
+    "courses:manage:global": "Full course management access (Admin).",
+    # Course Announcements Permissions
+    "courses:announcements:create:course": "Create announcements for courses you teach.",
+    "courses:announcements:update:course": "Update announcements for courses you teach.",
+    "courses:announcements:delete:course": "Delete announcements for courses you teach.",
 }
 
 ROLE_PERMISSIONS = {
@@ -44,6 +54,7 @@ ROLE_PERMISSIONS = {
         "storage:images:pull:self",
         "storage:images:push:self",
         "storage:data:read_write:self",
+        "courses:read:self",
     },
     "Instructor": {
         "clusters:create:course",
@@ -56,6 +67,13 @@ ROLE_PERMISSIONS = {
         "network:tailscale:access:assigned",
         "storage:images:push:course",
         "storage:datasets:manage:course",
+        "courses:read:self",
+        "courses:create:self",
+        "courses:update:course",
+        "courses:delete:course",
+        "courses:announcements:create:course",
+        "courses:announcements:update:course",
+        "courses:announcements:delete:course",
     },
     "Admin": {
         "clusters:manage:global",
@@ -66,6 +84,7 @@ ROLE_PERMISSIONS = {
         "storage:r2:manage:global",
         "storage:registry:manage:global",
         "storage:quotas:manage:global",
+        "courses:manage:global",
     },
 }
 

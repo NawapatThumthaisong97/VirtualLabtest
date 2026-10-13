@@ -23,6 +23,11 @@ GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION = {
     ("storage", "datasets"): "storage:r2:manage:global",
     ("storage", "r2"): "storage:r2:manage:global",
     ("storage", "quotas"): "storage:quotas:manage:global",
+    ("courses", "*"): "courses:manage:global",
+    ("courses", "create"): "courses:manage:global",
+    ("courses", "update"): "courses:manage:global",
+    ("courses", "delete"): "courses:manage:global",
+    ("courses", "announcements"): "courses:manage:global",
 }
 
 
@@ -93,6 +98,26 @@ class ResourceContextPolicy:
 
         if scope == "self" and resource_domain in {"clusters", "kubernetes", "network"}:
             return self._owns_cluster_or_session(db, user.id, resource_id)
+
+        # Course self scope - student can read enrolled courses, instructor can read teaching courses
+        if scope == "self" and resource_domain == "courses":
+            if action == "create":
+                # Instructor can create courses - permission already checked in verify_permission
+                return True
+            # For read - check enrollment or teaching
+            try:
+                target_course_id = UUID(resource_id)
+            except (ValueError, AttributeError):
+                return False
+            return self._has_course_access(db, user.id, target_course_id)
+
+        # Course scope - instructor must be teaching this course
+        if scope == "course" and resource_domain == "courses":
+            try:
+                target_course_id = UUID(resource_id)
+            except (ValueError, AttributeError):
+                return False
+            return self._is_course_instructor(db, user.id, target_course_id)
 
         if scope == "assigned" and resource_domain in {"kubernetes", "network"}:
             other_session = aliased(ComputeSession)
@@ -225,3 +250,69 @@ class ResourceContextPolicy:
         if len(owners) != 1:
             return False
         return user_id is None or owners[0][0] == user_id
+
+    @staticmethod
+    def _has_course_access(db: DbSession, user_id: UUID, course_id: UUID) -> bool:
+        """
+        ตรวจสอบว่า user มีสิทธิ์เข้าถึง course นี้หรือไม่
+        - Student: ต้อง enroll
+        - Instructor: ต้องเป็นผู้สร้าง, ผู้สอน, หรือ enroll เป็น instructor
+        """
+        # เช็คว่าเป็นผู้สร้าง
+        course = db.query(Course).filter(Course.id == course_id, Course.deleted_at.is_(None)).first()
+        if course and course.created_by == user_id:
+            return True
+        
+        # เช็ค enrollment (student หรือ instructor)
+        enrollment = (
+            db.query(Enrollment)
+            .filter(
+                Enrollment.course_id == course_id,
+                Enrollment.user_id == user_id
+            )
+            .first()
+        )
+        if enrollment:
+            return True
+        
+        # เช็คว่าเป็นผู้สอน (lecturer_name)
+        if course:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and course.lecturer_name == user.name:
+                return True
+        
+        return False
+
+    @staticmethod
+    def _is_course_instructor(db: DbSession, user_id: UUID, course_id: UUID) -> bool:
+        """
+        ตรวจสอบว่า user เป็น instructor ของ course นี้หรือไม่
+        - ต้องเป็นผู้สร้าง, ผู้สอน, หรือ enroll เป็น instructor
+        """
+        # เช็คว่าเป็นผู้สร้าง
+        course = db.query(Course).filter(Course.id == course_id, Course.deleted_at.is_(None)).first()
+        if not course:
+            return False
+        
+        if course.created_by == user_id:
+            return True
+        
+        # เช็ค enrollment เป็น instructor
+        enrollment = (
+            db.query(Enrollment)
+            .filter(
+                Enrollment.course_id == course_id,
+                Enrollment.user_id == user_id,
+                Enrollment.role_in_course == RoleInCourse.INSTRUCTOR
+            )
+            .first()
+        )
+        if enrollment:
+            return True
+        
+        # เช็คว่าเป็นผู้สอน (lecturer_name)
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and course.lecturer_name == user.name:
+            return True
+        
+        return False
