@@ -34,3 +34,13 @@ docker exec virtual_lab_db psql -U postgres -c "CREATE DATABASE virtual_lab_test
   `fake_sky.launch_error = RuntimeError(...)`, `fake_sky.job_statuses = ["SETTING_UP", "FAILED_SETUP"]`
   แล้ว assert สิ่งที่ถูกเรียก เช่น `fake_sky.downed`, `fake_sky.status_calls`
 - fixture `world` = user / course / lab K3s / lab AWS / lab ไม่มี image, `add_session` = ใส่ session สถานะใดก็ได้
+
+## CI
+
+`.github/workflows/backend-tests.yml` รันทุก PR ที่แตะ `web-portal/backend` (1 job ต่อ 1 โฟลเดอร์ใน `tests/`)
+
+| check ใน PR | รัน |
+|---|---|
+| Sky launch & session tests | `pytest tests/session` |
+
+เพิ่มโฟลเดอร์เทสใหม่ → เพิ่ม job ใหม่ใน workflow ด้วย

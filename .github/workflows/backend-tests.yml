@@ -1,5 +1,8 @@
 # รัน pytest ของ backend ทุก PR / push ที่แตะ web-portal/backend
 # ไม่ต่อ SkyPilot / cluster / AWS จริง (ใช้ FakeSky) ต้องการแค่ Postgres สำหรับเทส
+#
+# 1 job ต่อ 1 โฟลเดอร์ใน tests/ ชื่อ job คือชื่อ check ที่เห็นใน PR (และที่ branch protection ผูกไว้)
+# มีโฟลเดอร์เทสใหม่ → เพิ่ม job ใหม่ ไม่งั้นเทสนั้นจะไม่ถูกรันใน CI
 name: Backend tests
 
 on:
@@ -15,8 +18,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  pytest:
-    runs-on: ubuntu-latest
+  session:
+    name: Sky launch & session tests
+    # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     services:
@@ -39,9 +44,9 @@ jobs:
         working-directory: web-portal/backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -50,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirement.txt
 
-      - name: Run pytest
+      - name: Run tests/session
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
-        run: pytest --color=yes
+        run: pytest tests/session --color=yes
