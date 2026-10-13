@@ -59,6 +59,7 @@ erDiagram
     uuid image_id FK "อ้าง lab_images"
     timestamptz due_at
     text status "draft | published"
+    text run_target "KUBERNETES | AWS (ที่ launch session)"
     timestamptz created_at
   }
 
@@ -100,7 +101,8 @@ erDiagram
     text status "pending - provisioning - running - stopped/succeeded/failed"
     timestamptz started_at
     timestamptz ended_at
-    timestamptz expires_at "countdown ใน Lab Hub"
+    timestamptz expires_at "countdown ใน Lab Hub (ใส่ตอน launch เสร็จ = now + lifespan_minutes)"
+    text end_reason "USER_DELETE | EXPIRED | LOST | LAUNCH_FAILED | STALE_PENDING"
   }
 
   usage_records {
@@ -183,6 +185,31 @@ erDiagram
 **2. `users.password_hash`** — คอลัมน์ใหม่ (nullable) สำหรับ login ด้วย student_id/email
 seed จะตั้งรหัสเริ่มต้นให้ user ตัวอย่างทุกคนเป็น `labpass123`
 ปล่อย nullable ไว้เพราะวันที่ย้ายไป SSO user ที่สร้างจาก SSO จะไม่มีรหัสผ่าน
+
+**3. `labs.run_target`** — คอลัมน์ใหม่ เลือกว่า session ของ lab นี้ launch ไปที่ไหน
+(`KUBERNETES` = K3s on-prem เดิม, `AWS` = EC2 ใน private subnet) ค่าเริ่มต้นเป็น `KUBERNETES`
+ข้อนี้**ไม่ต้อง drop DB** เพิ่มคอลัมน์ทับของเดิมได้เลย (lab เดิมทุกตัวจะได้ `KUBERNETES`):
+
+```bash
+docker exec virtual_lab_db psql -U postgres -d virtual_lab   -c "CREATE TYPE runtarget AS ENUM ('KUBERNETES', 'AWS');"   -c "ALTER TABLE labs ADD COLUMN run_target runtarget NOT NULL DEFAULT 'KUBERNETES';"
+
+# ให้ lab ไหนไป AWS
+docker exec virtual_lab_db psql -U postgres -d virtual_lab   -c "UPDATE labs SET run_target = 'AWS' WHERE id = '<lab id>';"
+```
+
+เก็บเป็นชื่อ enum ตัวพิมพ์ใหญ่ (`KUBERNETES`/`AWS`) เหมือน enum ตัวอื่นในโปรเจกต์ เพราะ
+SQLAlchemy เก็บชื่อ ไม่ใช่ value ส่วนข้อ 1–2 ยังต้อง drop ตามข้างล่าง
+
+**4. `sessions.end_reason`** — คอลัมน์ใหม่ บอกว่า session จบเพราะอะไร (NULL = ยังไม่จบ หรือจบก่อนมีคอลัมน์นี้)
+reconciler ในตัว backend ใช้ตั้งค่า `EXPIRED` / `LOST` / `STALE_PENDING` เอง **ไม่ต้อง drop DB**:
+
+```bash
+docker exec virtual_lab_db psql -U postgres -d virtual_lab \
+  -c "CREATE TYPE sessionendreason AS ENUM ('USER_DELETE', 'EXPIRED', 'LOST', 'LAUNCH_FAILED', 'STALE_PENDING');" \
+  -c "ALTER TABLE sessions ADD COLUMN end_reason sessionendreason;"
+```
+
+ย้อนกลับ: `ALTER TABLE sessions DROP COLUMN end_reason; DROP TYPE sessionendreason;`
 
 **ใครที่มี DB อยู่ในเครื่องแล้วต้อง drop ทิ้งแล้วสร้างใหม่** ไม่งั้นจะ error ตอน
 insert session เพราะค่าเก่ายังค้างอยู่ใน enum type ของ Postgres — ต่างจากการเพิ่ม

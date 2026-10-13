@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models.session import ServiceType, SessionStatus
+from app.models.session import ServiceType, SessionStatus, SessionEndReason
 
 
 class CreateSessionRequest(BaseModel):
@@ -32,6 +32,7 @@ class CreateSessionResponse(BaseModel):
     endpoints: dict[str, str] = Field(..., description="Service endpoints")
     status: str = Field(..., description="Session status")
     started_at: datetime = Field(..., description="เวลาเริ่ม session")
+    expires_at: Optional[datetime] = Field(None, description="เวลาที่ lab จะถูกปิดอัตโนมัติ (lifespan_minutes)")
     
     class Config:
         json_schema_extra = {
@@ -71,6 +72,7 @@ class SessionResponse(BaseModel):
     started_at: Optional[datetime]
     ended_at: Optional[datetime]
     expires_at: Optional[datetime]
+    end_reason: Optional[SessionEndReason] = None
 
     class Config:
         from_attributes = True
