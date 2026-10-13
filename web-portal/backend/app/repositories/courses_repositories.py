@@ -61,9 +61,10 @@ class CourseRepository(BaseRepository[Course]):
         return self.db.execute(result).scalar_one_or_none() is not None
 
     def is_lecturer_teaching(self, course_id: UUID, lecturer_name: str) -> bool:
-        """ตรวจสอบว่าอาจารย์สอนวิชานี้หรือไม่"""
+        """ตรวจสอบว่าอาจารย์สอนวิชานี้หรือไม่ (course ต้องยังไม่ถูกลบ)"""
         result = select(self.model).where(
             self.model.id == course_id,
-            self.model.lecturer_name == lecturer_name
+            self.model.lecturer_name == lecturer_name,
+            self.model.deleted_at.is_(None),
         )
         return self.db.execute(result).scalar_one_or_none() is not None

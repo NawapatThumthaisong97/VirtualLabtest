@@ -1,14 +1,5 @@
 from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
-<<<<<<< HEAD
-from datetime import datetime
-from typing import Optional
-from decimal import Decimal, ROUND_UP
-import os
-import re
-import sky
-import yaml
-=======
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 import io
@@ -18,21 +9,14 @@ import shlex
 import sky
 import time
 from sky.exceptions import ClusterDoesNotExist
->>>>>>> origin/feature/sky-aws-launch
 
 from app.adapters.ecr_adapter import get_ecr_token
 from app.configs.settings import settings
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.user import User
-<<<<<<< HEAD
-from app.models.enrollment import Enrollment, RoleInCourse
-from app.models.lab import Lab, LabStatus
-from app.models.lab_image import ImageStatus, LabImage
-=======
 from app.models.lab import Lab, RunTarget
 from app.models.lab_image import LabImage
->>>>>>> origin/feature/sky-aws-launch
 from app.repositories.session_repository import SessionRepository
 from app.repositories.lab_repository import LabRepository
 from app.repositories.lab_image_repository import LabImageRepository
@@ -46,9 +30,6 @@ from app.exceptions.domain import (
     ClusterOperationError,
     ForbiddenError,
 )
-<<<<<<< HEAD
-from app.services.quota_reservation_service import QuotaReservationService
-=======
 from app.utils.logger import logger
 
 # session ที่ PENDING นานกว่านี้ถือว่าค้าง (launch จริง: K3s ~5 นาที, AWS ~2.5 นาที)
@@ -61,7 +42,6 @@ JOB_STARTING_STATUSES = {None, "INIT", "PENDING", "SETTING_UP"}
 
 # ตอน launch พัง เก็บท้าย log ของ job ไว้ก่อนลบ cluster (ลบแล้ว sky logs ดูไม่ได้อีก)
 FAILED_LOG_TAIL_LINES = 50
->>>>>>> origin/feature/sky-aws-launch
 
 
 class SessionService:
@@ -73,13 +53,11 @@ class SessionService:
         session_repository: SessionRepository,
         lab_repository: LabRepository,
         lab_image_repository: LabImageRepository,
-        quota_reservation_service: QuotaReservationService | None = None,
     ):
         self.db = db
         self.session_repository = session_repository
         self.lab_repository = lab_repository
         self.lab_image_repository = lab_image_repository
-        self.quota_reservation_service = quota_reservation_service or QuotaReservationService(db)
 
     def get_all_sessions(
         self, user_id: Optional[UUID] = None, status: Optional[SessionStatus] = None
@@ -279,13 +257,8 @@ class SessionService:
 
                     cluster_status = cluster_records[0].get('status')
                     from sky import ClusterStatus
-<<<<<<< HEAD
-                    
-                    if cluster_status == ClusterStatus.STOPPED:
-=======
 
                     if cluster_status in [ClusterStatus.STOPPED, ClusterStatus.AUTOSTOPPING]:
->>>>>>> origin/feature/sky-aws-launch
                         # Cluster หยุดแล้ว → อัพเดท status เป็น STOPPED
                         self._end_session(existing_session, SessionStatus.STOPPED,
                                           self._gone_reason(existing_session))
@@ -293,17 +266,11 @@ class SessionService:
                         existing_session = None
 
             except Exception as e:
-<<<<<<< HEAD
-                raise ClusterOperationError(
-                    "Could not verify the existing cluster state; refusing to start a duplicate"
-                ) from e
-=======
 
                 print(f"[Warning] Failed to check cluster status: {e}")
                 # ไม่รู้จริงว่า cluster ยังอยู่ไหม เลยไม่ใส่ end_reason
                 self._end_session(existing_session, SessionStatus.STOPPED, None)
                 existing_session = None
->>>>>>> origin/feature/sky-aws-launch
         
         if existing_session:
             raise SessionAlreadyExistsError(
@@ -321,15 +288,9 @@ class SessionService:
         ):
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
-<<<<<<< HEAD
-        cluster_name = f"music-lab-{uuid4().hex[:12]}"
-       
-        
-=======
         cluster_name = self._cluster_name(lab_image)
         run_target = lab.run_target or RunTarget.KUBERNETES
         is_cloud = run_target == RunTarget.AWS
->>>>>>> origin/feature/sky-aws-launch
 
         task_config = self.create_fastapi_task(
             lab_image=lab_image,
@@ -346,56 +307,6 @@ class SessionService:
                 raise ClusterOperationError(f"Failed to get ECR token: {e}")
         task = sky.Task.from_yaml_config(task_config, secrets_overrides=secrets)
 
-<<<<<<< HEAD
-        task = sky.Task.from_yaml_config(yaml.safe_load(task_yaml))
-        compute_hours, storage_mb = self._quota_requirements(lab_image)
-        reservation_ids = self.quota_reservation_service.reserve_personal_cluster(
-            user_id, compute_hours, storage_mb
-        )
-        is_cluster_launch_attempted = False
-        try:
-            is_cluster_launch_attempted = True
-            request_id = sky.launch(task, cluster_name=cluster_name)
-            job_id, _ = sky.stream_and_get(request_id)
-            endpoints = sky.get(sky.endpoints(cluster=cluster_name))
-
-            formatted_endpoints = {
-                str(port): f"http://{url}" if not url.startswith("http") else url
-                for port, url in endpoints.items()
-            }
-
-            new_session = SessionModel(
-                user_id=user_id,
-                lab_id=lab_id,
-                lab_image_id=lab_image.id,
-                service_type=ServiceType.LAB,
-                sky_cluster_name=cluster_name,
-                sky_job_id=job_id,
-                endpoints=formatted_endpoints,
-                status=SessionStatus.RUNNING,
-                started_at=datetime.utcnow(),
-                is_remote=False,
-                is_cloud=False,
-            )
-
-            self.db.add(new_session)
-            self.quota_reservation_service.mark_committed(reservation_ids)
-            self.db.commit()
-            self.db.refresh(new_session)
-        except Exception as error:
-            self.db.rollback()
-            if is_cluster_launch_attempted:
-                try:
-                    sky.down(cluster_name)
-                except Exception as cleanup_error:
-                    raise ClusterOperationError(
-                        "Cluster provisioning failed and cleanup could not be verified; quota remains reserved"
-                    ) from cleanup_error
-            self.quota_reservation_service.release(reservation_ids)
-            if isinstance(error, ClusterOperationError):
-                raise
-            raise ClusterOperationError("Cluster provisioning failed") from error
-=======
         # บันทึกเป็น PENDING ก่อน launch ถ้า launch พังกลางทางจะยังรู้ชื่อ cluster ไว้ตามลบ
         # (บน AWS cluster ที่ไม่มี record คือ EC2 ที่เปิดค้างเสียเงินโดยไม่มีใครเห็น)
         new_session = SessionModel(
@@ -443,7 +354,6 @@ class SessionService:
         )
         self.db.commit()
         self.db.refresh(new_session)
->>>>>>> origin/feature/sky-aws-launch
 
         return {
             "session_id": new_session.id,
@@ -458,21 +368,6 @@ class SessionService:
             "expires_at": new_session.expires_at,
         }
 
-<<<<<<< HEAD
-    @staticmethod
-    def _quota_requirements(lab_image: LabImage) -> tuple[Decimal, int]:
-        cpu_match = re.match(r"\s*(\d+(?:\.\d+)?)", lab_image.cpu_requirement)
-        if cpu_match is None:
-            raise LabImageMissingError("Lab image has an invalid CPU requirement")
-
-        cpu_count = Decimal(cpu_match.group(1))
-        lifespan_hours = Decimal(lab_image.lifespan_minutes or 60) / Decimal(60)
-        compute_hours = (cpu_count * lifespan_hours).quantize(
-            Decimal("0.01"), rounding=ROUND_UP
-        )
-        storage_mb = max(int(lab_image.disk_size or 0) * 1024, 1)
-        return compute_hours, storage_mb
-=======
     def _wait_job_running(self, cluster_name: str, job_id: int) -> None:
         """sky.launch คืนตั้งแต่ส่ง job ส่วน setup ไปรันต่อเองทีหลัง ถ้าไม่รอ setup ที่พัง
         (เช่น docker pull tag ที่ไม่มี) จะถูกบันทึกเป็น RUNNING ทั้งที่ job เป็น FAILED_SETUP
@@ -530,6 +425,15 @@ class SessionService:
         # ตัดรหัสสีของ terminal ที่ SkyPilot ใส่มา ไม่งั้นอ่านใน log file ลำบาก
         return re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
 
+    def _down_quietly(self, cluster_name: str) -> None:
+        """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
+        try:
+            sky.get(sky.down(cluster_name))
+        except ClusterDoesNotExist:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to clean up cluster {cluster_name}: {e}")
+
     def reconcile_sessions(self) -> dict:
         """ปิด session ที่เครื่องหายไปแล้วแต่ DB ยังไม่รู้ (autostop, pod/EC2 ตายเอง) และ
         PENDING ที่ค้างเกิน timeout ให้ session_reconciler เรียกเป็นระยะ
@@ -584,7 +488,6 @@ class SessionService:
             pass
         except Exception as e:
             print(f"[Warning] Failed to clean up cluster {cluster_name}: {e}")
->>>>>>> origin/feature/sky-aws-launch
 
     def delete_session(self, session_id: UUID) -> dict:
         """ลบ session - stop cluster (ถ้ายังรัน) และ soft delete"""
@@ -593,13 +496,8 @@ class SessionService:
         if not session:
             raise SessionNotFoundError(f"Session with id {session_id} not found")
         
-<<<<<<< HEAD
-        is_cluster_stopped = False
-        if session.status == SessionStatus.RUNNING:
-=======
         cluster_stopped = False
         if session.status in (SessionStatus.RUNNING, SessionStatus.PENDING):
->>>>>>> origin/feature/sky-aws-launch
             # RUNNING แต่ไม่มี sky_cluster_name = record ค้าง ไม่ใช่ cluster ที่รันอยู่จริง
             # เกิดได้จาก seed, จาก create ที่พังกลางทางก่อนบันทึกชื่อ cluster, หรือ
             # จากการแก้ DB ตรง ๆ
@@ -611,17 +509,12 @@ class SessionService:
             # ไม่มี cluster ก็แค่ไม่มีอะไรให้ปิด ปล่อยให้ไปลบต่อได้ตามปกติ
             if session.sky_cluster_name:
                 try:
-<<<<<<< HEAD
-                    sky.down(session.sky_cluster_name)
-                    is_cluster_stopped = True
-=======
                     # sky.down คืน request_id ต้อง sky.get ถึงจะรู้ว่าลบเสร็จหรือพังจริง
                     sky.get(sky.down(session.sky_cluster_name))
                     cluster_stopped = True
                 except ClusterDoesNotExist:
                     # autostop ลบไปเองแล้ว ไม่มีอะไรให้ปิด
                     pass
->>>>>>> origin/feature/sky-aws-launch
                 except Exception as e:
                     raise ClusterOperationError(
                         f"Failed to stop cluster {session.sky_cluster_name}: {str(e)}"
@@ -634,7 +527,5 @@ class SessionService:
         return {
             "session_id": session_id,
             "cluster_name": session.sky_cluster_name,
-            "isClusterStopped": is_cluster_stopped,
-            "message": "Session deleted successfully" if not is_cluster_stopped
-                      else "Session stopped and deleted successfully"
+            "cluster_stopped": cluster_stopped,
         }

@@ -139,6 +139,9 @@ def get_all_courses(
     request: Request,
     current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
+    _: User = Depends(
+        verify_permission("courses:read:self", allow_collection=True)
+    ),
 ):
     """คืนรายการวิชา (ต้อง login) - ถูกกรองตาม role อัตโนมัติ"""
     # Admin เห็นทุกวิชา (มี courses:manage:global)
@@ -193,7 +196,7 @@ def upload_course_image(
     if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
         raise ValidationError("Only JPEG, PNG, and WebP images are supported")
     
-    course = controller.course_service.save_course_image(
+    course = controller.save_course_image(
         course_id, image.filename or "image.bin", image
     )
     return course_response(course, request)
@@ -223,15 +226,6 @@ def update_course(
     # RBAC + Policy เช็คสิทธิ์แล้ว
     course = controller.update_course(course_id, updated_course)
     return course_response(course, request)
-
-
-def update_course_announcement_ids(
-    course_id: UUID,
-    announcement_ids: list[UUID],
-    controller: CourseController = Depends(get_course_controller),
-):
-    """อัปเดต announcement_ids ของ course โดยใช้ course_id"""
-    controller.update_course_announcement_ids(course_id, announcement_ids)
 
 
 @router.delete(
@@ -377,6 +371,5 @@ def delete_announcement(
     controller: CourseController = Depends(get_course_controller),
 ):
     """ลบ announcement (Hard Delete) - ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin"""
-    # RBAC + Policy เช็คสิทธิ์แล้ว
-    controller.course_service.announcement_repository.delete(announcement_id)
-    controller.course_service.announcement_repository.db.commit()
+    # RBAC + Policy เช็คสิทธิ์แล้ว, service เช็ค ownership ว่า announcement เป็นของ course_id นี้จริง
+    controller.delete_announcement(course_id=course_id, announcement_id=announcement_id)

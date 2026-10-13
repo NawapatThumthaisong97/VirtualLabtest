@@ -118,6 +118,16 @@ class CourseController:
         """
         return self.course_service.update_announcement_ids(course_id, announcement_ids)
 
+    def save_course_image(self, course_id: UUID, filename: str, source) -> Course:
+        """
+        บันทึกรูปภาพของ course
+
+        Raises:
+            CourseNotFoundError: จาก service ถ้าหา course ไม่เจอ
+            ValidationError: จาก service ถ้า filename หรือ source ไม่ถูกต้อง
+        """
+        return self.course_service.save_course_image(course_id, filename, source)
+
     def create_announcement(self, course_id: UUID, message: str, author_id: UUID):
         """
         สร้าง announcement ใหม่สำหรับ course
@@ -139,3 +149,13 @@ class CourseController:
             ValidationError: จาก service ถ้า message ไม่ถูกต้อง
         """
         return self.course_service.update_announcement(course_id, announcement_id, message)
+
+    def delete_announcement(self, course_id: UUID, announcement_id: UUID) -> None:
+        """
+        ลบ announcement (Hard Delete)
+
+        Raises:
+            CourseNotFoundError: จาก service ถ้าหา course หรือ announcement ไม่เจอ
+            ValidationError: จาก service ถ้า announcement ไม่ได้อยู่ใน course นี้
+        """
+        self.course_service.delete_announcement(course_id, announcement_id)

@@ -434,4 +434,39 @@ class CourseService:
             raise InternalServerError(
                 f"Failed to update announcement: {str(e)}"
             ) from e
+
+    def delete_announcement(self, course_id: UUID, announcement_id: UUID) -> None:
+        """
+        ลบ announcement (Hard Delete)
+
+        Raises:
+            CourseNotFoundError: ถ้าหา course หรือ announcement ไม่เจอ
+            ValidationError: ถ้า announcement ไม่ได้อยู่ใน course นี้
+            InternalServerError: ถ้าเกิด error อื่น ๆ
+        """
+        try:
+            course = self.course_repository.find_by_id(course_id)
+            if not course:
+                raise CourseNotFoundError(f"Course {course_id} not found")
+
+            announcement = self.announcement_repository.find_by_id(announcement_id)
+            if not announcement:
+                raise CourseNotFoundError(f"Announcement {announcement_id} not found")
+
+            # กัน instructor วิชาหนึ่งลบ announcement ของวิชาอื่นด้วย id ตรง ๆ
+            if announcement.course_id != course_id:
+                raise ValidationError(
+                    f"Announcement {announcement_id} does not belong to course {course_id}"
+                )
+
+            self.announcement_repository.delete(announcement_id)
+            self.course_repository.db.commit()
+        except (CourseNotFoundError, ValidationError):
+            self.course_repository.db.rollback()
+            raise
+        except Exception as e:
+            self.course_repository.db.rollback()
+            raise InternalServerError(
+                f"Failed to delete announcement: {str(e)}"
+            ) from e
     
