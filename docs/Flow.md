@@ -328,7 +328,7 @@ SkyPilot API server ในเครื่อง ใช้ IAM user `Skypilot-IAM
    → AMI `ami-0da9046ec7f57f3af` (`vlab-bake-0.12.3.post1-r2`) ใส่ `AWS_USE_DUALSTACK_ENDPOINT=true` ใน `/etc/environment`
 2. สิทธิ์อ่าน: `terminate_instances` เรียก `DescribeVpcs` / `DescribeSecurityGroups` ก่อนลบ
 3. สิทธิ์ลบ: role มีแค่ ECR → เพิ่ม `TerminateInstances` / `StopInstances` เฉพาะ tag `skypilot-cluster-name`
-   (2–3 อยู่ใน `terraform/lab_autostop.tf`)
+   (2–3 อยู่ใน `terraform/lab_iam.tf`)
 
 **session หลัง autostop:** reconciler ปิดให้เป็น `STOPPED` / `EXPIRED` เอง (ดูผลเทส reconciler ด้านล่าง)
 
@@ -348,7 +348,7 @@ SkyPilot API server ในเครื่อง ใช้ IAM user `Skypilot-IAM
 |---|---|
 | race ของ 2 request พร้อมกันจริง ๆ | ทั้งคู่ผ่านการเช็กก่อนที่อีกตัวจะ INSERT (มีมาตั้งแต่ก่อน PR) ต้องใช้ unique index หรือ lock ถ้าจะกันให้ขาด |
 | reconciler กับ K3s | ยังไม่ได้เทส (registry / worker ที่บ้าน offline) logic ชุดเดียวกับ AWS |
-| lab ที่ใช้ 5173 / 8443 บน AWS | router (`vlab-ts-router`) เปิด egress แค่ 8080 ต้องเพิ่มใน `lab_access.tf` |
+| lab ที่ใช้ 5173 / 8443 บน AWS | router (`vlab-ts-router`) เปิด egress แค่ 8080 ต้องเพิ่มใน `terraform/security_groups.tf` |
 | เทส K3s ซ้ำหลังเพิ่ม `_wait_job_running` | ยังไม่ได้ทำ registry ที่บ้าน (`100.127.74.48:5001`) ค้าง pull ไม่ได้ (`ErrImagePull`) path พังทำงานถูก (`FAILED` ไม่มี pod ค้าง) |
 | `skypilot/music-lab` บน AWS | ยังไม่มีใน ECR (เทสแค่ `vlab/music-lab-ide`) |
 | PENDING เกิน 20 นาทีแต่ launch ยังไม่จบจริง | จะถูกลบทิ้งตอนมีคนกด Start ใหม่ ถ้า image ใหญ่จน pull นานเกิน ต้องขยาย `PENDING_TIMEOUT` |

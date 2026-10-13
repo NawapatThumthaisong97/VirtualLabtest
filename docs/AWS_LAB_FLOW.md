@@ -169,8 +169,8 @@ flowchart TD
 | ด่าน | ปัญหา | แก้ที่ | สถานะ |
 |---|---|---|---|
 | 1 ทางเน็ต | skylet ข้าม `~/.aws/config` เลยไม่ใช้ dual-stack | AMI `ami-0da9046ec7f57f3af` (`vlab-bake-0.12.3.post1-r2`) มี `AWS_USE_DUALSTACK_ENDPOINT=true` ใน `/etc/environment` | ✅ |
-| 2 อ่าน | ขาด `DescribeVpcs` / `DescribeSecurityGroups` | `terraform/lab_autostop.tf` (inline policy `skypilot-autostop`) | ✅ |
-| 3 ลบ | role มีแค่สิทธิ์ ECR | `terraform/lab_autostop.tf` | ✅ |
+| 2 อ่าน | ขาด `DescribeVpcs` / `DescribeSecurityGroups` | `terraform/lab_iam.tf` (inline policy `skypilot-autostop`) | ✅ |
+| 3 ลบ | role มีแค่สิทธิ์ ECR | `terraform/lab_iam.tf` | ✅ |
 
 เทสแล้ว (2026-10-11): lifespan 1 นาที ได้ 201 เวลา 21:20:39 → EC2 `shutting-down` เวลา 21:22:09
 skylet เช็กทุก 1 นาทีและต้องปิด Ray ก่อน เลยช้ากว่า lifespan ราว 1–1.5 นาที
