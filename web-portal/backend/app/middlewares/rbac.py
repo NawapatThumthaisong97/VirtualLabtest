@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import Depends, Request
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session

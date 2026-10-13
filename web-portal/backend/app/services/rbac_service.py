@@ -1,14 +1,11 @@
 from collections.abc import Callable
 from uuid import UUID
 
-from sqlalchemy.orm import Session as DbSession, aliased
+from sqlalchemy.orm import Session as DbSession
 
-from app.models.enrollment import Enrollment, RoleInCourse
-from app.models.courses import Course
-from app.models.lab import Lab
-from app.models.rbac import Permission, Role, RolePermission, UserRoleAssignment
-from app.models.session import Session as ComputeSession
+from app.models.enrollment import RoleInCourse
 from app.models.user import User
+from app.repositories.rbac_repository import RBACRepository
 
 
 GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION = {
@@ -31,28 +28,21 @@ GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION = {
 }
 
 
+def _parse_uuid(value: str | None) -> UUID | None:
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 class RBACService:
     def has_permission(self, db: DbSession, user_id: UUID, permission_code: str) -> bool:
+        if ":" not in permission_code:
+            return False
         resource_domain, permission_name = permission_code.split(":", maxsplit=1)
-        matching_role = (
-            db.query(Role.id)
-            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
-            .join(RolePermission, RolePermission.role_id == Role.id)
-            .join(Permission, Permission.id == RolePermission.permission_id)
-            .filter(
-                UserRoleAssignment.user_id == user_id,
-                UserRoleAssignment.deleted_at.is_(None),
-                Role.is_active.is_(True),
-                Role.deleted_at.is_(None),
-                Permission.resource_domain == resource_domain,
-                Permission.permission_name == permission_name,
-                Permission.is_active.is_(True),
-                Permission.deleted_at.is_(None),
-                RolePermission.deleted_at.is_(None),
-            )
-            .first()
+        return RBACRepository(db).user_has_permission(
+            user_id, resource_domain, permission_name
         )
-        return matching_role is not None
 
     def has_global_permission(
         self,
@@ -96,223 +86,99 @@ class ResourceContextPolicy:
         if checker is not None:
             return checker(db, user.id, resource_id, course_id)
 
+        repo = RBACRepository(db)
+
         if scope == "self" and resource_domain in {"clusters", "kubernetes", "network"}:
-            return self._owns_cluster_or_session(db, user.id, resource_id)
+            return self._owns_cluster_or_session(repo, user.id, resource_id)
 
         # Course self scope - student can read enrolled courses, instructor can read teaching courses
         if scope == "self" and resource_domain == "courses":
             if action == "create":
                 # Instructor can create courses - permission already checked in verify_permission
                 return True
-            # For read - check enrollment or teaching
-            try:
-                target_course_id = UUID(resource_id)
-            except (ValueError, AttributeError):
+            target_course_id = _parse_uuid(resource_id)
+            if target_course_id is None:
                 return False
-            return self._has_course_access(db, user.id, target_course_id)
+            return self._has_course_access(repo, user.id, target_course_id)
 
         # Course scope - instructor must be teaching this course
         if scope == "course" and resource_domain == "courses":
-            try:
-                target_course_id = UUID(resource_id)
-            except (ValueError, AttributeError):
+            target_course_id = _parse_uuid(resource_id)
+            if target_course_id is None:
                 return False
-            return self._is_course_instructor(db, user.id, target_course_id)
+            return self._is_course_instructor(repo, user.id, target_course_id)
 
         if scope == "assigned" and resource_domain in {"kubernetes", "network"}:
-            other_session = aliased(ComputeSession)
-            has_conflicting_owner = (
-                db.query(other_session.id)
-                .filter(
-                    other_session.sky_cluster_name == ComputeSession.sky_cluster_name,
-                    other_session.deleted_at.is_(None),
-                    other_session.user_id != ComputeSession.user_id,
-                )
-                .exists()
-            )
-            return (
-                db.query(ComputeSession.id)
-                .join(Lab, Lab.id == ComputeSession.lab_id)
-                .join(Enrollment, Enrollment.course_id == Lab.course_id)
-                .filter(
-                    ComputeSession.sky_cluster_name == resource_id,
-                    ComputeSession.deleted_at.is_(None),
-                    Lab.deleted_at.is_(None),
-                    Enrollment.user_id == user.id,
-                    Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
-                    ~has_conflicting_owner,
-                )
-                .first()
-                is not None
-            )
+            return repo.is_instructor_of_cluster(user.id, resource_id)
 
         if scope == "course" and resource_domain in {"clusters", "storage"}:
             if course_id is None:
                 return False
             if resource_domain == "storage":
-                try:
-                    resource_course_id = UUID(resource_id)
-                except ValueError:
+                if _parse_uuid(resource_id) != course_id:
                     return False
-                if resource_course_id != course_id:
-                    return False
-                return (
-                    db.query(Course.id)
-                    .join(Enrollment, Enrollment.course_id == Course.id)
-                    .filter(
-                        Course.id == course_id,
-                        Course.deleted_at.is_(None),
-                        Enrollment.user_id == user.id,
-                        Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
-                    )
-                    .first()
-                    is not None
-                )
+                return repo.is_enrolled_instructor_of_active_course(user.id, course_id)
             if action == "create":
-                return (
-                    db.query(Enrollment.user_id)
-                    .filter(
-                        Enrollment.course_id == course_id,
-                        Enrollment.user_id == user.id,
-                        Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
-                    )
-                    .first()
-                    is not None
-                )
-            if resource_domain == "clusters":
-                other_session = aliased(ComputeSession)
-                has_conflicting_owner = (
-                    db.query(other_session.id)
-                    .filter(
-                        other_session.sky_cluster_name
-                        == ComputeSession.sky_cluster_name,
-                        other_session.deleted_at.is_(None),
-                        other_session.user_id != ComputeSession.user_id,
-                    )
-                    .exists()
-                )
-                return (
-                    db.query(ComputeSession.id)
-                    .join(Lab, Lab.id == ComputeSession.lab_id)
-                    .join(Enrollment, Enrollment.course_id == Lab.course_id)
-                    .filter(
-                        ComputeSession.sky_cluster_name == resource_id,
-                        ComputeSession.deleted_at.is_(None),
-                        Lab.deleted_at.is_(None),
-                        Lab.course_id == course_id,
-                        Enrollment.user_id == user.id,
-                        Enrollment.role_in_course == RoleInCourse.INSTRUCTOR,
-                        ~has_conflicting_owner,
-                    )
-                    .first()
-                    is not None
-                )
-            return False
+                return repo.is_enrolled_instructor_of_active_course(user.id, course_id)
+            return repo.is_instructor_of_cluster(user.id, resource_id, course_id=course_id)
 
         return False
 
     def _owns_cluster_or_session(
         self,
-        db: DbSession,
+        repo: RBACRepository,
         user_id: UUID,
         resource_id: str,
     ) -> bool:
-        try:
-            session_id = UUID(resource_id)
-        except ValueError:
-            return self._has_exclusive_cluster_owner(db, user_id, resource_id)
-        return (
-            db.query(ComputeSession.id)
-            .filter(
-                ComputeSession.id == session_id,
-                ComputeSession.user_id == user_id,
-                ComputeSession.deleted_at.is_(None),
-            )
-            .first()
-            is not None
-        )
+        session_id = _parse_uuid(resource_id)
+        if session_id is None:
+            return self._has_exclusive_cluster_owner(repo, user_id, resource_id)
+        return repo.user_owns_session(user_id, session_id)
 
     @staticmethod
     def _has_exclusive_cluster_owner(
-        db: DbSession,
+        repo: RBACRepository,
         user_id: UUID | None,
         cluster_name: str,
     ) -> bool:
-        owners = (
-            db.query(ComputeSession.user_id)
-            .filter(
-                ComputeSession.sky_cluster_name == cluster_name,
-                ComputeSession.deleted_at.is_(None),
-            )
-            .distinct()
-            .all()
-        )
+        owners = repo.get_cluster_owner_ids(cluster_name)
         if len(owners) != 1:
             return False
-        return user_id is None or owners[0][0] == user_id
+        return user_id is None or owners[0] == user_id
 
     @staticmethod
-    def _has_course_access(db: DbSession, user_id: UUID, course_id: UUID) -> bool:
+    def _is_named_lecturer(repo: RBACRepository, user_id: UUID, lecturer_name: str) -> bool:
+        # NOTE: จับคู่ด้วยชื่อแสดงผล ไม่ใช่ id ผู้ใช้ที่ชื่อซ้ำกับ lecturer_name จะได้สิทธิ์ด้วย
+        user_name = repo.get_user_name(user_id)
+        return user_name is not None and user_name == lecturer_name
+
+    @classmethod
+    def _has_course_access(cls, repo: RBACRepository, user_id: UUID, course_id: UUID) -> bool:
         """
-        ตรวจสอบว่า user มีสิทธิ์เข้าถึง course นี้หรือไม่
+        ตรวจสอบว่า user มีสิทธิ์เข้าถึง course นี้หรือไม่ (course ต้องยังไม่ถูกลบ)
         - Student: ต้อง enroll
         - Instructor: ต้องเป็นผู้สร้าง, ผู้สอน, หรือ enroll เป็น instructor
         """
-        # เช็คว่าเป็นผู้สร้าง
-        course = db.query(Course).filter(Course.id == course_id, Course.deleted_at.is_(None)).first()
-        if course and course.created_by == user_id:
-            return True
-        
-        # เช็ค enrollment (student หรือ instructor)
-        enrollment = (
-            db.query(Enrollment)
-            .filter(
-                Enrollment.course_id == course_id,
-                Enrollment.user_id == user_id
-            )
-            .first()
-        )
-        if enrollment:
-            return True
-        
-        # เช็คว่าเป็นผู้สอน (lecturer_name)
-        if course:
-            user = db.query(User).filter(User.id == user_id).first()
-            if user and course.lecturer_name == user.name:
-                return True
-        
-        return False
-
-    @staticmethod
-    def _is_course_instructor(db: DbSession, user_id: UUID, course_id: UUID) -> bool:
-        """
-        ตรวจสอบว่า user เป็น instructor ของ course นี้หรือไม่
-        - ต้องเป็นผู้สร้าง, ผู้สอน, หรือ enroll เป็น instructor
-        """
-        # เช็คว่าเป็นผู้สร้าง
-        course = db.query(Course).filter(Course.id == course_id, Course.deleted_at.is_(None)).first()
-        if not course:
+        course = repo.find_active_course(course_id)
+        if course is None:
             return False
-        
         if course.created_by == user_id:
             return True
-        
-        # เช็ค enrollment เป็น instructor
-        enrollment = (
-            db.query(Enrollment)
-            .filter(
-                Enrollment.course_id == course_id,
-                Enrollment.user_id == user_id,
-                Enrollment.role_in_course == RoleInCourse.INSTRUCTOR
-            )
-            .first()
-        )
-        if enrollment:
+        if repo.is_enrolled(user_id, course_id):
             return True
-        
-        # เช็คว่าเป็นผู้สอน (lecturer_name)
-        user = db.query(User).filter(User.id == user_id).first()
-        if user and course.lecturer_name == user.name:
+        return cls._is_named_lecturer(repo, user_id, course.lecturer_name)
+
+    @classmethod
+    def _is_course_instructor(cls, repo: RBACRepository, user_id: UUID, course_id: UUID) -> bool:
+        """
+        ตรวจสอบว่า user เป็น instructor ของ course นี้หรือไม่ (course ต้องยังไม่ถูกลบ)
+        - ต้องเป็นผู้สร้าง, ผู้สอน, หรือ enroll เป็น instructor
+        """
+        course = repo.find_active_course(course_id)
+        if course is None:
+            return False
+        if course.created_by == user_id:
             return True
-        
-        return False
+        if repo.is_enrolled(user_id, course_id, RoleInCourse.INSTRUCTOR):
+            return True
+        return cls._is_named_lecturer(repo, user_id, course.lecturer_name)
