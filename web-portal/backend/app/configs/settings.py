@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "FastAPI Backend"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"  # "development" or "production"
     API_PREFIX: str = "/api"
     
     # Database
@@ -83,6 +84,16 @@ class Settings(BaseSettings):
             for cidr in self.TAILSCALE_TRUSTED_PROXY_CIDRS_STR.split(",")
             if cidr.strip()
         ]
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production environment"""
+        return self.ENVIRONMENT.lower() == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development environment"""
+        return self.ENVIRONMENT.lower() == "development"
 
 
 # Global settings instance

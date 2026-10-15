@@ -25,12 +25,17 @@ class AdminAuth(AuthenticationBackend):
         db = SessionLocal()
         try:
             user = AuthService(db, UserRepository(db)).authenticate(username, password)
-            if (
-                user.role != UserRole.ADMIN
-                or self._active_admin_email(db, user.id) is None
-                or not self._has_trusted_tailscale_identity(request, user.email)
-            ):
+            
+            # Check if user is admin with active RBAC role
+            if user.role != UserRole.ADMIN or self._active_admin_email(db, user.id) is None:
                 return False
+            
+            # Tailscale check based on environment:
+            # - Production: REQUIRED (must have valid Tailscale identity)
+            # - Development: OPTIONAL (skip if not configured)
+            if not self._check_tailscale_based_on_environment(request, user.email):
+                return False
+                
         except DomainError:
             return False
         except Exception:
@@ -59,7 +64,7 @@ class AdminAuth(AuthenticationBackend):
         db = SessionLocal()
         try:
             admin_email = self._active_admin_email(db, parsed_user_id)
-            is_admin = admin_email is not None and self._has_trusted_tailscale_identity(
+            is_admin = admin_email is not None and self._check_tailscale_based_on_environment(
                 request, admin_email
             )
         except Exception:
@@ -89,9 +94,33 @@ class AdminAuth(AuthenticationBackend):
         )
 
     @staticmethod
+    def _check_tailscale_based_on_environment(request: Request, expected_email: str) -> bool:
+        """
+        Check Tailscale identity based on environment mode:
+        - Production: Tailscale is REQUIRED (strict security)
+        - Development: Tailscale is OPTIONAL (only check if configured)
+        """
+        if settings.is_production:
+            # Production mode: Tailscale authentication is mandatory
+            # Even if CIDR is empty, we require it in production
+            if not settings.tailscale_trusted_proxy_cidrs:
+                # Production without Tailscale config is a security risk
+                return False
+            return AdminAuth._has_trusted_tailscale_identity(request, expected_email)
+        else:
+            # Development mode: Tailscale is optional
+            if not settings.tailscale_trusted_proxy_cidrs:
+                # No Tailscale configured in dev → allow access (skip check)
+                return True
+            # Tailscale configured in dev → verify it
+            return AdminAuth._has_trusted_tailscale_identity(request, expected_email)
+
+    @staticmethod
     def _has_trusted_tailscale_identity(request: Request, expected_email: str) -> bool:
-        if request.client is None or not settings.tailscale_trusted_proxy_cidrs:
+        """Verify that request comes from Tailscale network with correct identity"""
+        if request.client is None:
             return False
+        
         try:
             peer_ip = ipaddress.ip_address(request.client.host)
             trusted_proxy_cidrs = [

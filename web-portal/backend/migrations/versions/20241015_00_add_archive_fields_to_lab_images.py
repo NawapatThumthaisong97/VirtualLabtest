@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '20241015_00_add_archive_fields_to_lab_images'
-down_revision = '20261013_06_add_end_reason_to_sessions'
+revision = '20241015_00'
+down_revision = '20261013_06'
 branch_labels = None
 depends_on = None
 
