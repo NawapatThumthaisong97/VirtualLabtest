@@ -251,9 +251,6 @@ export default function AnnouncementTab({ announcements, courseId, onUpdate }: A
             </div>
             
             <p className="mt-4 text-sm leading-6 text-slate-600">{item.message}</p>
-            <p className="mt-4 flex items-center gap-2 text-xs font-semibold text-emerald-600">
-              <Eye size={14} /> Visible to 48 enrolled students
-            </p>
           </article>
         ))}
       </div>
