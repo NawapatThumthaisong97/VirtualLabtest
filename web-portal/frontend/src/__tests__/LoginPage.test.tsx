@@ -57,3 +57,4 @@ describe('LoginPage & University SSO (Issue #80 Acceptance Criteria 1)', () => {
     expect(screen.getByRole('button', { name: /^Sign in$/i })).toBeDefined();
   });
 });
+

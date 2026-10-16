@@ -96,3 +96,4 @@ describe('ProtectedRoute & Route Protection (Issue #80 Acceptance Criteria 2)', 
     expect(screen.queryByText('Protected Courses Content')).toBeNull();
   });
 });
+

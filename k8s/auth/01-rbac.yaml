@@ -1,0 +1,82 @@
+# Kubernetes-native RBAC for Authentication & Secret Access
+# Enforces Least Privilege: pods can only read explicitly designated auth secrets.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: auth-service-account
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/name: virtual-lab-backend
+    app.kubernetes.io/component: authentication
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oauth2-proxy-sa
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/component: reverse-proxy-auth
+---
+# Role restricting Secret access exclusively to authentication and database secrets
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: auth-secrets-reader
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/component: rbac-policy
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - jwt-secret
+      - google-oauth-secret
+      - oauth2-proxy-secret
+      - database-secret
+    verbs: ["get", "watch", "list"]
+---
+# Bind auth-service-account to auth-secrets-reader
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: auth-secrets-reader-binding
+  namespace: virtual-lab
+subjects:
+  - kind: ServiceAccount
+    name: auth-service-account
+    namespace: virtual-lab
+roleRef:
+  kind: Role
+  name: auth-secrets-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role specifically for oauth2-proxy (OAuth & Cookie secrets only)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oauth2-proxy-secret-reader
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/component: rbac-policy
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - google-oauth-secret
+      - oauth2-proxy-secret
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oauth2-proxy-secret-binding
+  namespace: virtual-lab
+subjects:
+  - kind: ServiceAccount
+    name: oauth2-proxy-sa
+    namespace: virtual-lab
+roleRef:
+  kind: Role
+  name: oauth2-proxy-secret-reader
+  apiGroup: rbac.authorization.k8s.io

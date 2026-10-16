@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: virtual-lab
+  labels:
+    app.kubernetes.io/name: virtual-lab
+    app.kubernetes.io/part-of: virtual-lab-platform

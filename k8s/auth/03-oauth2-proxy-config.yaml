@@ -1,0 +1,54 @@
+# oauth2-proxy configuration working with Google SSO & University Email Domains
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth2-proxy-config
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/component: reverse-proxy-auth
+data:
+  oauth2-proxy.cfg: |
+    # Provider configuration
+    provider = "google"
+    oidc_issuer_url = "https://accounts.google.com"
+    scope = "openid email profile"
+
+    # University allowed email domains (TU dome and tu domains)
+    email_domains = [
+      "dome.tu.ac.th",
+      "tu.ac.th"
+    ]
+
+    # HTTP & Proxy Bind Settings
+    http_address = "0.0.0.0:4180"
+    reverse_proxy = true
+
+    # Upstream application service (Virtual Lab Frontend / Ingress)
+    upstreams = [
+      "http://virtual-lab-frontend:80"
+    ]
+
+    # Cookie Security Settings (HTTP-Only, SameSite, Secure)
+    cookie_name = "_vlab_oauth2"
+    cookie_secure = true
+    cookie_httponly = true
+    cookie_samesite = "lax"
+    cookie_expire = "168h"
+    cookie_refresh = "15m"
+
+    # Header Propagation for Virtual Lab Backend
+    # Propagates verified identity headers: X-Forwarded-Email, X-Forwarded-User, X-Auth-Request-Email
+    pass_user_headers = true
+    pass_authorization_header = true
+    pass_access_token = true
+    set_xauthrequest = true
+    set_authorization_header = true
+
+    # Skip auth for public static assets and healthcheck
+    skip_auth_routes = [
+      "^/health$",
+      "^/api/auth/login$",
+      "^/api/auth/refresh$",
+      "^/api/auth/sso/.*"
+    ]
