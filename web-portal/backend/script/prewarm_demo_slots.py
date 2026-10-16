@@ -18,6 +18,9 @@
     PREWARM_ENABLED=true
     PREWARM_INTERVAL_SECONDS=20
     PREWARM_LEAD_MINUTES=1
+    WARM_POD_ENABLED=true          # ถ้าจะทดลอง warm pod ด้วย (Exp3)
+
+แต่ละคาบมี lab ของตัวเอง (พิมพ์ lab_id ออกมา) image เป็น busybox httpd เปิด v1 พอร์ต 8080 / v2 พอร์ต 8081
 """
 import argparse
 import sys
@@ -28,21 +31,46 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.configs.db import SessionLocal
 from app.models.class_slot import ClassSlot
+from sqlalchemy import func
+
 from app.models.courses import Course
+from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
 
 DEMO_NOTE = "prewarm demo (script/prewarm_demo_slots.py)"
 
 
+# hello เป็น busybox มี httpd ในตัว ใช้เป็น "lab" ทดลอง warm pod ได้ (เปิด http://<IP เครื่อง>:<port> เห็น hello vN)
+# คนละพอร์ต เพราะ warm pod ใช้ hostPort ถ้า 2 lab ใช้พอร์ตเดียวกันบนเครื่องเดียว ตัวที่ 2 จะ Pending
+DEMO_PORTS = {"v1": 8080, "v2": 8081}
+
+
 def demo_image(db, course: Course, tag: str) -> LabImage:
+    port = DEMO_PORTS[tag]
     img = db.query(LabImage).filter_by(repository="vlab/hello", tag=tag).first()
     if img is None:
         img = LabImage(uploaded_by=course.created_by, course_id=course.id, repository="vlab/hello",
                        tag=tag, image_digest=f"demo-vlab-hello-{tag}", size_mb=55,
-                       status=ImageStatus.APPROVED, description="Exp2 demo image (experiments/prewarm/hello)")
+                       status=ImageStatus.APPROVED, description="Exp2/3 demo image (experiments/prewarm/hello)")
         db.add(img)
-        db.flush()
+    img.cpu_requirement, img.memory_requirement = "0.1", "0.05"  # เล็กพอลงทุกเครื่อง
+    img.exposed_ports = [port]
+    img.entrypoint_script = f"mkdir -p /www && cat /hello.txt > /www/index.html && exec httpd -f -p {port} -h /www"
+    img.lifespan_minutes = 10
+    db.flush()
     return img
+
+
+def demo_lab(db, course: Course, img: LabImage) -> Lab:
+    """lab ที่ชี้ image ทดลอง ไว้ใช้ POST /api/sessions"""
+    lab = db.query(Lab).filter_by(course_id=course.id, image_id=img.id, deleted_at=None).first()
+    if lab is None:
+        last = db.query(func.max(Lab.order_no)).filter(Lab.course_id == course.id).scalar() or 0
+        lab = Lab(course_id=course.id, title=f"Demo warm pod ({img.full_image_name})", order_no=last + 1,
+                  image_id=img.id, status=LabStatus.PUBLISHED, run_target=RunTarget.KUBERNETES)
+        db.add(lab)
+        db.flush()
+    return lab
 
 
 def main():
@@ -67,13 +95,16 @@ def main():
         devops = db.query(Course).filter_by(code="DEVOPS201").one()
         starts_at = now + timedelta(minutes=args.start)
         for course, tag, minutes in ((se, "v1", args.first), (devops, "v2", args.second)):
-            slot = ClassSlot(course_id=course.id, lab_image_id=demo_image(db, course, tag).id,
+            img = demo_image(db, course, tag)
+            lab = demo_lab(db, course, img)
+            slot = ClassSlot(course_id=course.id, lab_id=lab.id, lab_image_id=img.id,
                              starts_at=starts_at, ends_at=starts_at + timedelta(minutes=minutes),
                              expected_seats=5, note=DEMO_NOTE, created_by=course.created_by)
             db.add(slot)
             db.flush()
             local = lambda t: t.astimezone().strftime("%H:%M:%S")
-            print(f"{course.code:10} hello:{tag}  {local(slot.starts_at)} - {local(slot.ends_at)}  slot {slot.id}")
+            print(f"{course.code:10} hello:{tag} port {DEMO_PORTS[tag]}  {local(slot.starts_at)} - "
+                  f"{local(slot.ends_at)}  lab_id {lab.id}")
         db.commit()
     finally:
         db.close()
