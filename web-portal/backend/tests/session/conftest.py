@@ -1,28 +1,13 @@
 """
-Fixture ฝั่ง DB + sky ปลอม สำหรับเทส create / delete / reconcile
-
-DB: Postgres ชื่อ virtual_lab_test (model ใช้ UUID / JSONB / enum ของ Postgres ใช้ SQLite ไม่ได้)
-- สร้าง schema ใหม่จาก model ทุกครั้งที่เริ่มรัน
-- แต่ละเทสอยู่ใน transaction ที่ rollback ทิ้งตอนจบ ข้อมูลไม่ค้าง
-  (join_transaction_mode="create_savepoint" ทำให้ db.commit() ในโค้ดจริงกลายเป็น savepoint)
-- ต่อ DB ไม่ได้ → เทสที่ใช้ db ถูก skip ส่วนเทส builder ยังรันได้
-
-เปลี่ยน DB ได้ด้วย env TEST_DATABASE_URL (ชื่อ DB ต้องลงท้ายด้วย _test กันลบข้อมูลจริง)
+Fixture sky ปลอม + ข้อมูลตั้งต้น สำหรับเทส create / delete / reconcile
+(fixture db / db_engine อยู่ใน tests/conftest.py ใช้ร่วมกับเทส prewarm)
 """
-import os
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import make_url
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
 
-import app.models  # noqa: F401  ให้ทุก table อยู่ใน Base.metadata
-from app.configs.db import Base
-from app.configs.settings import settings
 from app.models.courses import Course
 from app.models.lab import Lab, RunTarget
 from app.models.lab_image import LabImage
@@ -34,40 +19,6 @@ from app.repositories.session_repository import SessionRepository
 from app.services import session_service
 from app.services.session_service import SessionService
 from tests.fakes import FakeSky
-
-
-def _test_db_url() -> str:
-    url = os.getenv("TEST_DATABASE_URL") or make_url(settings.DATABASE_URL).set(
-        database="virtual_lab_test"
-    ).render_as_string(hide_password=False)
-    if not make_url(url).database.endswith("_test"):
-        raise RuntimeError(f"test DB name must end with _test: {make_url(url).database}")
-    return url
-
-
-@pytest.fixture(scope="session")
-def db_engine():
-    engine = create_engine(_test_db_url())
-    try:
-        with engine.connect():
-            pass
-    except OperationalError as e:
-        pytest.skip(f"test database not available: {e.orig}")
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def db(db_engine):
-    connection = db_engine.connect()
-    transaction = connection.begin()
-    session = Session(bind=connection, join_transaction_mode="create_savepoint")
-    yield session
-    session.close()
-    transaction.rollback()
-    connection.close()
 
 
 @pytest.fixture

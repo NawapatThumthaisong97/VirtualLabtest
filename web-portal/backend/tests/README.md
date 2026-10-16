@@ -42,5 +42,6 @@ docker exec virtual_lab_db psql -U postgres -c "CREATE DATABASE virtual_lab_test
 | check ใน PR | รัน |
 |---|---|
 | Sky launch & session tests | `pytest tests/session` |
+| Prewarm & class schedule tests | `pytest tests/prewarm` |
 
 เพิ่มโฟลเดอร์เทสใหม่ → เพิ่ม job ใหม่ใน workflow ด้วย

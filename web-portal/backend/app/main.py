@@ -17,6 +17,7 @@ from sqladmin import Admin, ModelView
 from app.configs import settings, check_db_connection
 from app.configs.db import engine
 from app.services.session_reconciler import run_reconciler
+from app.services.prewarm_scheduler import run_prewarm_scheduler
 from app.models import (
     User,
     Course,
@@ -155,6 +156,14 @@ async def lifespan(app: FastAPI):
         reconciler_task = asyncio.create_task(
             run_reconciler(settings.SESSION_RECONCILE_INTERVAL_SECONDS, reconciler_stop)
         )
+    prewarm_task = None
+    if settings.PREWARM_ENABLED and settings.PREWARM_INTERVAL_SECONDS > 0:
+        prewarm_task = asyncio.create_task(
+            run_prewarm_scheduler(settings.PREWARM_INTERVAL_SECONDS, reconciler_stop)
+        )
+    else:
+        # บอกไว้ใน log จะได้ไม่งงว่าทำไมไม่มี DaemonSet ขึ้น
+        logger.info("Prewarm scheduler disabled (set PREWARM_ENABLED=true to enable)")
 
     logger.info("Application started successfully!")
 
@@ -162,13 +171,15 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down application...")
-    if reconciler_task:
-        reconciler_stop.set()
-        # รอบที่กำลังเรียก SkyPilot อยู่หยุดกลางทางไม่ได้ (อยู่ใน thread) รอสั้น ๆ แล้วปล่อย
+    reconciler_stop.set()
+    # รอบที่กำลังเรียก SkyPilot / K3s อยู่หยุดกลางทางไม่ได้ (อยู่ใน thread) รอสั้น ๆ แล้วปล่อย
+    for name, task in (("Session reconciler", reconciler_task), ("Prewarm scheduler", prewarm_task)):
+        if task is None:
+            continue
         try:
-            await asyncio.wait_for(reconciler_task, timeout=10)
+            await asyncio.wait_for(task, timeout=10)
         except asyncio.TimeoutError:
-            logger.warning("Session reconciler did not stop within 10s")
+            logger.warning(f"{name} did not stop within 10s")
 
 
 # สร้าง FastAPI app

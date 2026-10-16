@@ -2,8 +2,25 @@
 Application Settings
 Load environment variables and configuration
 """
+from datetime import datetime
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+
+
+class PrewarmTarget(BaseModel):
+    """image ที่ต้องมีอยู่บนทุก worker ในช่วง start_at ถึง end_at"""
+    image: str
+    start_at: datetime
+    end_at: datetime
+
+    @field_validator("start_at", "end_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        # ไม่มี timezone จะไม่รู้ว่าเป็นเวลาไทยหรือ UTC ห่างกัน 7 ชม.
+        if value.tzinfo is None:
+            raise ValueError("ต้องใส่ timezone เช่น 2026-10-17T14:00:00+07:00")
+        return value
 
 
 class Settings(BaseSettings):
@@ -61,6 +78,21 @@ class Settings(BaseSettings):
 
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
+
+    # Pre-pull image ลงทุก worker ก่อนคาบ (DaemonSet) ปิดไว้เป็นค่าเริ่มต้น ต้องสั่งเปิดเองเท่านั้น
+    # เพราะเครื่องในห้องแลปจริงยังไม่รู้ว่าจะเปิดเครื่องตอนไหน (boot อัตโนมัติ / Deep Freeze ล้างดิสก์)
+    # ถ้า scheduler รันเองตลอดจะ pull ใส่เครื่องที่ไม่พร้อม หรือ pull ทิ้งเปล่า ๆ
+    PREWARM_ENABLED: bool = False
+    # ทุกกี่วินาทีให้ scheduler เทียบ (มีผลเมื่อ PREWARM_ENABLED=true)
+    PREWARM_INTERVAL_SECONDS: int = 60
+    # เริ่ม pull ก่อน class_slots.starts_at กี่นาที (ลบ DaemonSet ตอน ends_at)
+    PREWARM_LEAD_MINUTES: int = 30
+    # worker ที่หลุด (NotReady) ไม่เกินกี่นาทียังนับว่าต้องมี image (slot จะยังไม่ READY จนกว่าจะกลับมา)
+    # หลุดนานกว่านี้ถือว่าปิดเครื่องไปแล้ว ไม่นับ (เช่น workerfilm ที่ NotReady มาหลายสัปดาห์)
+    PREWARM_NODE_GRACE_MINUTES: int = 5
+    # กำหนดเวลาเองเพิ่มจาก class_slots เป็น JSON ใน .env (ไว้ทดลอง) เวลาต้องมี timezone เช่น
+    # PREWARM_TARGETS=[{"image":"100.127.74.48:5001/vlab/hello:v1","start_at":"2026-10-17T14:00:00+07:00","end_at":"2026-10-17T15:00:00+07:00"}]
+    PREWARM_TARGETS: list[PrewarmTarget] = []
 
     model_config = SettingsConfigDict(
         env_file=".env",
