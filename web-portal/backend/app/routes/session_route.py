@@ -1,7 +1,7 @@
 from uuid import UUID
 from typing import Optional, Any
 
-from fastapi import APIRouter, Depends, Query, Body, status as http_status
+from fastapi import APIRouter, Depends, Query, Body, Request, status as http_status
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
@@ -69,20 +69,24 @@ def get_session(
 )
 def create_session(
     request: CreateSessionRequest,
+    http_request: Request,
     controller: SessionController = Depends(get_controller),
 ):
     """
     สร้าง session ใหม่
     - Body: { "lab_id": "UUID", "user_id": "UUID (optional)" }
     - Return: session information with endpoints
+    - กดจากเครื่องแลปที่มี warm pod ว่าง (WARM_POD_ENABLED) ได้ pod นั้นทันที (launch_mode = warm_pod)
     """
     # ถ้าไม่มี userId ใช้ default UUID
     user_id = request.user_id or UUID("00000000-0000-0000-0000-000000000000")
-    
+    # IP ของ connection จริง ไม่อ่าน X-Forwarded-For เพราะ client ใส่เองได้ (ปลอมเป็นเครื่องอื่นได้)
+    client_ip = http_request.client.host if http_request.client else None
+
     return {
         "success": True,
         "message": "Session created successfully",
-        "data": controller.create_session(user_id, request.lab_id),
+        "data": controller.create_session(user_id, request.lab_id, client_ip=client_ip),
     }
 
 

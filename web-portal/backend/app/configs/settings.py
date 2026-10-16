@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # worker ที่หลุด (NotReady) ไม่เกินกี่นาทียังนับว่าต้องมี image (slot จะยังไม่ READY จนกว่าจะกลับมา)
     # หลุดนานกว่านี้ถือว่าปิดเครื่องไปแล้ว ไม่นับ (เช่น workerfilm ที่ NotReady มาหลายสัปดาห์)
     PREWARM_NODE_GRACE_MINUTES: int = 5
+
+    # Warm pod: รัน lab จริงรอไว้บนเครื่องแลปช่วงคาบ (1 เครื่อง = 1 pod) กด Start จากเครื่องนั้นได้ pod ทันที
+    # ปิดไว้เป็นค่าเริ่มต้นแยกจาก PREWARM_ENABLED เพราะกิน CPU / RAM จริงทุกเครื่องตลอดคาบ
+    # scheduler สร้าง / ลบ DaemonSet ให้เมื่อเปิดทั้ง PREWARM_ENABLED และตัวนี้ ส่วน launch ใช้ตัวนี้ตัวเดียว
+    WARM_POD_ENABLED: bool = False
     # กำหนดเวลาเองเพิ่มจาก class_slots เป็น JSON ใน .env (ไว้ทดลอง) เวลาต้องมี timezone เช่น
     # PREWARM_TARGETS=[{"image":"100.127.74.48:5001/vlab/hello:v1","start_at":"2026-10-17T14:00:00+07:00","end_at":"2026-10-17T15:00:00+07:00"}]
     PREWARM_TARGETS: list[PrewarmTarget] = []

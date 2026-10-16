@@ -97,34 +97,51 @@ class FakeSky:
 
 # ---------------------------------------------------------------- Kubernetes
 
-class FakeK8s:
-    """ตัวแทน KubernetesService (.v1 / .apps_v1) ตอนเทส prewarm ไม่ต่อ cluster จริง
+def _match(labels: dict, selector: str | None) -> bool:
+    """label selector แบบ k=v,k=v (เท่าที่โค้ดเราใช้)"""
+    if not selector:
+        return True
+    return all((labels or {}).get(k) == v for k, v in (part.split("=", 1) for part in selector.split(",")))
 
-    เก็บ DaemonSet ที่สร้างไว้ใน dict ส่วน pod / node ให้เทสใส่เองผ่าน add_pod / add_node
+
+class FakeK8s:
+    """ตัวแทน KubernetesService (.v1 / .apps_v1) ตอนเทส prewarm / warm pod ไม่ต่อ cluster จริง
+
+    เก็บ DaemonSet ที่สร้างไว้ใน dict ส่วน pod / node ให้เทสใส่เองผ่าน add_pod / add_warm_pod / add_node
     object ที่คืนเป็น SimpleNamespace ที่มี attribute ชื่อเดียวกับของ kubernetes client
     """
 
     def __init__(self):
         self.daemonsets: dict[str, dict] = {}   # ชื่อ -> manifest
         self.ds_status: dict[str, tuple[int, int]] = {}  # ชื่อ -> (desired, ready)
+        self.ds_delete_policy: dict[str, str] = {}  # ชื่อ -> propagation_policy ตอนลบ
         self.pods: list = []
         self.nodes: list = []
         self.created: list[str] = []
         self.deleted: list[str] = []
+        self.deleted_pods: list[str] = []
+        self.error: Exception | None = None  # ตั้งไว้ = ทุกคำสั่ง raise (จำลอง K3s ล่ม)
+        self.patch_conflict = False          # ตั้งไว้ = patch pod ได้ 409 (มีคนแย่งไปก่อน)
+        self._rv = 0
         self.v1 = self
         self.apps_v1 = self
 
+    def _check(self):
+        if self.error is not None:
+            raise self.error
+
     # ---- ตั้งโลก
-    def add_node(self, name, control_plane=False, ready=True, not_ready_for=timedelta(days=1)):
+    def add_node(self, name, control_plane=False, ready=True, not_ready_for=timedelta(days=1), ip=None):
         """not_ready_for = หลุดมานานแค่ไหน (ใช้เมื่อ ready=False) ค่าเริ่มต้น 1 วัน = ปิดเครื่องไปแล้ว"""
         labels = {"node-role.kubernetes.io/control-plane": "true"} if control_plane else {}
         since = datetime.now(timezone.utc) - (not_ready_for if not ready else timedelta(days=30))
         condition = _ns(type="Ready", status="True" if ready else "Unknown", last_transition_time=since)
+        addresses = [_ns(type="InternalIP", address=ip), _ns(type="Hostname", address=name)] if ip else []
         self.nodes.append(_ns(metadata=_ns(name=name, labels=labels),
-                              status=_ns(conditions=[condition])))
+                              status=_ns(conditions=[condition], addresses=addresses)))
 
     def add_pod(self, ds_name, node, running_after=None, waiting=None, terminated=None):
-        """running_after = วินาทีจากสร้าง pod ถึง container ขึ้น / waiting = reason"""
+        """pod ของ DaemonSet pre-pull: running_after = วินาทีจากสร้าง pod ถึง container ขึ้น / waiting = reason"""
         created = datetime(2026, 10, 17, 7, 0, tzinfo=timezone.utc)
         state = _ns(running=None, waiting=None, terminated=None)
         if running_after is not None:
@@ -135,14 +152,38 @@ class FakeK8s:
             state.terminated = _ns(reason=terminated)
         has_status = running_after is not None or waiting or terminated
         self.pods.append(_ns(
-            metadata=_ns(labels={"vlab/prewarm": "true", "vlab/prewarm-ds": ds_name},
-                         creation_timestamp=created),
+            metadata=_ns(name=f"{ds_name}-{len(self.pods)}", labels={"vlab/prewarm": "true", "vlab/prewarm-ds": ds_name},
+                         annotations={}, creation_timestamp=created, deletion_timestamp=None,
+                         resource_version="1"),
             spec=_ns(node_name=node),
-            status=_ns(container_statuses=[_ns(state=state)] if has_status else None),
+            status=_ns(phase="Running", conditions=[], container_statuses=[_ns(state=state)] if has_status else None),
         ))
+
+    def add_warm_pod(self, ds_name, node, lab_image_id, state="free", ready=True, phase="Running",
+                     session_id=None):
+        """pod ของ DaemonSet warm pod คืน pod ที่สร้าง (ชื่อ <ds>-<node>)"""
+        self._rv += 1
+        annotations = {"vlab/lab-image-id": str(lab_image_id)}
+        if session_id:
+            annotations["vlab/session-id"] = str(session_id)
+        pod = _ns(
+            metadata=_ns(name=f"{ds_name}-{node}", labels={"vlab/warm": "true", "vlab/warm-ds": ds_name,
+                                                          "vlab/warm-state": state},
+                         annotations=annotations, creation_timestamp=None, deletion_timestamp=None,
+                         resource_version=str(self._rv)),
+            spec=_ns(node_name=node),
+            status=_ns(phase=phase, conditions=[_ns(type="Ready", status="True" if ready else "False")],
+                       container_statuses=None),
+        )
+        self.pods.append(pod)
+        return pod
+
+    def pod(self, name):
+        return next((p for p in self.pods if p.metadata.name == name), None)
 
     # ---- AppsV1Api
     def create_namespaced_daemon_set(self, namespace, body):
+        self._check()
         name = body["metadata"]["name"]
         if name in self.daemonsets:
             raise ApiException(status=409, reason="AlreadyExists")
@@ -150,13 +191,18 @@ class FakeK8s:
         self.created.append(name)
 
     def delete_namespaced_daemon_set(self, name, namespace, propagation_policy=None):
+        self._check()
         self.deleted.append(name)
+        self.ds_delete_policy[name] = propagation_policy
         if self.daemonsets.pop(name, None) is None:
             raise ApiException(status=404, reason="NotFound")
 
     def list_namespaced_daemon_set(self, namespace, label_selector=None):
+        self._check()
         items = []
         for name, body in self.daemonsets.items():
+            if not _match(body["metadata"].get("labels"), label_selector):
+                continue
             desired, ready = self.ds_status.get(name, (0, 0))
             items.append(_ns(
                 metadata=_ns(name=name, annotations=body["metadata"].get("annotations"),
@@ -166,8 +212,41 @@ class FakeK8s:
         return _ns(items=items)
 
     # ---- CoreV1Api
-    def list_namespaced_pod(self, namespace, label_selector=None):
-        return _ns(items=list(self.pods))
+    def list_namespaced_pod(self, namespace, label_selector=None, field_selector=None):
+        self._check()
+        node = field_selector.split("=", 1)[1] if field_selector else None
+        return _ns(items=[p for p in self.pods if _match(p.metadata.labels, label_selector)
+                          and (node is None or p.spec.node_name == node)])
+
+    def read_namespaced_pod(self, name, namespace):
+        self._check()
+        pod = self.pod(name)
+        if pod is None:
+            raise ApiException(status=404, reason="NotFound")
+        return pod
+
+    def patch_namespaced_pod(self, name, namespace, body):
+        self._check()
+        pod = self.pod(name)
+        if pod is None:
+            raise ApiException(status=404, reason="NotFound")
+        rv = body["metadata"].get("resourceVersion")
+        if self.patch_conflict or (rv is not None and rv != pod.metadata.resource_version):
+            raise ApiException(status=409, reason="Conflict")
+        pod.metadata.labels.update(body["metadata"].get("labels", {}))
+        pod.metadata.annotations.update(body["metadata"].get("annotations", {}))
+        self._rv += 1
+        pod.metadata.resource_version = str(self._rv)
+        return pod
+
+    def delete_namespaced_pod(self, name, namespace):
+        self._check()
+        self.deleted_pods.append(name)
+        pod = self.pod(name)
+        if pod is None:
+            raise ApiException(status=404, reason="NotFound")
+        self.pods.remove(pod)
 
     def list_node(self):
+        self._check()
         return _ns(items=list(self.nodes))
