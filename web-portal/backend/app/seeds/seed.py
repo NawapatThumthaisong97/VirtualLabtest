@@ -22,11 +22,13 @@ Seed ข้อมูลตั้งต้นให้ตรง persona "Sophia D
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.models.announcement import Announcement
+from app.models.class_schedule import ClassSchedule
+from app.models.class_slot import ClassSlot
 from app.models.courses import Course
 from app.models.enrollment import Enrollment, RoleInCourse
 from app.models.lab import Lab, LabStatus
@@ -36,6 +38,7 @@ from app.models.quota import Quota, QuotaPeriod
 from app.models.session import ServiceType, Session as ComputeSession, SessionStatus
 from app.models.usage_record import UsageRecord
 from app.models.user import User, UserRole
+from app.services.schedule_service import SCHEDULE_TZ, generate_slots
 from app.utils.security import hash_password
 
 # รหัสผ่านของ staff กับนักศึกษาคนอื่น — ของ Sophia แยกต่างหากข้างล่าง
@@ -424,6 +427,45 @@ def seed_database(db: Session):
     db.commit()
     print("[ok] Created 3 announcements")
 
+    # 12. ตารางเรียน + รอบเรียน (ใช้ pre-warm image ก่อนคาบ ยังไม่บังคับจอง)
+    # วันที่อิงกับวันที่รัน seed: เทอม 8 สัปดาห์ เริ่ม 4 สัปดาห์ก่อน จะมีทั้งคาบที่ผ่านไปแล้วและที่ยังไม่ถึง
+    # (คาบที่ผ่านไปแล้วยังเป็น SCHEDULED prewarm scheduler รอบแรกจะเลื่อนเป็น DONE เอง)
+    today = datetime.now(SCHEDULE_TZ).date()
+    term_start = today - timedelta(weeks=4)
+    se_schedule = ClassSchedule(
+        id=uuid.uuid4(),
+        course_id=se_course.id,
+        weekday=0,  # จันทร์
+        start_time=time(9, 0),
+        end_time=time(12, 0),
+        valid_from=term_start,
+        valid_until=term_start + timedelta(weeks=8, days=-1),
+        default_lab_image_id=se_image.id,
+        expected_seats=40,
+        created_by=se_instructor.id,
+    )
+    db.add(se_schedule)
+    db.commit()
+    se_slots = generate_slots(db, se_schedule)
+
+    # จองครั้งเดียว (ไม่มี schedule) ศุกร์ที่จะถึง (ถ้าวันนี้ศุกร์ = ศุกร์หน้า)
+    next_friday = today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+    devops_slot = ClassSlot(
+        id=uuid.uuid4(),
+        schedule_id=None,
+        course_id=devops_course.id,
+        lab_id=devops_labs[0].id,
+        lab_image_id=devops_image.id,
+        starts_at=datetime.combine(next_friday, time(13, 0), tzinfo=SCHEDULE_TZ),
+        ends_at=datetime.combine(next_friday, time(16, 0), tzinfo=SCHEDULE_TZ),
+        expected_seats=25,
+        note="จองครั้งเดียว: workshop CI/CD",
+        created_by=devops_instructor.id,
+    )
+    db.add(devops_slot)
+    db.commit()
+    print(f"[ok] Created 1 class schedule ({len(se_slots)} slots) + 1 one-off slot")
+
     print("\n[done] Database seeding completed successfully!")
     print("\nSummary:")
     print(f"  - Users: {db.query(User).count()}")
@@ -436,6 +478,8 @@ def seed_database(db: Session):
     print(f"  - Usage Records: {db.query(UsageRecord).count()}")
     print(f"  - Quotas: {db.query(Quota).count()}")
     print(f"  - Announcements: {db.query(Announcement).count()}")
+    print(f"  - Class Schedules: {db.query(ClassSchedule).count()}")
+    print(f"  - Class Slots: {db.query(ClassSlot).count()}")
     print("\nLogin ด้วย persona:")
     print(f"  student_id : {sophia.student_id}")
     print(f"  email      : {sophia.email}")

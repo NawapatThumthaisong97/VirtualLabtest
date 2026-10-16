@@ -12,6 +12,8 @@ from .session import Session, ServiceType, SessionStatus, SessionEndReason
 from .usage_record import UsageRecord
 from .quota import Quota, QuotaPeriod
 from .announcement import Announcement
+from .class_schedule import ClassSchedule
+from .class_slot import ClassSlot, ClassSlotStatus
 
 __all__ = [
     "User",
@@ -34,4 +36,7 @@ __all__ = [
     "Quota",
     "QuotaPeriod",
     "Announcement",
+    "ClassSchedule",
+    "ClassSlot",
+    "ClassSlotStatus",
 ]

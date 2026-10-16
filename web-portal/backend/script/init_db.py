@@ -30,6 +30,8 @@ def init_database():
     print("  - usage_records")
     print("  - quotas")
     print("  - announcements")
+    print("  - class_schedules")
+    print("  - class_slots (+ extension btree_gist)")
 
 
 if __name__ == "__main__":
