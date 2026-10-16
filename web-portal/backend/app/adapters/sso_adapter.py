@@ -151,3 +151,4 @@ class GoogleSSOAdapter:
 
 
 sso_adapter = GoogleSSOAdapter()
+

@@ -38,7 +38,15 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Cookie Security Settings
+    AUTH_COOKIE_SECURE: bool = False  # True ใน Production (HTTPS) / False ใน Dev (HTTP/Tailscale)
+    AUTH_COOKIE_SAMESITE: str = "lax"  # "lax", "strict", "none"
+    AUTH_COOKIE_DOMAIN: Optional[str] = None
+    ACCESS_TOKEN_COOKIE_NAME: str = "access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "refresh_token"
 
     # University SSO (Google OAuth2 / OIDC) & Allowed Email Domains
     ALLOWED_EMAIL_DOMAINS_STR: str = "dome.tu.ac.th,tu.ac.th"

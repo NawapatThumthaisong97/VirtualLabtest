@@ -143,20 +143,65 @@ class AuthService:
             "name": user.name,
             "student_id": user.student_id,
             "role": role_value,
+            "type": "access",
             "iat": int(now.timestamp()),
             "exp": int(expire.timestamp()),
         }
         return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    def create_refresh_token(self, user: User) -> str:
+        """
+        สร้าง JWT Refresh Token ที่มีอายุยาวกว่า สำหรับใช้ต่ออายุ access token
+        """
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        payload = {
+            "sub": str(user.id),
+            "type": "refresh",
+            "iat": int(now.timestamp()),
+            "exp": int(expire.timestamp()),
+        }
+        return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    def create_token_pair(self, user: User) -> tuple[str, str]:
+        """สร้างคู่ (access_token, refresh_token)"""
+        return self.create_access_token(user), self.create_refresh_token(user)
+
+    def refresh_tokens(self, refresh_token: str) -> tuple[User, str, str]:
+        """ตรวจสอบ refresh_token และออก token คู่ใหม่"""
+        payload = self.decode_refresh_token(refresh_token)
+        user_id = UUID(payload["sub"])
+        user = self.user_repo.find_by_id(user_id)
+        if user is None:
+            raise InvalidTokenError("ไม่พบผู้ใช้ของ refresh token นี้")
+        new_access_token, new_refresh_token = self.create_token_pair(user)
+        return user, new_access_token, new_refresh_token
 
     def decode_access_token(self, token: str) -> dict:
         try:
             payload = jwt.decode(
                 token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
             )
+            token_type = payload.get("type", "access")
+            if token_type != "access":
+                raise InvalidTokenError("token ไม่ใช่ access token")
             UUID(payload["sub"])
             return payload
         except (JWTError, KeyError, ValueError, TypeError) as e:
             raise InvalidTokenError("token ไม่ถูกต้องหรือหมดอายุแล้ว") from e
+
+    def decode_refresh_token(self, token: str) -> dict:
+        try:
+            payload = jwt.decode(
+                token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+            )
+            token_type = payload.get("type")
+            if token_type != "refresh":
+                raise InvalidTokenError("token ไม่ใช่ refresh token")
+            UUID(payload["sub"])
+            return payload
+        except (JWTError, KeyError, ValueError, TypeError) as e:
+            raise InvalidTokenError("refresh token ไม่ถูกต้องหรือหมดอายุแล้ว") from e
 
     def get_user_from_token(self, token: str) -> User:
         payload = self.decode_access_token(token)
@@ -166,3 +211,56 @@ class AuthService:
         if user is None:
             raise InvalidTokenError("ไม่พบผู้ใช้ของ token นี้")
         return user
+
+    @staticmethod
+    def set_auth_cookies(
+        response,
+        access_token: str,
+        refresh_token: str | None = None,
+    ) -> None:
+        """ตั้งค่า HTTP-Only, Secure, และ SameSite Cookie บน Response"""
+        access_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        response.set_cookie(
+            key=settings.ACCESS_TOKEN_COOKIE_NAME,
+            value=access_token,
+            max_age=access_max_age,
+            expires=access_max_age,
+            httponly=True,
+            secure=settings.AUTH_COOKIE_SECURE,
+            samesite=settings.AUTH_COOKIE_SAMESITE,
+            domain=settings.AUTH_COOKIE_DOMAIN,
+            path="/",
+        )
+        if refresh_token:
+            refresh_max_age = settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+            response.set_cookie(
+                key=settings.REFRESH_TOKEN_COOKIE_NAME,
+                value=refresh_token,
+                max_age=refresh_max_age,
+                expires=refresh_max_age,
+                httponly=True,
+                secure=settings.AUTH_COOKIE_SECURE,
+                samesite=settings.AUTH_COOKIE_SAMESITE,
+                domain=settings.AUTH_COOKIE_DOMAIN,
+                path="/",
+            )
+
+    @staticmethod
+    def clear_auth_cookies(response) -> None:
+        """ลบ Authentication cookies ออกจาก Response"""
+        response.delete_cookie(
+            key=settings.ACCESS_TOKEN_COOKIE_NAME,
+            path="/",
+            domain=settings.AUTH_COOKIE_DOMAIN,
+            httponly=True,
+            secure=settings.AUTH_COOKIE_SECURE,
+            samesite=settings.AUTH_COOKIE_SAMESITE,
+        )
+        response.delete_cookie(
+            key=settings.REFRESH_TOKEN_COOKIE_NAME,
+            path="/",
+            domain=settings.AUTH_COOKIE_DOMAIN,
+            httponly=True,
+            secure=settings.AUTH_COOKIE_SECURE,
+            samesite=settings.AUTH_COOKIE_SAMESITE,
+        )

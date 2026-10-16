@@ -28,7 +28,26 @@ class SSOAuthorizeResponse(CamelModel):
 
 class TokenResponse(CamelModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
+
+
+class AuthTokens(CamelModel):
+    """Token bundle สำหรับส่งผ่าน Cookie และ JSON Response"""
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class RefreshTokenRequest(CamelModel):
+    """ส่ง refresh_token ผ่าน body (กรณีไม่ได้ส่งผ่าน HTTP-Only cookie)"""
+
+    refresh_token: str | None = None
+
+
+class LogoutResponse(CamelModel):
+    logged_out: bool = True
 
 
 class JWTPayload(CamelModel):

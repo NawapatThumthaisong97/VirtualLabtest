@@ -327,3 +327,164 @@ class TestSSOEndpoints:
         assert "accounts.google.com" in url
         assert "hd=dome.tu.ac.th" in url
         assert "state=xyz123" in url
+
+
+class TestTokenLifecycleAndCookies:
+    """Secure Token Lifecycle with HTTP-Only Cookies and Refresh Endpoint (Issue #79)"""
+
+    def test_login_sets_http_only_secure_samesite_cookies(self, db, client):
+        """POST /api/auth/login sets HTTP-Only, SameSite cookies for access and refresh tokens"""
+        user = User(
+            id=uuid.uuid4(),
+            email="sophia.dav@dome.tu.ac.th",
+            name="Sophia Davis",
+            student_id="6709616000",
+            password_hash=hash_password("sophia6764"),
+            role=UserRole.STUDENT,
+        )
+        db.add(user)
+        db.commit()
+
+        resp = client.post(
+            "/api/auth/login",
+            json={"username": "6709616000", "password": "sophia6764"},
+        )
+        assert resp.status_code == 200
+        assert "access_token" in resp.cookies
+        assert "refresh_token" in resp.cookies
+
+        # Check Set-Cookie headers for security attributes
+        cookie_headers = resp.headers.get_list("set-cookie")
+        access_cookie_header = next(h for h in cookie_headers if "access_token=" in h)
+        refresh_cookie_header = next(h for h in cookie_headers if "refresh_token=" in h)
+
+        assert "httponly" in access_cookie_header.lower()
+        assert "samesite=lax" in access_cookie_header.lower()
+        assert "httponly" in refresh_cookie_header.lower()
+        assert "samesite=lax" in refresh_cookie_header.lower()
+
+    def test_sso_login_sets_cookies(self, db, client, fake_sso):
+        """POST /api/auth/sso sets HTTP-Only, SameSite cookies for access and refresh tokens"""
+        fake_sso.codes["tu-student-code"] = SSOUserInfo(
+            email="freshman@dome.tu.ac.th",
+            name="Freshman",
+            email_verified=True,
+            hd="dome.tu.ac.th",
+        )
+        resp = client.post("/api/auth/sso", json={"code": "tu-student-code"})
+        assert resp.status_code == 200
+        assert "access_token" in resp.cookies
+        assert "refresh_token" in resp.cookies
+
+    def test_refresh_token_extends_session_without_re_login(self, db, client):
+        """POST /api/auth/refresh creates a new access token and refresh token via cookie or body"""
+        user = User(
+            id=uuid.uuid4(),
+            email="sophia.dav@dome.tu.ac.th",
+            name="Sophia Davis",
+            role=UserRole.STUDENT,
+        )
+        db.add(user)
+        db.commit()
+
+        service = AuthService(db, UserRepository(db))
+        _access, refresh_token = service.create_token_pair(user)
+
+        # Test refresh via cookie
+        client.cookies.set("refresh_token", refresh_token)
+        resp = client.post("/api/auth/refresh")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        new_access = body["data"]["accessToken"]
+        new_refresh = body["data"]["refreshToken"]
+
+        assert new_access != refresh_token
+        assert new_refresh is not None
+
+        # Verify new access token works with protected endpoint
+        me_resp = client.get("/api/me", headers={"Authorization": f"Bearer {new_access}"})
+        assert me_resp.status_code == 200
+        assert me_resp.json()["data"]["email"] == "sophia.dav@dome.tu.ac.th"
+
+    def test_refresh_with_invalid_or_expired_token_returns_401(self, client):
+        """Refreshing with invalid or expired refresh token returns 401"""
+        resp_missing = client.post("/api/auth/refresh")
+        assert resp_missing.status_code == 401
+        assert resp_missing.json()["error"]["code"] == "invalid_token"
+
+        resp_bad = client.post("/api/auth/refresh", json={"refreshToken": "not-a-valid-jwt"})
+        assert resp_bad.status_code == 401
+        assert resp_bad.json()["error"]["code"] == "invalid_token"
+
+    def test_access_token_cannot_be_used_as_refresh_token(self, db, client):
+        """An access token cannot be used to call the refresh endpoint"""
+        user = User(
+            id=uuid.uuid4(),
+            email="sophia.dav@dome.tu.ac.th",
+            name="Sophia Davis",
+            role=UserRole.STUDENT,
+        )
+        db.add(user)
+        db.commit()
+
+        service = AuthService(db, UserRepository(db))
+        access_token, _ = service.create_token_pair(user)
+
+        resp = client.post("/api/auth/refresh", json={"refreshToken": access_token})
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "invalid_token"
+
+    def test_protected_route_without_token_returns_401(self, client):
+        """Request without Authorization header or cookie returns 401 Unauthorized"""
+        resp = client.get("/api/me")
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "invalid_token"
+
+    def test_protected_route_with_expired_token_returns_401(self, client):
+        """Request with expired JWT returns 401 Unauthorized"""
+        expired_token = jwt.encode(
+            {
+                "sub": str(uuid.uuid4()),
+                "type": "access",
+                "exp": int((datetime.now(timezone.utc) - timedelta(minutes=1)).timestamp()),
+            },
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM,
+        )
+        resp = client.get("/api/me", headers={"Authorization": f"Bearer {expired_token}"})
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "invalid_token"
+
+    def test_protected_route_reads_http_only_cookie(self, db, client):
+        """Request with valid access_token in HTTP-Only cookie succeeds on protected route"""
+        user = User(
+            id=uuid.uuid4(),
+            email="sophia.dav@dome.tu.ac.th",
+            name="Sophia Davis",
+            role=UserRole.STUDENT,
+        )
+        db.add(user)
+        db.commit()
+
+        service = AuthService(db, UserRepository(db))
+        access_token = service.create_access_token(user)
+
+        client.cookies.set("access_token", access_token)
+        resp = client.get("/api/me")
+        assert resp.status_code == 200
+        assert resp.json()["data"]["email"] == "sophia.dav@dome.tu.ac.th"
+
+    def test_logout_clears_auth_cookies(self, client):
+        """POST /api/auth/logout deletes access_token and refresh_token cookies"""
+        client.cookies.set("access_token", "fake-token")
+        client.cookies.set("refresh_token", "fake-refresh")
+
+        resp = client.post("/api/auth/logout")
+        assert resp.status_code == 200
+        assert resp.json()["data"]["loggedOut"] is True
+
+        cookie_headers = resp.headers.get_list("set-cookie")
+        deleted_cookies = [h for h in cookie_headers if 'max-age=0' in h.lower() or 'expires=' in h.lower()]
+        assert len(deleted_cookies) >= 2
+
