@@ -9,6 +9,7 @@ from .kubernetes_route import router as k8s_router
 from .session_route import router as session_router
 from .lab_route import router as lab_router
 from .courses_route import router as courses_router
+from .prewarm_route import router as prewarm_router
 
 # สร้าง main router
 api_router = APIRouter()
@@ -20,5 +21,6 @@ api_router.include_router(k8s_router, prefix="/kubernetes", tags=["Kubernetes"])
 api_router.include_router(session_router, tags=["Session"])
 api_router.include_router(lab_router, prefix="/labs", tags=["Labs"])
 api_router.include_router(courses_router, prefix="/courses", tags=["Courses"])
+api_router.include_router(prewarm_router, tags=["Prewarm"])
 
 __all__ = ["api_router"]

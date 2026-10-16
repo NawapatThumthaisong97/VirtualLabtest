@@ -32,6 +32,8 @@ class Course(Base):
         "Quota", back_populates="course", foreign_keys="Quota.course_id"
     )
     announcements = relationship("Announcement", back_populates="course")
+    class_schedules = relationship("ClassSchedule", back_populates="course")
+    class_slots = relationship("ClassSlot", back_populates="course")
 
     def __repr__(self):
         return f"<Course(id={self.id}, code='{self.code}', name='{self.name}', lecturer='{self.lecturer_name}')>"

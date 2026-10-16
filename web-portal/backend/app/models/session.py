@@ -64,12 +64,15 @@ class Session(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
     end_reason = Column(Enum(SessionEndReason), nullable=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
-    
+    # เปิดในคาบไหน (null = เปิดนอกคาบ) โค้ด launch ยังไม่ได้เขียนค่านี้
+    class_slot_id = Column(UUID(as_uuid=True), ForeignKey("class_slots.id", ondelete="SET NULL"), nullable=True)
+
     # Relationships
     user = relationship("User", back_populates="sessions", foreign_keys=[user_id])
     lab = relationship("Lab", back_populates="sessions", foreign_keys=[lab_id])
     lab_image = relationship("LabImage", back_populates="sessions", foreign_keys=[lab_image_id])
     usage_records = relationship("UsageRecord", back_populates="session")
+    class_slot = relationship("ClassSlot", back_populates="sessions", foreign_keys=[class_slot_id])
     
     def __repr__(self):
         return f"<Session(id={self.id}, user_id={self.user_id}, service_type='{self.service_type.value}', status='{self.status.value}')>"

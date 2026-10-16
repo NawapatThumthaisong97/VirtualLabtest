@@ -47,6 +47,10 @@ class LabImageNotFoundError(NotFoundError):
     code = "lab_image_not_found"
 
 
+class PrewarmNotFoundError(NotFoundError):
+    code = "prewarm_not_found"
+
+
 # ---------- 409 ----------
 class ConflictError(DomainError):
     """ข้อมูลชนกับที่มีอยู่แล้ว"""
