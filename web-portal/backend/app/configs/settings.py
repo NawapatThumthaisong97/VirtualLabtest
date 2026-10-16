@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # University SSO (Google OAuth2 / OIDC) & Allowed Email Domains
+    ALLOWED_EMAIL_DOMAINS_STR: str = "dome.tu.ac.th,tu.ac.th"
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/sso/callback"
+    GOOGLE_AUTH_URI: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URI: str = "https://openidconnect.googleapis.com/v1/userinfo"
+    GOOGLE_TOKENINFO_URI: str = "https://oauth2.googleapis.com/tokeninfo"
     
     # CORS - เก็บเป็น string คั่นด้วย comma แล้ว parse ใน code
     CORS_ORIGINS_STR: str = "http://localhost:3000,http://localhost:5173"
@@ -97,13 +107,23 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True
+        case_sensitive=True,
+        extra="ignore",
     )
     
     @property
     def cors_origins(self) -> list:
         """Parse CORS origins from comma-separated string"""
         return [origin.strip() for origin in self.CORS_ORIGINS_STR.split(",")]
+
+    @property
+    def allowed_email_domains(self) -> list[str]:
+        """Parse allowed university email domains from comma-separated string"""
+        return [
+            domain.strip().lower().lstrip("@")
+            for domain in self.ALLOWED_EMAIL_DOMAINS_STR.split(",")
+            if domain.strip()
+        ]
 
 
 # Global settings instance

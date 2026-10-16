@@ -4,10 +4,18 @@ from uuid import UUID
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.adapters import sso_adapter as sso_adapter_module
+from app.adapters.sso_adapter import SSOUserInfo
 from app.configs.settings import settings
-from app.exceptions.domain import InvalidCredentialsError, InvalidTokenError
-from app.models.user import User
+from app.exceptions.domain import (
+    InvalidCredentialsError,
+    InvalidEmailDomainError,
+    InvalidTokenError,
+    SSOAuthenticationError,
+)
+from app.models.user import User, UserRole
 from app.repositories.user_repository import UserRepository
+from app.schemas.auth_schema import SSOLoginRequest
 from app.utils.security import verify_password
 
 
@@ -16,6 +24,103 @@ class AuthService:
         self.db = db
         self.user_repo = user_repo
 
+    @staticmethod
+    def validate_university_email(email: str) -> str:
+        """ตรวจสอบว่าอีเมลถูกต้องและอยู่ภายใต้โดเมนของมหาวิทยาลัยที่อนุญาตเท่านั้น"""
+        normalized = (email or "").strip().lower()
+        if not normalized or "@" not in normalized or " " in normalized:
+            raise SSOAuthenticationError("รูปแบบอีเมลจากระบบ SSO ไม่ถูกต้อง")
+
+        local_part, domain = normalized.rsplit("@", 1)
+        if not local_part or not domain or "@" in local_part:
+            raise SSOAuthenticationError("รูปแบบอีเมลจากระบบ SSO ไม่ถูกต้อง")
+
+        allowed_domains = settings.allowed_email_domains
+        if domain not in allowed_domains:
+            domains_str = ", ".join(allowed_domains)
+            raise InvalidEmailDomainError(
+                f"อนุญาตให้เข้าสู่ระบบเฉพาะอีเมลภายใต้โดเมนของมหาวิทยาลัยเท่านั้น ({domains_str})"
+            )
+
+        return normalized
+
+    def get_sso_authorize_url(
+        self,
+        state: str | None = None,
+        redirect_uri: str | None = None,
+    ) -> str:
+        return sso_adapter_module.sso_adapter.build_authorization_url(
+            state=state,
+            redirect_uri=redirect_uri,
+        )
+
+    def resolve_sso_user_info(
+        self,
+        payload: SSOLoginRequest,
+        forwarded_email: str | None = None,
+        forwarded_name: str | None = None,
+    ) -> SSOUserInfo:
+        """ดึงข้อมูลผู้ใช้จาก Google OAuth2 (code / id_token / access_token) หรือจาก SSO callback"""
+        adapter = sso_adapter_module.sso_adapter
+
+        if payload.code:
+            sso_info = adapter.exchange_code(
+                payload.code, redirect_uri=payload.redirect_uri
+            )
+        elif payload.id_token:
+            sso_info = adapter.verify_id_token(payload.id_token)
+        elif payload.access_token:
+            sso_info = adapter.fetch_user_info(payload.access_token)
+        elif payload.email or forwarded_email:
+            raw_email = (payload.email or forwarded_email or "").strip()
+            raw_name = (payload.name or forwarded_name or "").strip()
+            sso_info = SSOUserInfo(
+                email=raw_email,
+                name=raw_name,
+                email_verified=payload.email_verified,
+                student_id=payload.student_id,
+            )
+        else:
+            raise SSOAuthenticationError(
+                "ต้องส่ง code, id_token, access_token หรือข้อมูลผู้ใช้จากระบบ SSO"
+            )
+
+        if not sso_info.email_verified:
+            raise SSOAuthenticationError("อีเมลจากระบบ SSO ยังไม่ได้รับการยืนยัน")
+
+        if payload.student_id and not sso_info.student_id:
+            sso_info.student_id = payload.student_id.strip() or None
+
+        return sso_info
+
+    def authenticate_sso(self, sso_info: SSOUserInfo) -> User:
+        """ตรวจสอบโดเมนมหาวิทยาลัย ค้นหาผู้ใช้ในระบบ (หรือสร้างใหม่อัตโนมัติเมื่อล็อกอินครั้งแรก)"""
+        email = self.validate_university_email(sso_info.email)
+        user = self.user_repo.find_by_email(email)
+        if user is not None:
+            return user
+
+        local_part = email.split("@", 1)[0]
+        display_name = (sso_info.name or "").strip() or local_part
+
+        student_id = (sso_info.student_id or "").strip() or None
+        if student_id is None and local_part.isdigit():
+            student_id = local_part
+        if student_id and self.user_repo.find_by_login(student_id) is not None:
+            student_id = None
+
+        new_user = User(
+            email=email,
+            name=display_name,
+            student_id=student_id,
+            password_hash=None,
+            role=UserRole.STUDENT,
+        )
+        self.user_repo.save(new_user)
+        self.db.commit()
+        self.db.refresh(new_user)
+        return new_user
+
     def authenticate(self, username: str, password: str) -> User:
         user = self.user_repo.find_by_login(username)
         if user is None or not verify_password(password, user.password_hash):
@@ -23,20 +128,39 @@ class AuthService:
         return user
 
     def create_access_token(self, user: User) -> str:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        """
+        สร้าง JWT Access Token ที่มี Role (student, instructor, admin) และข้อมูลพื้นฐานของผู้ใช้
+        โดยไม่ใส่ความลับเชิงลึก (เช่น password_hash หรือ API Key) ลงใน Payload
+        """
+        now = datetime.now(timezone.utc)
+        expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        role_value = (
+            user.role.value if isinstance(user.role, UserRole) else str(user.role)
         )
-        payload = {"sub": str(user.id), "exp": expire}
+        payload = {
+            "sub": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "student_id": user.student_id,
+            "role": role_value,
+            "iat": int(now.timestamp()),
+            "exp": int(expire.timestamp()),
+        }
         return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-    def get_user_from_token(self, token: str) -> User:
+    def decode_access_token(self, token: str) -> dict:
         try:
             payload = jwt.decode(
                 token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
             )
-            user_id = UUID(payload["sub"])
-        except (JWTError, KeyError, ValueError) as e:
+            UUID(payload["sub"])
+            return payload
+        except (JWTError, KeyError, ValueError, TypeError) as e:
             raise InvalidTokenError("token ไม่ถูกต้องหรือหมดอายุแล้ว") from e
+
+    def get_user_from_token(self, token: str) -> User:
+        payload = self.decode_access_token(token)
+        user_id = UUID(payload["sub"])
 
         user = self.user_repo.find_by_id(user_id)
         if user is None:
