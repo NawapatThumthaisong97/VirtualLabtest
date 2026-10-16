@@ -62,3 +62,4 @@ kubectl create secret generic database-secret \
 
 echo "==> All authentication secrets successfully provisioned in namespace '${NAMESPACE}'."
 echo "==> Apply RBAC rules with: kubectl apply -f k8s/auth/01-rbac.yaml"
+

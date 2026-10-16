@@ -58,3 +58,4 @@ spec:
                 name: virtual-lab-frontend
                 port:
                   number: 80
+

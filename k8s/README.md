@@ -103,3 +103,4 @@ kubectl -n virtual-lab get secrets
 kubectl -n virtual-lab get pods -l app.kubernetes.io/name=oauth2-proxy
 kubectl -n virtual-lab logs deployment/oauth2-proxy
 ```
+

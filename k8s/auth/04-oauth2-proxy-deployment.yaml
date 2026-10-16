@@ -91,3 +91,4 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/name: oauth2-proxy
+

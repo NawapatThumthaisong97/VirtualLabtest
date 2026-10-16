@@ -90,3 +90,4 @@ spec:
       targetPort: 8000
   selector:
     app.kubernetes.io/name: virtual-lab-backend
+

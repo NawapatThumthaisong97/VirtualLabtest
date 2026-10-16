@@ -50,3 +50,4 @@ kubectl create secret generic database-secret `
   --dry-run=client -o yaml | kubectl apply -f -
 
 Write-Host "==> All authentication secrets successfully provisioned in namespace '$Namespace'."
+

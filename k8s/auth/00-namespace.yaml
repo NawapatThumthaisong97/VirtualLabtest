@@ -5,3 +5,4 @@ metadata:
   labels:
     app.kubernetes.io/name: virtual-lab
     app.kubernetes.io/part-of: virtual-lab-platform
+
