@@ -30,3 +30,14 @@ class PrewarmResponse(BaseModel):
         ..., description="worker ที่ Ready ทุกเครื่อง pull แล้ว และไม่มีเครื่องที่เพิ่งหลุด (= slot READY)"
     )
     nodes: list[PrewarmNodeStatus]
+
+
+class WarmPodResponse(BaseModel):
+    """warm pod 1 ตัว (1 เครื่อง)"""
+    pod: str
+    node: Optional[str]
+    lab_image_id: Optional[str]
+    state: Optional[str] = Field(None, description="free = ว่าง / claimed = แจกให้ session แล้ว")
+    session_id: Optional[str]
+    phase: Optional[str]
+    ready: bool

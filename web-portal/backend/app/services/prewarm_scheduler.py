@@ -14,7 +14,6 @@ Prewarm Scheduler
 backend หลายตัวกัน reconcile ซ้อนกันด้วย advisory lock แบบเดียวกับ session_reconciler
 """
 import asyncio
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -26,7 +25,8 @@ from app.configs.settings import settings
 from app.models.class_slot import ClassSlot, ClassSlotStatus
 from app.models.lab import RunTarget
 from app.services.kubernetes_service import get_kubernetes_service
-from app.services.prewarm_service import PrewarmService
+from app.services.prewarm_service import PrewarmService, k8s_image_ref
+from app.services.warm_pod_service import WarmPodService
 from app.utils.logger import logger
 
 # ห้ามชนกับ session_reconciler (880_001)
@@ -36,12 +36,7 @@ LIVE_STATUSES = (ClassSlotStatus.SCHEDULED, ClassSlotStatus.PREWARMING, ClassSlo
 
 
 def slot_image(slot: ClassSlot) -> str:
-    """image เต็มแบบเดียวกับที่ pod ของ lab จะ pull ตอน launch (ดู SessionService._build_k8s_task)
-
-    ต้องตรงกันทุกตัวอักษร ไม่งั้น pull ไว้คนละชื่อ cache ไม่ช่วยอะไร
-    """
-    registry = os.getenv("DOCKER_REGISTRY_HOST", "100.127.74.48:5001")
-    return f"{registry}/{slot.lab_image.full_image_name}"
+    return k8s_image_ref(slot.lab_image)
 
 
 def active_slots(db: Session, now: datetime) -> list[ClassSlot]:
@@ -66,10 +61,11 @@ def _target_images(now: datetime) -> set[str]:
 
 
 def sync_prewarm(prewarm: PrewarmService, db: Optional[Session] = None,
-                 now: Optional[datetime] = None) -> dict:
+                 now: Optional[datetime] = None, warm: Optional[WarmPodService] = None) -> dict:
     """ทำให้ DaemonSet และ status ของ slot ตรงกับเวลา now 1 รอบ
 
     db = None ใช้แค่ PREWARM_TARGETS (เทสที่ไม่มี DB)
+    warm = ให้มาเมื่อเปิด WARM_POD_ENABLED: สร้าง / ลบ DaemonSet ของ warm pod ตาม slot ช่วงเดียวกัน
     """
     now = now or datetime.now(timezone.utc)
     slots = active_slots(db, now) if db is not None else []
@@ -84,9 +80,27 @@ def sync_prewarm(prewarm: PrewarmService, db: Optional[Session] = None,
         prewarm.remove(current[image])
         result["removed"].append(image)
 
+    if warm is not None:
+        _sync_warm(warm, slots, result)
     if db is not None:
         _update_slot_status(prewarm, db, slots, now, result["slots"])
     return result
+
+
+def _sync_warm(warm: WarmPodService, slots: list[ClassSlot], result: dict) -> None:
+    """warm pod ตามคาบ: 1 DaemonSet ต่อ lab image ของ slot ที่กำลังจะเริ่ม / กำลังเรียน
+
+    คาบจบ → WarmPodService.remove ลบเฉพาะ pod ที่ว่าง pod ที่มีคนใช้อยู่รอจน session จบ
+    """
+    desired = {str(s.lab_image_id): s.lab_image for s in slots}
+    current = warm.list_managed()
+    result["warm_created"], result["warm_removed"] = [], []
+    for image_id in sorted(desired.keys() - current.keys()):
+        if warm.ensure(desired[image_id]):
+            result["warm_created"].append(desired[image_id].full_image_name)
+    for image_id in sorted(current.keys() - desired.keys()):
+        warm.remove(current[image_id])
+        result["warm_removed"].append(current[image_id])
 
 
 def _update_slot_status(prewarm: PrewarmService, db: Session, slots: list[ClassSlot],
@@ -122,7 +136,9 @@ def sync_once() -> Optional[dict]:
         try:
             db = SessionLocal()
             try:
-                return sync_prewarm(PrewarmService(get_kubernetes_service()), db)
+                k8s = get_kubernetes_service()
+                warm = WarmPodService(k8s) if settings.WARM_POD_ENABLED else None
+                return sync_prewarm(PrewarmService(k8s), db, warm=warm)
             finally:
                 db.close()
         finally:
@@ -135,11 +151,13 @@ async def run_prewarm_scheduler(interval_seconds: int, stop: asyncio.Event) -> N
     kubernetes client เป็นแบบ blocking เลยรันใน thread ไม่ให้ event loop ของ FastAPI ค้าง
     """
     logger.info(f"Prewarm scheduler started (every {interval_seconds}s, lead "
-                f"{settings.PREWARM_LEAD_MINUTES} min, {len(settings.PREWARM_TARGETS)} .env targets)")
+                f"{settings.PREWARM_LEAD_MINUTES} min, {len(settings.PREWARM_TARGETS)} .env targets, "
+                f"warm pod {'on' if settings.WARM_POD_ENABLED else 'off'})")
     while not stop.is_set():
         try:
             result = await asyncio.to_thread(sync_once)
-            if result and (result["created"] or result["removed"] or result["slots"]):
+            if result and any(result.get(k) for k in
+                              ("created", "removed", "slots", "warm_created", "warm_removed")):
                 logger.info(f"Prewarm scheduler: {result}")
         except Exception as e:
             # รอบนี้พัง (เช่น ต่อ K3s ไม่ได้) ลองใหม่รอบหน้า
