@@ -13,7 +13,7 @@ from sky.exceptions import ClusterDoesNotExist
 from app.adapters.ecr_adapter import get_ecr_token
 from app.configs.settings import settings
 from app.services.kubernetes_service import get_kubernetes_service
-from app.services.warm_pod_service import WARM_POD_PREFIX, WarmPodService, warm_endpoints
+from app.services.warm_pod_service import LAB_LABEL, WARM_POD_PREFIX, WarmPodService, warm_endpoints
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.user import User
@@ -91,15 +91,18 @@ class SessionService:
         app_name: str,
         env: str = "production",
         run_target: RunTarget = RunTarget.KUBERNETES,
+        pin_node: Optional[str] = None,
     ) -> dict:
         """สร้าง SkyPilot task config (dict) จาก LabImage ตาม run_target ของ lab
+
+        pin_node = ชื่อ node ที่ต้องให้ pod ลง (K3s เท่านั้น ดู LAB_ISOLATION_ENABLED)
 
         คืนเป็น dict แล้วส่งเข้า sky.Task.from_yaml_config ตรง ๆ แทนการต่อ YAML ด้วย
         f-string แบบเดิม ซึ่งพังเมื่อค่า env มี ':' หรือ '#' และเมื่อ entrypoint มีหลายบรรทัด
         """
         if run_target == RunTarget.AWS:
             return self._build_aws_task(lab_image, app_name, env)
-        return self._build_k8s_task(lab_image, app_name, env)
+        return self._build_k8s_task(lab_image, app_name, env, pin_node)
 
     def _lab_envs(self, lab_image: LabImage, env: str) -> dict[str, str]:
         envs = {k: str(v) for k, v in (lab_image.env_vars or {}).items()}
@@ -115,8 +118,13 @@ class SessionService:
             "wait_for": "none",
         }
 
-    def _build_k8s_task(self, lab_image: LabImage, app_name: str, env: str) -> dict:
-        """K3s on-prem: SkyPilot รัน image เป็น pod ตรง ๆ (container mode)"""
+    def _build_k8s_task(self, lab_image: LabImage, app_name: str, env: str,
+                        pin_node: Optional[str] = None) -> dict:
+        """K3s on-prem: SkyPilot รัน image เป็น pod ตรง ๆ (container mode)
+
+        pin_node: บังคับ pod ลงเครื่องที่กด Start และติด label vlab/lab ให้ NetworkPolicy
+        vlab-lab-isolation ปิดขาเข้าจากเครื่องอื่น (kubernetes.pod_config เป็น override ที่ task ตั้งได้)
+        """
         docker_registry_host = os.getenv("DOCKER_REGISTRY_HOST", "100.127.74.48:5001")
         resources_req = lab_image.get_skypilot_resources()
 
@@ -139,6 +147,11 @@ class SessionService:
         }
         if lab_image.workdir:
             task["workdir"] = lab_image.workdir
+        if pin_node:
+            task["config"] = {"kubernetes": {"pod_config": {
+                "metadata": {"labels": {LAB_LABEL: "true"}},
+                "spec": {"nodeSelector": {"kubernetes.io/hostname": pin_node}},
+            }}}
         return task
 
     def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str) -> dict:
@@ -315,20 +328,24 @@ class SessionService:
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
         run_target = lab.run_target or RunTarget.KUBERNETES
-        if run_target == RunTarget.KUBERNETES:
+        # เครื่องแลปที่กด Start (None = ไม่ได้กดจากเครื่องแลป / ไม่ได้เปิดฟีเจอร์ที่ต้องใช้)
+        node = self._client_node(client_ip) if run_target == RunTarget.KUBERNETES else None
+        if node is not None:
             # นั่งอยู่ที่เครื่องแลปที่มี warm pod ว่าง → ใช้เลย ไม่ต้องรอ SkyPilot
-            warm = self._try_warm_pod(user_id, lab, lab_image, client_ip)
+            warm = self._try_warm_pod(user_id, lab, lab_image, node)
             if warm is not None:
                 return warm
 
         cluster_name = self._cluster_name(lab_image)
         is_cloud = run_target == RunTarget.AWS
+        pin_node = node[0] if node is not None and settings.LAB_ISOLATION_ENABLED else None
 
         task_config = self.create_fastapi_task(
             lab_image=lab_image,
             app_name=cluster_name,
             env="staging",
             run_target=run_target,
+            pin_node=pin_node,
         )
         # ขอ token ก่อนสร้าง record จะได้ไม่มี session ค้างถ้าแค่ขอ token ไม่ผ่าน
         secrets = None
@@ -401,25 +418,35 @@ class SessionService:
             "expires_at": new_session.expires_at,
         }
 
+    def _client_node(self, client_ip: Optional[str]) -> Optional[tuple[str, str]]:
+        """(ชื่อ node, IP) ถ้า IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (= นั่งเครื่องนั้นจริง)
+
+        หาเฉพาะตอนเปิด WARM_POD_ENABLED หรือ LAB_ISOLATION_ENABLED ต่อ K3s ไม่ได้ = None (launch ต่อได้)
+        """
+        if not client_ip or not (settings.WARM_POD_ENABLED or settings.LAB_ISOLATION_ENABLED):
+            return None
+        try:
+            return get_warm_pod_service().node_for_ip(client_ip)
+        except Exception as e:
+            logger.warning(f"[lab node] cannot look up node for {client_ip}: {e}")
+            return None
+
     def _try_warm_pod(self, user_id: UUID, lab: Lab, lab_image: LabImage,
-                      client_ip: Optional[str]) -> Optional[dict]:
-        """แจก warm pod บนเครื่องที่ request มา คืน None ถ้าใช้ไม่ได้ (ให้ไป SkyPilot ต่อ)
+                      node: tuple[str, str]) -> Optional[dict]:
+        """แจก warm pod บนเครื่องที่กด Start คืน None ถ้าใช้ไม่ได้ (ให้ไป SkyPilot ต่อ)
 
         เงื่อนไขทั้งหมดต้องจริง:
         1. เปิด WARM_POD_ENABLED
-        2. IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (= นั่งอยู่ที่เครื่องนั้นจริง)
+        2. IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (_client_node หาให้แล้ว)
         3. เครื่องนั้นมี warm pod ของ lab image นี้ที่ว่าง และ Running + Ready
         4. แย่ง pod สำเร็จ (ไม่มีคนอื่นได้ไปก่อน)
         K3s ต่อไม่ได้หรือพังตรงไหนก็ไป SkyPilot แทน ไม่ให้นักศึกษาเปิด lab ไม่ได้เพราะ warm pod
         """
-        if not settings.WARM_POD_ENABLED or not client_ip:
+        if not settings.WARM_POD_ENABLED:
             return None
+        node_name, node_ip = node
         try:
             warm = get_warm_pod_service()
-            node = warm.node_for_ip(client_ip)
-            if node is None:
-                return None
-            node_name, node_ip = node
             pod = warm.find_free_pod(node_name, lab_image.id)
             if pod is None:
                 logger.info(f"[warm pod] no free pod for {lab_image.full_image_name} on {node_name}")

@@ -313,3 +313,6 @@ script/prepull-daemonset.yaml
 # Personal seed scripts — local only, ไม่ต้อง commit
 web-portal/backend/script/seed_pete.py
 web-portal/backend/script/check_repo.py
+
+# backup ของ Tailscale policy (script/tailscale-acl.sh) อาจมีข้อมูลของ tailnet
+tailscale/backup/

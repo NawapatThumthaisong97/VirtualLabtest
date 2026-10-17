@@ -1,0 +1,8 @@
+# เครื่องไหนได้ tag อะไร (script/tailscale-acl.sh tag / apply อ่านไฟล์นี้)
+# ผูกด้วย Tailscale IP เพราะไม่ซ้ำและไม่เปลี่ยน (hostname ซ้ำกันได้)
+# <Tailscale IP>    <tag>               # ชื่อเครื่อง
+100.125.244.48      tag:vlab-server     # master (K3s server)
+100.93.121.17       tag:vlab-server     # thinkpad (backend + SkyPilot API, เป็น worker ด้วย)
+100.83.96.97        tag:vlab-worker     # worker-pete (เครื่องแลป)
+100.97.13.122       tag:vlab-worker     # workerfilm (เครื่องแลป)
+100.127.74.48       tag:vlab-registry   # register (registry :5001)

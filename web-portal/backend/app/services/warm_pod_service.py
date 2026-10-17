@@ -26,6 +26,9 @@ WARM_DS_LABEL = "vlab/warm-ds"
 STATE_LABEL = "vlab/warm-state"
 LAB_IMAGE_ANNOTATION = "vlab/lab-image-id"
 SESSION_ANNOTATION = "vlab/session-id"
+# pod ของ lab ทุกแบบ (warm / SkyPilot ที่บังคับลงเครื่องตัวเอง) NetworkPolicy vlab-lab-isolation เลือกด้วย label นี้
+LAB_LABEL = "vlab/lab"
+LOCALHOST = "127.0.0.1"
 
 # ชื่อ pod ของ DaemonSet = <ชื่อ DaemonSet>-xxxxx reconciler / delete ใช้ prefix นี้แยก session ของ
 # warm pod ออกจาก session seed ที่มี k8s_pod_name แต่ไม่ได้มาจาก launch จริง
@@ -60,6 +63,16 @@ def lab_envs(lab_image, env: str = "staging") -> dict[str, str]:
     return envs
 
 
+def _host_port(port: int) -> dict:
+    """LAB_ISOLATION_ENABLED: ผูก hostPort กับ 127.0.0.1 เครื่องอื่นเรียกผ่าน Tailscale IP ไม่ได้
+    ไม่เปิด = ผูกทุก IP ของเครื่อง (ใครอยู่ใน tailnet ก็เปิด http://<IP เครื่อง>:<port> ได้)
+    """
+    mapping = {"containerPort": port, "hostPort": port}
+    if settings.LAB_ISOLATION_ENABLED:
+        mapping["hostIP"] = LOCALHOST
+    return mapping
+
+
 def build_warm_daemonset(lab_image) -> dict:
     """DaemonSet ที่รัน lab จริงบนทุก worker
 
@@ -75,7 +88,7 @@ def build_warm_daemonset(lab_image) -> dict:
         "image": image,
         "imagePullPolicy": "IfNotPresent",
         "env": [{"name": k, "value": v} for k, v in lab_envs(lab_image).items()],
-        "ports": [{"containerPort": int(p), "hostPort": int(p)} for p in ports],
+        "ports": [_host_port(int(p)) for p in ports],
     }
     # entrypoint ว่าง = ใช้ ENTRYPOINT / CMD ของ image เอง (แบบเดียวกับ AWS VM mode)
     # ใช้ sh ไม่ใช้ bash เพราะ image เล็ก ๆ (busybox) ไม่มี bash ส่วน "/bin/bash /run.sh" ก็ยังรันได้
@@ -101,7 +114,8 @@ def build_warm_daemonset(lab_image) -> dict:
             "selector": {"matchLabels": {WARM_DS_LABEL: name}},
             "template": {
                 "metadata": {
-                    "labels": {WARM_LABEL: "true", WARM_DS_LABEL: name, STATE_LABEL: "free"},
+                    "labels": {WARM_LABEL: "true", WARM_DS_LABEL: name, STATE_LABEL: "free",
+                               LAB_LABEL: "true"},
                     "annotations": {LAB_IMAGE_ANNOTATION: str(lab_image.id)},
                 },
                 "spec": {
@@ -260,6 +274,10 @@ class WarmPodService:
 
 
 def warm_endpoints(node_ip: str, lab_image) -> dict[str, str]:
-    """endpoint แบบเดียวกับของ SkyPilot ({"8080": "http://..."}) แต่ชี้ IP ของเครื่องที่นั่งอยู่ (hostPort)"""
+    """endpoint แบบเดียวกับของ SkyPilot ({"8080": "http://..."}) ชี้เครื่องที่นั่งอยู่ (hostPort)
+
+    LAB_ISOLATION_ENABLED = localhost (เปิดได้แค่จากเครื่องนั้น ซึ่งคือเครื่องที่กด Start อยู่แล้ว)
+    """
+    host = "localhost" if settings.LAB_ISOLATION_ENABLED else node_ip
     ports = lab_image.get_skypilot_resources().get("ports") or []
-    return {str(p): f"http://{node_ip}:{p}" for p in ports}
+    return {str(p): f"http://{host}:{p}" for p in ports}
