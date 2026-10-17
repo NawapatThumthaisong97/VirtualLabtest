@@ -60,6 +60,8 @@ jobs:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
         run: pytest tests/session --color=yes
 
+  course:
+    name: Course & RBAC tests
   prewarm:
     name: Prewarm & class schedule tests
     # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
@@ -97,6 +99,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirement.txt
 
+      - name: Run tests/course
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/course --color=yes
       # K3s ปลอม (FakeK8s) ส่วน class_slots ใช้ DB เทสเพราะ exclusion constraint ต้องเป็น Postgres
       - name: Run tests/prewarm
         env:

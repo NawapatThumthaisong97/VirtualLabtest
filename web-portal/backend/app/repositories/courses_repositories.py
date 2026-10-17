@@ -20,7 +20,18 @@ class CourseRepository(BaseRepository[Course]):
         return self.db.execute(result).scalar_one_or_none()
 
     def find_by_lecturer(self, lecturer_name: str) -> list[Course]:
-        result = select(self.model).where(self.model.lecturer_name == lecturer_name)
+        result = select(self.model).where(
+            self.model.lecturer_name == lecturer_name,
+            self.model.deleted_at.is_(None)
+        )
+        return list(self.db.execute(result).scalars().all())
+
+    def find_by_creator(self, creator_id: UUID) -> list[Course]:
+        """ดึงวิชาที่สร้างโดย user นี้"""
+        result = select(self.model).where(
+            self.model.created_by == creator_id,
+            self.model.deleted_at.is_(None)
+        )
         return list(self.db.execute(result).scalars().all())
 
     def find_by_student(self, student_id: UUID) -> list[Course]:
@@ -38,3 +49,22 @@ class CourseRepository(BaseRepository[Course]):
             .order_by(self.model.code)
         )
         return list(self.db.execute(result).scalars().all())
+
+    def is_student_enrolled(self, course_id: UUID, student_id: UUID) -> bool:
+        """ตรวจสอบว่านักศึกษาลงทะเบียนวิชานี้หรือไม่"""
+        from app.models.enrollment import Enrollment
+
+        result = select(Enrollment).where(
+            Enrollment.course_id == course_id,
+            Enrollment.user_id == student_id
+        )
+        return self.db.execute(result).scalar_one_or_none() is not None
+
+    def is_lecturer_teaching(self, course_id: UUID, lecturer_name: str) -> bool:
+        """ตรวจสอบว่าอาจารย์สอนวิชานี้หรือไม่ (course ต้องยังไม่ถูกลบ)"""
+        result = select(self.model).where(
+            self.model.id == course_id,
+            self.model.lecturer_name == lecturer_name,
+            self.model.deleted_at.is_(None),
+        )
+        return self.db.execute(result).scalar_one_or_none() is not None

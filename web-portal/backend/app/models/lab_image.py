@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum, Text, UniqueConstraint
+from sqlalchemy import Column, String, Integer, BigInteger, DateTime, ForeignKey, Enum, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -46,6 +46,12 @@ class LabImage(Base):
     description = Column(Text, nullable=True)
     status = Column(Enum(ImageStatus), default=ImageStatus.PENDING, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Metadata After Upload to R2
+    archive_key = Column(String(500), nullable=True)
+    archive_etag = Column(String(255), nullable=True)
+    archive_size_bytes = Column(BigInteger, nullable=True)
+    archive_uploaded_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     uploader = relationship("User", back_populates="uploaded_images", foreign_keys=[uploaded_by])
