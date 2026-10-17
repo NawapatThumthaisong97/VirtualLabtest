@@ -2,6 +2,7 @@
 Application Settings
 Load environment variables and configuration
 """
+import os
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -107,6 +108,12 @@ class Settings(BaseSettings):
     # PREWARM_TARGETS=[{"image":"100.127.74.48:5001/vlab/hello:v1","start_at":"2026-10-17T14:00:00+07:00","end_at":"2026-10-17T15:00:00+07:00"}]
     PREWARM_TARGETS: list[PrewarmTarget] = []
 
+    # SkyPilot API server กลาง (helm บน master เช่น https://skypilot.bell-lab.space) + token ของ service account
+    # ไม่ตั้ง = ใช้ API server ในเครื่อง (127.0.0.1:46580) เหมือนเดิม
+    # sky SDK อ่านค่าจาก os.environ เท่านั้น ดู export_skypilot_env ข้างล่าง
+    SKYPILOT_API_SERVER_ENDPOINT: Optional[str] = None
+    SKYPILOT_SERVICE_ACCOUNT_TOKEN: Optional[str] = None
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -119,5 +126,22 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.CORS_ORIGINS_STR.split(",")]
 
 
+SKYPILOT_ENV_KEYS = ("SKYPILOT_API_SERVER_ENDPOINT", "SKYPILOT_SERVICE_ACCOUNT_TOKEN")
+
+
+def export_skypilot_env(s: Settings) -> None:
+    """ส่งค่า SkyPilot จาก .env ไปที่ os.environ ให้ sky SDK เห็น
+
+    pydantic อ่าน .env เข้า settings แต่ไม่ export ออก process env และ sky SDK cache endpoint
+    ไว้ตั้งแต่เรียกครั้งแรก จึงต้องทำตอนโหลด settings (ก่อนโค้ดไหนเรียก sky)
+    ค่าที่อยู่ใน environ แล้วชนะ (เช่น docker compose env_file หรือ export เองใน shell)
+    """
+    for key in SKYPILOT_ENV_KEYS:
+        value = getattr(s, key)
+        if value:
+            os.environ.setdefault(key, value)
+
+
 # Global settings instance
 settings = Settings()
+export_skypilot_env(settings)
