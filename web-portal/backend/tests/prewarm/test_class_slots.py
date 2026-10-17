@@ -22,6 +22,7 @@ from app.models.user import User
 from app.services.prewarm_scheduler import sync_prewarm
 from app.services.prewarm_service import PrewarmService, daemonset_name
 from app.services.schedule_service import generate_slots
+from app.services.warm_pod_service import WarmPodService, build_warm_daemonset, warm_daemonset_name
 from tests.conftest import REGISTRY
 from tests.fakes import FakeK8s
 
@@ -286,3 +287,66 @@ class TestSchedulerWithSlots:
         db.refresh(slot)
         assert slot.status == ClassSlotStatus.DONE
         assert result["created"] == [] and k8s.created == []
+
+
+class TestWarmPodScheduler:
+    """Warm pod DaemonSets follow class slots"""
+
+    @pytest.fixture
+    def warm(self, k8s, monkeypatch):
+        monkeypatch.setattr(settings, "WARM_POD_ENABLED", True)
+        return WarmPodService(k8s, namespace="default")
+
+    def test_created_with_class(self, db, world, prewarm, warm, k8s, add_slot):
+        """Slot within lead time: warm DaemonSet runs the lab with hostPort, separate from pre-pull"""
+        world.v1.exposed_ports = [8080]
+        world.v1.entrypoint_script = "httpd -f -p 8080"
+        world.v1.env_vars = {"IDE_PASSWORD": "x"}
+        db.commit()
+        add_slot()
+
+        result = sync_prewarm(prewarm, db, NOW, warm=warm)
+
+        assert result["warm_created"] == ["vlab/hello:v1"]
+        name = warm_daemonset_name(world.v1)
+        container = k8s.daemonsets[name]["spec"]["template"]["spec"]["containers"][0]
+        assert container["image"] == HELLO_V1
+        assert container["command"] == ["/bin/sh", "-c", "httpd -f -p 8080"]
+        assert container["ports"] == [{"containerPort": 8080, "hostPort": 8080}]
+        assert {"name": "IDE_PASSWORD", "value": "x"} in container["env"]
+        assert set(prewarm.list_managed()) == {HELLO_V1}  # pre-pull ยังสร้างแยกตามเดิม
+        assert set(warm.list_managed()) == {str(world.v1.id)}
+
+    def test_class_end_keeps_claimed_pod(self, db, world, prewarm, warm, k8s, add_slot):
+        """Class ends: DaemonSet deleted as Orphan, free pods deleted, claimed pod (student still working) kept"""
+        add_slot(length=timedelta(hours=1))
+        sync_prewarm(prewarm, db, NOW, warm=warm)
+        name = warm_daemonset_name(world.v1)
+        free = k8s.add_warm_pod(name, "thinkpad", world.v1.id)
+        claimed = k8s.add_warm_pod(name, "worker-pete", world.v1.id, state="claimed")
+
+        result = sync_prewarm(prewarm, db, NOW + timedelta(hours=2), warm=warm)
+
+        assert result["warm_removed"] == [name]
+        assert k8s.ds_delete_policy[name] == "Orphan"
+        assert k8s.pod(free.metadata.name) is None
+        assert k8s.pod(claimed.metadata.name) is not None
+
+    def test_disabled_no_warm(self, db, world, prewarm, k8s, add_slot):
+        """warm=None (WARM_POD_ENABLED off): only pre-pull DaemonSet"""
+        add_slot()
+
+        result = sync_prewarm(prewarm, db, NOW)
+
+        assert "warm_created" not in result
+        assert all(not n.startswith("warm-") for n in k8s.daemonsets)
+
+    def test_image_entrypoint_and_resources(self, world):
+        """Empty entrypoint uses the image CMD; "2+" / "4+" become integer k8s requests"""
+        world.v1.entrypoint_script = ""
+        world.v1.cpu_requirement, world.v1.memory_requirement = "2+", "4+"
+
+        container = build_warm_daemonset(world.v1)["spec"]["template"]["spec"]["containers"][0]
+
+        assert "command" not in container
+        assert container["resources"] == {"requests": {"cpu": "2000m", "memory": "4096Mi"}}

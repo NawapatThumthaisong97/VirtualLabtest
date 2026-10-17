@@ -10,6 +10,7 @@ DaemonSet ที่ระบบนี้สร้างมี label vlab/prewarm
 scheduler ใช้ annotation นี้เทียบว่า image ไหนมี DaemonSet แล้ว ไม่ต้องพึ่งชื่อ
 """
 import hashlib
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -29,7 +30,16 @@ PULL_ERROR_REASONS = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName",
                       "ErrImageNeverPull", "CreateContainerError"}
 
 
-def daemonset_name(image: str) -> str:
+def k8s_image_ref(lab_image) -> str:
+    """image เต็มแบบเดียวกับที่ pod ของ lab pull ตอน launch ผ่าน SkyPilot (SessionService._build_k8s_task)
+
+    ต้องตรงกันทุกตัวอักษร ไม่งั้น pull ไว้คนละชื่อ cache ไม่ช่วยอะไร
+    """
+    registry = os.getenv("DOCKER_REGISTRY_HOST", "100.127.74.48:5001")
+    return f"{registry}/{lab_image.full_image_name}"
+
+
+def daemonset_name(image: str, prefix: str = "prewarm") -> str:
     """prewarm-<repo>-<tag>-<hash> ชื่อ resource ของ k8s ต้องเป็นตัวเล็ก ตัวเลข และ '-' ไม่เกิน 63 ตัว
 
     ต่อ hash ของ image เต็มไว้ท้าย เพราะ repo ชื่อเดียวกันจาก registry ต่างกันต้องได้คนละชื่อ
@@ -41,7 +51,7 @@ def daemonset_name(image: str) -> str:
         repo, tag = ref, "latest"
     slug = re.sub(r"[^a-z0-9-]+", "-", f"{repo.split('/')[-1]}-{tag}".lower()).strip("-")
     digest = hashlib.sha1(image.encode()).hexdigest()[:6]
-    return f"prewarm-{slug[:46].rstrip('-')}-{digest}"
+    return f"{prefix}-{slug[:46].rstrip('-')}-{digest}"
 
 
 def build_daemonset(image: str) -> dict:

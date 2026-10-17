@@ -12,6 +12,8 @@ from sky.exceptions import ClusterDoesNotExist
 
 from app.adapters.ecr_adapter import get_ecr_token
 from app.configs.settings import settings
+from app.services.kubernetes_service import get_kubernetes_service
+from app.services.warm_pod_service import WARM_POD_PREFIX, WarmPodService, warm_endpoints
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.user import User
@@ -42,6 +44,16 @@ JOB_STARTING_STATUSES = {None, "INIT", "PENDING", "SETTING_UP"}
 
 # ตอน launch พัง เก็บท้าย log ของ job ไว้ก่อนลบ cluster (ลบแล้ว sky logs ดูไม่ได้อีก)
 FAILED_LOG_TAIL_LINES = 50
+
+
+def get_warm_pod_service() -> WarmPodService:
+    # แยกเป็นฟังก์ชันให้เทสแทนด้วย FakeK8s ได้
+    return WarmPodService(get_kubernetes_service())
+
+
+def _is_warm_session(session) -> bool:
+    """session ที่ได้ warm pod (ไม่มี cluster ของ SkyPilot) แยกจาก seed ที่มี k8s_pod_name แต่ไม่มี pod จริง"""
+    return not session.sky_cluster_name and (session.k8s_pod_name or "").startswith(WARM_POD_PREFIX)
 
 
 class SessionService:
@@ -192,8 +204,11 @@ class SessionService:
             slug = f"lab-{slug}".rstrip("-")
         return f"{slug}-{int(time.time())}"
 
-    def create_session(self, user_id: UUID, lab_id: UUID) -> dict:
-        """สร้าง session ใหม่ - launch pod และบันทึกลง database"""
+    def create_session(self, user_id: UUID, lab_id: UUID, client_ip: Optional[str] = None) -> dict:
+        """สร้าง session ใหม่ - launch pod และบันทึกลง database
+
+        client_ip = IP ของเครื่องที่ส่ง request มา ใช้หา warm pod บนเครื่องที่นักศึกษานั่งอยู่
+        """
         
         user = self.db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -240,6 +255,17 @@ class SessionService:
             if existing_session.sky_cluster_name:
                 self._down_quietly(existing_session.sky_cluster_name)
             existing_session = None
+
+        if existing_session and _is_warm_session(existing_session):
+            # warm pod ไม่มี sky.status ให้ถาม ดู pod เอง หายแล้ว = ปิด session เดิมแล้วเปิดใหม่ได้
+            try:
+                if not get_warm_pod_service().pod_exists(existing_session.k8s_pod_name):
+                    self._end_session(existing_session, SessionStatus.STOPPED,
+                                      self._gone_reason(existing_session))
+                    existing_session = None
+            except Exception as e:
+                # ต่อ K3s ไม่ได้ ไม่รู้ว่า pod ยังอยู่ไหม ถือว่ายังอยู่ (ตอบ 409) ดีกว่าเปิดซ้อน
+                logger.warning(f"[warm pod] cannot check {existing_session.k8s_pod_name}: {e}")
 
         if existing_session and existing_session.sky_cluster_name:
 
@@ -288,8 +314,14 @@ class SessionService:
         ):
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
-        cluster_name = self._cluster_name(lab_image)
         run_target = lab.run_target or RunTarget.KUBERNETES
+        if run_target == RunTarget.KUBERNETES:
+            # นั่งอยู่ที่เครื่องแลปที่มี warm pod ว่าง → ใช้เลย ไม่ต้องรอ SkyPilot
+            warm = self._try_warm_pod(user_id, lab, lab_image, client_ip)
+            if warm is not None:
+                return warm
+
+        cluster_name = self._cluster_name(lab_image)
         is_cloud = run_target == RunTarget.AWS
 
         task_config = self.create_fastapi_task(
@@ -358,6 +390,7 @@ class SessionService:
         return {
             "session_id": new_session.id,
             "cluster_name": cluster_name,
+            "launch_mode": "skypilot",
             "lab_id": lab_id,
             "lab_title": lab.title,
             "image_repository": lab_image.repository,
@@ -366,6 +399,80 @@ class SessionService:
             "status": "running",
             "started_at": new_session.started_at,
             "expires_at": new_session.expires_at,
+        }
+
+    def _try_warm_pod(self, user_id: UUID, lab: Lab, lab_image: LabImage,
+                      client_ip: Optional[str]) -> Optional[dict]:
+        """แจก warm pod บนเครื่องที่ request มา คืน None ถ้าใช้ไม่ได้ (ให้ไป SkyPilot ต่อ)
+
+        เงื่อนไขทั้งหมดต้องจริง:
+        1. เปิด WARM_POD_ENABLED
+        2. IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (= นั่งอยู่ที่เครื่องนั้นจริง)
+        3. เครื่องนั้นมี warm pod ของ lab image นี้ที่ว่าง และ Running + Ready
+        4. แย่ง pod สำเร็จ (ไม่มีคนอื่นได้ไปก่อน)
+        K3s ต่อไม่ได้หรือพังตรงไหนก็ไป SkyPilot แทน ไม่ให้นักศึกษาเปิด lab ไม่ได้เพราะ warm pod
+        """
+        if not settings.WARM_POD_ENABLED or not client_ip:
+            return None
+        try:
+            warm = get_warm_pod_service()
+            node = warm.node_for_ip(client_ip)
+            if node is None:
+                return None
+            node_name, node_ip = node
+            pod = warm.find_free_pod(node_name, lab_image.id)
+            if pod is None:
+                logger.info(f"[warm pod] no free pod for {lab_image.full_image_name} on {node_name}")
+                return None
+            session_id = uuid4()
+            if not warm.claim(pod, session_id):
+                logger.info(f"[warm pod] {pod.metadata.name} was claimed by someone else")
+                return None
+        except Exception as e:
+            logger.warning(f"[warm pod] lookup failed, falling back to SkyPilot: {e}")
+            return None
+
+        now = datetime.utcnow()
+        session = SessionModel(
+            id=session_id,
+            user_id=user_id,
+            lab_id=lab.id,
+            lab_image_id=lab_image.id,
+            service_type=ServiceType.LAB,
+            k8s_pod_name=pod.metadata.name,
+            node_name=node_name,
+            endpoints=warm_endpoints(node_ip, lab_image),
+            status=SessionStatus.RUNNING,
+            started_at=now,
+            # ไม่มี autostop ของ SkyPilot reconciler ลบ pod เองเมื่อถึงเวลานี้
+            expires_at=now + timedelta(minutes=lab_image.lifespan_minutes or 60),
+            is_remote=False,
+            is_cloud=False,
+        )
+        try:
+            self.db.add(session)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            # pod ถูก claim ไปแล้วแต่ไม่มี session ชี้ ลบทิ้งให้ DaemonSet สร้างตัวใหม่ ไม่งั้นค้างตลอด
+            warm.delete_pod(pod.metadata.name)
+            raise
+        self.db.refresh(session)
+        logger.info(f"[warm pod] {pod.metadata.name} on {node_name} -> session {session.id}")
+
+        return {
+            "session_id": session.id,
+            "cluster_name": None,
+            "launch_mode": "warm_pod",
+            "node_name": node_name,
+            "lab_id": lab.id,
+            "lab_title": lab.title,
+            "image_repository": lab_image.repository,
+            "image_tag": lab_image.tag,
+            "endpoints": session.endpoints,
+            "status": "running",
+            "started_at": session.started_at,
+            "expires_at": session.expires_at,
         }
 
     def _wait_job_running(self, cluster_name: str, job_id: int) -> None:
@@ -458,6 +565,10 @@ class SessionService:
                     self._down_quietly(session.sky_cluster_name)
                 result["failed"].append(session.sky_cluster_name)
 
+        warm = [s for s in active if s.status == SessionStatus.RUNNING and _is_warm_session(s)]
+        if warm:
+            self._reconcile_warm(warm, result)
+
         # ไม่มีชื่อ cluster = record ที่ไม่ได้มาจาก launch จริง (เช่น seed) ไม่ใช่งานของ reconciler
         running = [
             s for s in active
@@ -479,6 +590,33 @@ class SessionService:
                 self._end_session(session, SessionStatus.STOPPED, self._gone_reason(session))
                 result["stopped"].append(session.sky_cluster_name)
         return result
+
+    def _reconcile_warm(self, sessions: list[SessionModel], result: dict) -> None:
+        """session ของ warm pod: ไม่มี autostop ของ SkyPilot ต้องลบ pod เองเมื่อถึง expires_at
+        และปิด session ที่ pod หายไปเอง (เครื่องดับ / มีคนลบ)
+
+        ต่อ K3s ไม่ได้ = ไม่แตะ session เลยรอบนี้ (เหมือนตอน SkyPilot ล่ม)
+        """
+        try:
+            warm = get_warm_pod_service()
+        except Exception as e:
+            logger.warning(f"[warm pod] reconcile skipped, K3s unavailable: {e}")
+            return
+        now = datetime.now(timezone.utc)
+        for session in sessions:
+            try:
+                expires_at = session.expires_at
+                if expires_at is not None and expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at is not None and now >= expires_at:
+                    warm.delete_pod(session.k8s_pod_name)
+                    self._end_session(session, SessionStatus.STOPPED, SessionEndReason.EXPIRED)
+                    result["stopped"].append(session.k8s_pod_name)
+                elif not warm.pod_exists(session.k8s_pod_name):
+                    self._end_session(session, SessionStatus.STOPPED, SessionEndReason.LOST)
+                    result["stopped"].append(session.k8s_pod_name)
+            except Exception as e:
+                logger.warning(f"[warm pod] reconcile {session.k8s_pod_name} failed: {e}")
 
     def _down_quietly(self, cluster_name: str) -> None:
         """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
@@ -507,7 +645,16 @@ class SessionService:
             # ทางเดียวที่ออกได้คือไปแก้ DB เอง ซึ่งไม่ควรเป็นคำตอบของ API
             #
             # ไม่มี cluster ก็แค่ไม่มีอะไรให้ปิด ปล่อยให้ไปลบต่อได้ตามปกติ
-            if session.sky_cluster_name:
+            if _is_warm_session(session):
+                # ลบ pod แล้ว DaemonSet จะสร้างตัวใหม่ที่สะอาดให้คนถัดไปที่นั่งเครื่องนี้
+                try:
+                    get_warm_pod_service().delete_pod(session.k8s_pod_name)
+                    cluster_stopped = True
+                except Exception as e:
+                    raise ClusterOperationError(
+                        f"Failed to delete warm pod {session.k8s_pod_name}: {str(e)}"
+                    )
+            elif session.sky_cluster_name:
                 try:
                     # sky.down คืน request_id ต้อง sky.get ถึงจะรู้ว่าลบเสร็จหรือพังจริง
                     sky.get(sky.down(session.sky_cluster_name))

@@ -119,7 +119,7 @@ docker push 100.127.74.48:5001/vlab/hello:v1 && docker push 100.127.74.48:5001/v
 
 ---
 
-## Exp3 (ร่าง รอ Pete อนุมัติก่อนเขียนโค้ด) — warm pod
+## Exp3 ร่างแรก (ไม่ใช้แล้ว ดู "Exp3 — warm pod บนเครื่องแลป" ท้ายไฟล์) — warm pod
 
 แนวคิด: ก่อนคาบสร้าง pod ของ lab ขึ้นรอไว้เลย เส้น launch ดูว่ามี pod ว่างไหม ถ้ามีแจกให้ทันที ถ้าไม่มีค่อย launch ผ่าน SkyPilot แบบเดิม
 ได้มากกว่า pre-pull เพราะ SkyPilot บน K3s ใช้ ~5 นาทีแม้ image อยู่ใน cache แล้ว (provision + ลง runtime ใน pod)
@@ -234,3 +234,89 @@ venv/bin/uvicorn app.main:app --port 8000 2>&1 | grep --line-buffered -i -E "pre
   เลยยัง READY ทั้งที่เหลือ worker เดียว → เปลี่ยนเป็น `all_pulled` ดูราย node (+ field `node_ready`) เครื่องที่เพิ่งหลุด
   ≤ `PREWARM_NODE_GRACE_MINUTES` ทำให้ slot กลับเป็น PREWARMING จนกว่าจะกลับมา (เทส regression ใน `tests/prewarm`)
 - ลบช้ากว่า `ends_at` ได้สูงสุด 1 interval (20 วินาที) ไม่มีผลกับนักศึกษา เพราะลบแค่ holder pod image ยังอยู่
+
+---
+
+## Exp3 — warm pod บนเครื่องแลป (branch `feature/warm-pod`)
+
+ร่างแรกใช้ Deployment เพราะเข้าใจว่านักศึกษาเข้ามาจากที่อื่น Pete ยืนยัน (2026-10-17) ว่า**นักศึกษานั่งที่เครื่องแลป
+ซึ่งเป็น K3s worker เอง** → DaemonSet (1 เครื่อง = 1 pod = 1 คน) ถูกต้องและง่ายกว่า
+
+```mermaid
+flowchart TD
+    S(["POST /api/sessions<br/>จากเครื่องแลป"]) --> E{"WARM_POD_ENABLED<br/>+ lab เป็น K3s?"}
+    E -->|"ไม่"| SKY
+    E -->|"ใช่"| IP{"IP ของ connection =<br/>InternalIP ของ worker ที่ Ready?"}
+    IP -->|"ไม่ (นอกห้องแลป / master / NotReady)"| SKY["sky.launch แบบเดิม (~5 นาที)"]
+    IP -->|"ใช่ = นั่งเครื่องนั้นจริง"| F{"มี warm pod ของ image นี้<br/>free + Running + Ready?"}
+    F -->|"ไม่"| SKY
+    F -->|"มี"| C{"claim (patch label + resourceVersion)"}
+    C -->|"409 มีคนแย่งก่อน"| SKY
+    C -->|"สำเร็จ"| R["session RUNNING ทันที<br/>k8s_pod_name, node_name<br/>endpoint http://IP เครื่อง:port (hostPort)"]
+    K["K3s ต่อไม่ได้ที่จุดไหนก็ตาม"] -.-> SKY
+```
+
+| เรื่อง | ทำแบบนี้ | เหตุผล |
+|---|---|---|
+| ยืนยันเครื่อง | IP ของ connection (`request.client.host`) ต้องตรง InternalIP ของ worker ที่ Ready | หน้าเว็บเรียก backend ตรง ไม่ผ่าน proxy / **ไม่เชื่อ `X-Forwarded-For`** (ปลอมได้) / ถ้าวันหน้ามี proxy หรือ Cloudflare ต้องตั้ง trusted proxy |
+| warm pod | DaemonSet แยกจาก pre-pull (`warm-…` label `vlab/warm`) รัน lab จริง (entrypoint, env, hostPort) | pre-pull เป็น holder 10m/16Mi ส่วนตัวนี้กิน CPU / RAM จริงทั้งคาบ จึงมีสวิตช์ `WARM_POD_ENABLED` แยก |
+| แจก pod | patch label `vlab/warm-state: free → claimed` พร้อม `resourceVersion` | 2 request พร้อมกัน ตัวหลังได้ 409 → ไป SkyPilot ไม่ได้ pod ซ้ำ |
+| endpoint | `http://<IP เครื่อง>:<port>` ผ่าน hostPort | 1 เครื่องมี pod เดียว ไม่ต้องสร้าง Service / 2 lab พอร์ตเดียวกันพร้อมกันบนเครื่องเดียวไม่ได้ (ตัวที่ 2 Pending) |
+| จบ session | ลบ pod → DaemonSet สร้างตัวใหม่ที่สะอาด | คนถัดไปไม่เห็นไฟล์ / password ของคนก่อน image อยู่ใน cache แล้ว pod ใหม่ขึ้นไม่กี่วินาที |
+| หมดเวลา | reconciler ลบ pod เองเมื่อถึง `expires_at` (EXPIRED) / pod หายเอง = LOST | ไม่มี autostop ของ SkyPilot |
+| คาบจบ | ลบ DaemonSet แบบ **Orphan** แล้วลบเฉพาะ pod ที่ free | ลบแบบปกติ pod ทุกตัวหายตาม นักศึกษาที่ยังทำต่อหลังคาบจะโดนตัด |
+| แยก session | warm session = ไม่มี `sky_cluster_name` และ `k8s_pod_name` ขึ้นต้น `warm-` | session seed มี `k8s_pod_name = lab-se301-sophia` แต่ไม่มี pod จริง ต้องไม่โดน reconciler ปิด |
+
+ตั้งค่า: `WARM_POD_ENABLED=true` (launch ใช้ warm pod) + `PREWARM_ENABLED=true` (scheduler สร้าง / ลบ DaemonSet ตามคาบ)
+API ใหม่: `GET /api/warm-pods` (pod ไหน เครื่องไหน free / claimed) / response ของ `POST /api/sessions` มี `launch_mode`
+(`warm_pod` / `skypilot`) และ `node_name`, `cluster_name` เป็น null ได้
+
+เทส: `tests/session/test_warm_pod.py` (21) + `tests/prewarm/test_class_slots.py::TestWarmPodScheduler` (4)
+manifest ผ่าน `kubectl apply --dry-run=server` กับ cluster จริง (เจอ memory `0.05Gi` เป็น fractional byte → แก้เป็น Mi จำนวนเต็ม)
+
+### ทดลองจริง (Pete รัน)
+
+`web-portal/backend/.env`
+```env
+PREWARM_ENABLED=true
+PREWARM_INTERVAL_SECONDS=20
+PREWARM_LEAD_MINUTES=1
+WARM_POD_ENABLED=true
+```
+
+```bash
+cd web-portal/backend
+venv/bin/python script/prewarm_demo_slots.py --start 1 --first 15 --second 20
+# --host 0.0.0.0: ให้เครื่องอื่น (worker-pete) เรียกได้ และให้ ThinkPad เรียกผ่าน IP Tailscale ของตัวเอง
+venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 2>&1 | grep --line-buffered -i -E "prewarm|warm pod|error|traceback"
+```
+
+| เคส | วิธี | ต้องได้ |
+|---|---|---|
+| warm pod ขึ้นทุก worker | `curl -s 100.93.121.17:8000/api/warm-pods \| jq` | thinkpad + worker-pete มี pod v1 / v2 `free` + `ready` |
+| Start จาก ThinkPad | POST จาก ThinkPad ไปที่ `100.93.121.17:8000` | `launch_mode = warm_pod`, `node_name = thinkpad` ภายในไม่กี่วินาที |
+| เปิด lab | `curl http://100.93.121.17:8080` | `hello v1` |
+| Start ซ้ำ | POST เดิมอีกครั้ง | 409 |
+| Start จาก worker-pete | ssh ไป worker-pete แล้ว POST ไปที่ `100.93.121.17:8000` (user อื่น) | `node_name = worker-pete` (ไม่ได้ pod ของ ThinkPad) |
+| เรียกผ่าน localhost | POST ไปที่ `localhost:8000` (IP = 127.0.0.1 ไม่ใช่ worker) | ตกไป SkyPilot (ถ้า SkyPilot API ไม่ได้เปิด = 500 ตามปกติ) |
+| DELETE | `curl -X DELETE …/api/sessions/<id>` | pod เดิมหาย DaemonSet สร้างตัวใหม่ `free` |
+| คาบ v1 จบ | รอ | DaemonSet warm v1 หาย (pod ที่ claimed ยังอยู่จนกว่าจะ DELETE / หมดเวลา) |
+
+| เคส | ผล |
+|---|---|
+รอบจริง 2026-10-17 (คาบ v1 / v2 เริ่ม ~03:05, lifespan 10 นาที)
+
+| เคส | ผล |
+|---|---|
+| warm pod ขึ้นทุก worker | ✅ 03:04:56 scheduler สร้าง warm v1 / v2 + pre-pull, slot → READY รอบถัดไป, pod 4 ตัว free + ready |
+| hostPort เปิดได้จริง | ✅ `100.93.121.17:8080` / `:8081` และ `100.83.96.97:8080` / `:8081` ตอบ `hello v1` / `hello v2` |
+| Start จาก ThinkPad → warm_pod | ✅ 03:05:38 session RUNNING ทันที `warm-hello-v1-…-7kmwk` บน thinkpad, `sky_cluster_name` ว่าง, endpoint `http://100.93.121.17:8080` |
+| Start ซ้ำ → 409 | ✅ `session_already_exists` (ข้อความยังขึ้น `Cluster: None` ปรับทีหลังได้) |
+| DELETE → pod ใหม่ | ✅ 03:09 STOPPED / USER_DELETE, pod เดิมหาย DaemonSet สร้าง `…-bwlqd` free + ready ใน **~4 วินาที** |
+| worker-pete NotReady → ไม่แจก pod ของเครื่องนั้น | ✅ (เกิดเอง) 03:06:35 worker-pete NotReady ครั้งที่ 3 pod ขึ้น notready ไม่อยู่ในเงื่อนไขแจก |
+| Start จาก worker-pete → pod ของเครื่องตัวเอง | ⏳ รอ worker-pete กลับมา Ready |
+| localhost → SkyPilot | ⏳ |
+| คาบจบ ลบ DaemonSet แต่ pod ที่ใช้อยู่ยังอยู่ | ⏳ |
+
+เรื่องที่เจอ: worker-pete NotReady ซ้ำทุก ~10 นาที แต่ Tailscale ping จาก ThinkPad ตอบ 16 ms → น่าจะเป็น heartbeat
+ของ k3s-agent ไป master ไม่ใช่เครื่องดับ ต้องดู `journalctl -u k3s-agent` บน worker-pete
