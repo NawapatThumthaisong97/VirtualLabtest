@@ -31,3 +31,8 @@ webportal_k8s_enabled: true
 # seed ข้อมูล persona (Sophia + วิชา + lab) — ปิดไว้เป็นค่าเริ่มต้นเพราะเขียนทับ
 # ข้อมูลเดิมได้ เปิดตอนตั้งเครื่องใหม่ด้วย -e webportal_seed=true
 webportal_seed: false
+
+# SkyPilot กลางที่ backend ส่ง launch ไป (role skypilot-node) — "" = ใช้ SkyPilot ใน container แทน
+webportal_skypilot_endpoint: "{{ ('https://' + skypilot_domain) if skypilot_domain is defined else '' }}"
+# token ของ service account (สร้างจาก dashboard) ต้องตั้งใน group_vars เมื่อใช้ SkyPilot กลาง
+webportal_skypilot_token: "{{ skypilot_backend_token | default('') }}"

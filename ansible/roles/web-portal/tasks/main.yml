@@ -1,3 +1,13 @@
+# ใช้ SkyPilot กลางแต่ไม่มี token = backend ได้ 401 ทุกครั้งที่ launch เช็กก่อนลงอะไรทั้งหมด
+- name: Require backend token when using the central SkyPilot API server
+  ansible.builtin.assert:
+    that: webportal_skypilot_token | length > 0
+    fail_msg: >-
+      ตั้ง skypilot_backend_token ใน group_vars/all.yml (สร้าง service account token จาก
+      https://{{ skypilot_domain | default('<skypilot_domain>') }}/dashboard) หรือตั้ง
+      webportal_skypilot_endpoint="" เพื่อใช้ SkyPilot ใน container แทน
+  when: webportal_skypilot_endpoint | length > 0
+
 # ---------- Docker ----------
 # ติดตั้งจาก repo ทางการของ Docker ไม่ใช้ docker.io ของ Ubuntu
 # เพราะตัวนั้นเก่าและไม่มี compose v2 plugin ติดมาด้วย
@@ -193,8 +203,24 @@
   delay: 5
   until: db_probe.status in [200, 401, 403]
 
-# SkyPilot ต้องมี kubectl, nc, socat, ssh, rsync ซึ่ง pip ไม่ได้ลงให้ ถ้าขาดจะพังเป็น
-# FileNotFoundError ที่ไม่บอกว่าตัวไหนหาย — ใช้ sky check ตรวจตอน deploy แทน
+# SkyPilot กลาง: backend ต้องคุยกับ server กลางได้ด้วย token (ผิด = 401, ไม่มี token = ไปไม่ถึง)
+# ต้องเห็น endpoint ของ server กลาง ไม่ใช่ "default local API server"
+- name: Verify backend reaches the central SkyPilot API server
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      sky api info
+    chdir: "{{ webportal_dir }}"
+  register: sky_api_info
+  changed_when: false
+  failed_when: >-
+    sky_api_info.rc != 0
+    or webportal_skypilot_endpoint not in sky_api_info.stdout
+    or 'HEALTHY' not in sky_api_info.stdout
+  when: webportal_skypilot_endpoint | length > 0
+
+# SkyPilot ใน container (ไม่ได้ตั้ง SkyPilot กลาง) ต้องมี kubectl, nc, socat, ssh, rsync ซึ่ง pip
+# ไม่ได้ลงให้ ถ้าขาดจะพังเป็น FileNotFoundError ที่ไม่บอกว่าตัวไหนหาย — ใช้ sky check ตรวจตอน deploy แทน
 - name: Verify SkyPilot can actually use the Kubernetes cluster
   ansible.builtin.command:
     cmd: >-
@@ -204,7 +230,9 @@
   register: sky_check
   changed_when: false
   failed_when: "'Kubernetes: disabled' in sky_check.stdout"
-  when: webportal_k8s_enabled | bool
+  when:
+    - webportal_k8s_enabled | bool
+    - webportal_skypilot_endpoint | length == 0
 
 - name: Report access URL
   ansible.builtin.debug:

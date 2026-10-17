@@ -22,6 +22,15 @@ skypilot_domain: <SKYPILOT_DOMAIN>   # e.g. skypilot.yourdomain.com
 
 skypilot_chart_version: "<SKYPILOT_CHART_VERSION>"   # ณ ตอนนี้แนะนําให้ลง 0.12.3+post.1 เราใช้ตัวนี้อยู่
 
+# รหัส user admin ของ dashboard (https://<skypilot_domain>/dashboard) ใช้สร้าง admin ครั้งแรกเท่านั้น
+# เปลี่ยนรหัสทีหลังทำใน dashboard ได้เลย สร้างรหัสด้วย: openssl rand -base64 18
+skypilot_admin_password: <SKYPILOT_ADMIN_PASSWORD>
+
+# token ของ backend (service account) — รัน skypilot-node เสร็จแล้วเข้า dashboard ด้วย admin
+# → Users → Service Accounts → สร้าง token ชื่อ vlab-backend (แสดงครั้งเดียว) แล้วใส่ที่นี่ ก่อนรัน web-portal
+# ถ้า reset namespace skypilot (skypilot_reset=true) token เดิมหาย ต้องสร้างใหม่
+skypilot_backend_token: <SKYPILOT_BACKEND_TOKEN>
+
 # --- Optional: skypilot-node role ---
 # ปกติ role ไม่ลบ namespace skypilot เดิมทิ้ง (idempotent) จะรีเซ็ตแบบลบทิ้งแล้วลงใหม่ได้ก็ต่อเมื่อ
 # รันด้วย: ansible-playbook site.yml --tags skypilot-node -e skypilot_reset=true
