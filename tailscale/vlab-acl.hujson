@@ -1,10 +1,11 @@
 // Tailscale policy สำหรับ cluster ห้องแลป (Exp4: กันเครื่องอื่นเปิด lab ของเรา)
 //
-// !! ไฟล์นี้ไม่ได้ apply เอง Pete วางใน admin console (Access controls) แล้วกด Save
-// !! policy มีผลทั้ง tailnet (รวมเครื่องของ Film / AWS router / Windows) ให้ "รวม" กับ policy เดิม
-//    อย่าวางทับทั้งไฟล์ถ้า policy เดิมมีส่วนอื่น (ssh, grants, nodeAttrs ฯลฯ) ให้เก็บไว้
+// apply ด้วย script/tailscale-acl.sh (plan → apply) ไม่ต้องกดใน admin console
+// script backup ของเดิม validate + รัน tests และแสดง diff ก่อนเขียนจริงทุกครั้ง
+// !! policy มีผลทั้ง tailnet (รวมเครื่องของ Film / AWS router / Windows) ไฟล์นี้คือ policy ทั้งก้อน
+//    ถ้าจะเพิ่มกฎอื่นของ tailnet ให้เพิ่มที่ไฟล์นี้ ไม่งั้นรอบหน้าที่ apply จะถูกทับ
 //
-// เครื่องที่ต้องติด tag (admin console → Machines → ... → Edit ACL tags):
+// tag ของแต่ละเครื่องอยู่ใน tailscale/vlab-tags.tsv (script ติดให้)
 //   tag:vlab-server   = master (100.125.244.48), thinkpad (100.93.121.17, backend + SkyPilot)
 //   tag:vlab-worker   = เครื่องในห้องแลป: worker-pete (100.83.96.97), workerfilm (100.97.13.122)
 //   tag:vlab-registry = register (100.127.74.48)
@@ -45,7 +46,18 @@
 		// พอร์ต lab (8080 / 5173 / 8443 / NodePort ฯลฯ) ระหว่าง worker ไม่มีข้อไหนเปิด = ปิด
 	],
 
-	// admin console รัน tests ทุกครั้งที่กด Save ถ้าไม่ผ่านจะไม่ยอม save
+	// Tailscale SSH: เก็บตามค่าเริ่มต้นของ tailnet เดิม (คนในทีมเข้าเครื่องของตัวเองแบบ check mode)
+	// ไม่เกี่ยวกับการกันเครื่องแลป เพราะเครื่องที่ติด tag ไม่นับเป็น autogroup:self
+	"ssh": [
+		{
+			"action": "check",
+			"src":    ["autogroup:member"],
+			"dst":    ["autogroup:self"],
+			"users":  ["autogroup:nonroot", "root"],
+		},
+	],
+
+	// Tailscale รัน tests ทุกครั้งที่ validate / save ถ้าไม่ผ่านจะไม่ยอม save
 	"tests": [
 		{
 			"src": "tag:vlab-worker",
