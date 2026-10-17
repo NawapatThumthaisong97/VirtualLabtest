@@ -145,6 +145,19 @@ class TestDuplicateStart:
         assert (old.status, old.end_reason) == (SessionStatus.STOPPED, reason)
         assert len(fake_sky.launched) == 1
 
+    def test_regression_status_check_fails_keeps_old_session(self, svc, db, world, fake_sky, add_session):
+        """Regression: SkyPilot unreachable during the check: error, old session untouched, no new launch"""
+        # เดิมตั้ง session เก่าเป็น STOPPED แล้ว launch ต่อ → cluster เก่าไม่ถูก down ค้างจน autostop
+        old = add_session(SessionStatus.RUNNING, cluster="music-lab-unknown")
+        fake_sky.status_error = ConnectionError("Could not connect to SkyPilot API server")
+
+        with pytest.raises(ClusterOperationError, match="try again"):
+            svc.create_session(world.user.id, world.k8s_lab.id)
+
+        db.refresh(old)
+        assert (old.status, old.ended_at) == (SessionStatus.RUNNING, None)
+        assert fake_sky.launched == []
+
 
 class TestLaunchFailure:
     """Launch failure"""

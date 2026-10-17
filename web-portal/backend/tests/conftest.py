@@ -34,6 +34,23 @@ AMI = "ami-0123456789abcdef0"
 REGISTRY = "10.0.0.1:5001"
 
 
+# ค่าที่เทสยังต้องใช้จาก .env (หา DB ทดสอบจาก DATABASE_URL ดู fixture db_engine)
+SETTINGS_FROM_DOTENV = {"DATABASE_URL"}
+
+
+@pytest.fixture(autouse=True)
+def default_settings(monkeypatch):
+    """ทุกเทสเริ่มจากค่า default ในโค้ด ไม่ใช่ .env ของเครื่องที่รัน
+
+    .env ของ dev เปิดฟีเจอร์ไว้ทดลอง (LAB_ISOLATION_ENABLED / WARM_POD_ENABLED / PREWARM_LEAD_MINUTES ฯลฯ)
+    ถ้าเทสอ่านค่าพวกนี้ ผลจะขึ้นกับว่าเครื่องไหนรัน — เทสที่ต้องการค่าอื่นให้ monkeypatch เองในเทส
+    """
+    defaults = type(settings)(_env_file=None)
+    for name in type(settings).model_fields:
+        if name not in SETTINGS_FROM_DOTENV:
+            monkeypatch.setattr(settings, name, getattr(defaults, name))
+
+
 @pytest.fixture
 def service():
     # builder ไม่ใช้ db / repository เลยส่ง None ได้

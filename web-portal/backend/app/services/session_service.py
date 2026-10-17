@@ -292,11 +292,15 @@ class SessionService:
                         existing_session = None
 
             except Exception as e:
-
-                print(f"[Warning] Failed to check cluster status: {e}")
-                # ไม่รู้จริงว่า cluster ยังอยู่ไหม เลยไม่ใส่ end_reason
-                self._end_session(existing_session, SessionStatus.STOPPED, None)
-                existing_session = None
+                # ถาม SkyPilot ไม่ได้ (เช่น "Could not connect to SkyPilot API server") = ไม่รู้ว่า cluster
+                # เดิมยังอยู่ไหม เดิมเดาว่าหยุดแล้ว ตั้ง STOPPED แล้ว launch ต่อ → cluster เดิมไม่ถูก down
+                # (ลบ session ทีหลังก็ข้ามเพราะเห็นว่า STOPPED) ค้างกินเครื่องจน autostop และเปิดซ้อนได้
+                # ไม่แตะ session เดิม ให้กดใหม่ทีหลัง เหมือน warm pod ที่ต่อ K3s ไม่ได้
+                logger.warning(f"[session] cannot check cluster {existing_session.sky_cluster_name}: {e}")
+                raise ClusterOperationError(
+                    f"Cannot verify existing session {existing_session.id} "
+                    f"(cluster {existing_session.sky_cluster_name}), please try again: {e}"
+                )
         
         if existing_session:
             raise SessionAlreadyExistsError(
