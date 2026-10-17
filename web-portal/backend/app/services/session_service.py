@@ -1,18 +1,22 @@
 from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
-from datetime import datetime
-from typing import Optional
-from decimal import Decimal, ROUND_UP
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Any
+import io
 import os
 import re
+import shlex
 import sky
-import yaml
+import time
+from sky.exceptions import ClusterDoesNotExist
 
-from app.models.session import Session as SessionModel, SessionStatus, ServiceType
+from app.adapters.ecr_adapter import get_ecr_token
+from app.configs.settings import settings
+
+from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.user import User
-from app.models.enrollment import Enrollment, RoleInCourse
-from app.models.lab import Lab, LabStatus
-from app.models.lab_image import ImageStatus, LabImage
+from app.models.lab import Lab, RunTarget
+from app.models.lab_image import LabImage
 from app.repositories.session_repository import SessionRepository
 from app.repositories.lab_repository import LabRepository
 from app.repositories.lab_image_repository import LabImageRepository
@@ -26,7 +30,18 @@ from app.exceptions.domain import (
     ClusterOperationError,
     ForbiddenError,
 )
-from app.services.quota_reservation_service import QuotaReservationService
+from app.utils.logger import logger
+
+# session ที่ PENDING นานกว่านี้ถือว่าค้าง (launch จริง: K3s ~5 นาที, AWS ~2.5 นาที)
+PENDING_TIMEOUT = timedelta(minutes=20)
+
+# รอ job ของ lab ผ่าน setup จนเป็น RUNNING (AWS: docker login + pull ~10 วินาที)
+JOB_START_TIMEOUT = timedelta(minutes=10)
+JOB_POLL_SECONDS = 5
+JOB_STARTING_STATUSES = {None, "INIT", "PENDING", "SETTING_UP"}
+
+# ตอน launch พัง เก็บท้าย log ของ job ไว้ก่อนลบ cluster (ลบแล้ว sky logs ดูไม่ได้อีก)
+FAILED_LOG_TAIL_LINES = 50
 
 
 class SessionService:
@@ -38,13 +53,11 @@ class SessionService:
         session_repository: SessionRepository,
         lab_repository: LabRepository,
         lab_image_repository: LabImageRepository,
-        quota_reservation_service: QuotaReservationService | None = None,
     ):
         self.db = db
         self.session_repository = session_repository
         self.lab_repository = lab_repository
         self.lab_image_repository = lab_image_repository
-        self.quota_reservation_service = quota_reservation_service or QuotaReservationService(db)
 
     def get_all_sessions(
         self, user_id: Optional[UUID] = None, status: Optional[SessionStatus] = None
@@ -65,55 +78,119 @@ class SessionService:
         lab_image: LabImage,
         app_name: str,
         env: str = "production",
-    ) -> str:
-        """สร้าง SkyPilot task YAML จาก LabImage model"""
+        run_target: RunTarget = RunTarget.KUBERNETES,
+    ) -> dict:
+        """สร้าง SkyPilot task config (dict) จาก LabImage ตาม run_target ของ lab
+
+        คืนเป็น dict แล้วส่งเข้า sky.Task.from_yaml_config ตรง ๆ แทนการต่อ YAML ด้วย
+        f-string แบบเดิม ซึ่งพังเมื่อค่า env มี ':' หรือ '#' และเมื่อ entrypoint มีหลายบรรทัด
+        """
+        if run_target == RunTarget.AWS:
+            return self._build_aws_task(lab_image, app_name, env)
+        return self._build_k8s_task(lab_image, app_name, env)
+
+    def _lab_envs(self, lab_image: LabImage, env: str) -> dict[str, str]:
+        envs = {k: str(v) for k, v in (lab_image.env_vars or {}).items()}
+        envs["APP_ENV"] = env
+        return envs
+
+    def _autostop(self, lab_image: LabImage) -> dict:
+        # wait_for: none = ลบ cluster เมื่อครบ idle_minutes โดยไม่รอ job หรือ SSH
+        # lifespan_minutes จึงเป็นอายุสูงสุดของ lab ไม่ใช่เวลานับหลังเลิกใช้
+        return {
+            "idle_minutes": lab_image.lifespan_minutes or 60,
+            "down": True,
+            "wait_for": "none",
+        }
+
+    def _build_k8s_task(self, lab_image: LabImage, app_name: str, env: str) -> dict:
+        """K3s on-prem: SkyPilot รัน image เป็น pod ตรง ๆ (container mode)"""
         docker_registry_host = os.getenv("DOCKER_REGISTRY_HOST", "100.127.74.48:5001")
-        full_image = f"{docker_registry_host}/{lab_image.full_image_name}"
-        image_id = f"docker:{full_image}"
-        
-        resources = lab_image.get_skypilot_resources()
-        
-        ports_list = resources.get("ports", [])
-        if ports_list:
-            ports_yaml = "\n".join([f"    - {port}" for port in ports_list])
-            ports_section = f"\n  ports:\n{ports_yaml}"
-        else:
-            ports_section = ""
-        
-    
-        env_vars = lab_image.env_vars or {}
-        env_vars["APP_ENV"] = env 
-        if env_vars:
-            env_yaml = "\n".join([f"  {key}: {value}" for key, value in env_vars.items()])
-            envs_section = f"\nenvs:\n{env_yaml}\n"
-        else:
-            envs_section = ""
-        
-   
-        idle_minutes = lab_image.lifespan_minutes or 60
-        
-        # Optional
-        workdir_section = ""
+        resources_req = lab_image.get_skypilot_resources()
+
+        resources: dict[str, Any] = {
+            "infra": "kubernetes",
+            "cpus": resources_req["cpus"],
+            "memory": resources_req["memory"],
+            "disk_size": resources_req.get("disk_size", 50),
+            "image_id": f"docker:{docker_registry_host}/{lab_image.full_image_name}",
+            "autostop": self._autostop(lab_image),
+        }
+        if resources_req.get("ports"):
+            resources["ports"] = resources_req["ports"]
+
+        task: dict[str, Any] = {
+            "name": app_name,
+            "resources": resources,
+            "envs": self._lab_envs(lab_image, env),
+            "run": lab_image.entrypoint_script or "/bin/bash /run.sh",
+        }
         if lab_image.workdir:
-            workdir_section = f"\nworkdir: {lab_image.workdir}\n"
+            task["workdir"] = lab_image.workdir
+        return task
 
-        yaml_str = f"""name: {app_name}
+    def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str) -> dict:
+        """AWS: VM mode บน EC2 ใน private subnet
 
-resources:
-  infra: kubernetes
-  cpus: {resources['cpus']}
-  memory: {resources['memory']}
-  disk_size: {resources.get('disk_size', 50)}
-  image_id: {image_id}{ports_section}
-  autostop:
-    idle_minutes: {idle_minutes}
-    down: true
-    wait_for: none
-{workdir_section}{envs_section}
-run: |
-  {lab_image.entrypoint_script or '/bin/bash /run.sh'}
-"""
-        return yaml_str
+        ไม่ใช้ image_id: docker: เพราะแบบนั้น SkyPilot ต้องลง runtime ลงใน container ใหม่
+        ทุกครั้ง (~5 นาที) และ image ของ lab ไม่ได้ตั้ง HOME ไว้ ใช้ AMI ที่ bake runtime
+        ไว้แล้ว แล้ว docker run image จาก ECR เองแทน (~1 นาที)
+
+        ECR_TOKEN ไม่ได้ใส่ตรงนี้ create_session ส่งเข้าเป็น secret ตอน launch
+        """
+        if not settings.ECR_REGISTRY_HOST or not settings.AWS_LAB_AMI:
+            raise ClusterOperationError(
+                "AWS launch is not configured: set ECR_REGISTRY_HOST and AWS_LAB_AMI"
+            )
+
+        image = f"{settings.ECR_REGISTRY_HOST}/{lab_image.full_image_name}"
+        ports = lab_image.get_skypilot_resources().get("ports") or []
+
+        # env ของ lab ต้องส่งเข้า container ไม่ใช่ VM เลยแปลงเป็น -e ของ docker run
+        docker_args = ["--rm", "--name", "lab"]
+        docker_args += [arg for port in ports for arg in ("-p", f"{port}:{port}")]
+        for key, value in self._lab_envs(lab_image, env).items():
+            docker_args += ["-e", f"{key}={value}"]
+        if lab_image.workdir:
+            docker_args += ["-w", lab_image.workdir]
+        docker_run = "sudo docker run " + " ".join(shlex.quote(a) for a in docker_args)
+        # entrypoint ว่าง = ใช้ ENTRYPOINT/CMD ของ image เอง เช่น code-server ที่ตั้ง ENTRYPOINT ไว้
+        # ถ้าต่อคำสั่งท้าย docker run จะกลายเป็น argument ของ ENTRYPOINT นั้นแล้วพัง
+        # (K3s ใช้ไม่ได้แบบนี้ เพราะ SkyPilot แทน command ของ pod เอง ต้องมี run เสมอ)
+        entrypoint = (lab_image.entrypoint_script or "").strip()
+        command = f" /bin/bash -c {shlex.quote(entrypoint)}" if entrypoint else ""
+
+        resources: dict[str, Any] = {
+            "infra": f"aws/{settings.AWS_REGION}",
+            "instance_type": settings.AWS_INSTANCE_TYPE,
+            "disk_size": settings.AWS_DISK_SIZE,
+            "image_id": settings.AWS_LAB_AMI,
+            "autostop": self._autostop(lab_image),
+        }
+        if ports:
+            resources["ports"] = ports
+
+        registry = shlex.quote(settings.ECR_REGISTRY_HOST)
+        return {
+            "name": app_name,
+            "resources": resources,
+            "setup": (
+                f'echo "$ECR_TOKEN" | sudo docker login -u AWS --password-stdin {registry}\n'
+                f"sudo docker pull {shlex.quote(image)}\n"
+            ),
+            # foreground: job อยู่ใน RUNNING ตลอดที่ lab เปิด (_wait_job_running ใช้สถานะนี้)
+            # ส่ง entrypoint เป็นก้อนเดียวผ่าน bash -c ถ้าต่อท้ายตรง ๆ แล้ว entrypoint มีหลายบรรทัด
+            # บรรทัดที่ 2 เป็นต้นไปจะไปรันบน VM แทนที่จะรันใน container
+            "run": f"{docker_run} {shlex.quote(image)}{command}\n",
+        }
+
+    def _cluster_name(self, lab_image: LabImage) -> str:
+        # ชื่อ cluster ของ SkyPilot ต้องเป็นตัวเล็ก ตัวเลข และ '-' ขึ้นต้นด้วยตัวอักษร
+        slug = re.sub(r"[^a-z0-9-]+", "-", lab_image.repository.split("/")[-1].lower()).strip("-")
+        if not slug[:1].isalpha():
+            # เช่น repo "2048-game" SkyPilot ไม่รับชื่อที่ขึ้นต้นด้วยตัวเลข
+            slug = f"lab-{slug}".rstrip("-")
+        return f"{slug}-{int(time.time())}"
 
     def create_session(self, user_id: UUID, lab_id: UUID) -> dict:
         """สร้าง session ใหม่ - launch pod และบันทึกลง database"""
@@ -143,43 +220,57 @@ run: |
             .filter(
                 SessionModel.user_id == user_id,
                 SessionModel.lab_id == lab_id,
-                SessionModel.status == SessionStatus.RUNNING,
+                # PENDING ด้วย กันกด Start ซ้ำระหว่างที่ launch รอบแรกยังไม่เสร็จ
+                SessionModel.status.in_([SessionStatus.RUNNING, SessionStatus.PENDING]),
                 SessionModel.deleted_at.is_(None)
             )
             .first()
         )
-        
-     
+
+        # PENDING = launch รอบก่อนยังไม่จบ ห้ามไปถาม sky.status เพราะช่วงไม่กี่วินาทีแรก
+        # SkyPilot ยังไม่มี record ของ cluster โค้ดข้างล่างจะเข้าใจว่า cluster หายแล้ว
+        # ตั้ง STOPPED แล้วปล่อย launch ซ้อน (เทสกับ K3s จริงได้ 2 pod ของ user เดียวกัน)
+        if existing_session and existing_session.status == SessionStatus.PENDING:
+            if not self._is_stale_pending(existing_session):
+                raise SessionAlreadyExistsError(
+                    f"Session is still starting. Session ID: {existing_session.id}, Cluster: {existing_session.sky_cluster_name}"
+                )
+            # ค้างเกิน timeout = backend ตายกลาง launch ไม่มีใครมาอัปเดต record นี้แล้ว
+            self._end_session(existing_session, SessionStatus.FAILED, SessionEndReason.STALE_PENDING)
+            if existing_session.sky_cluster_name:
+                self._down_quietly(existing_session.sky_cluster_name)
+            existing_session = None
+
         if existing_session and existing_session.sky_cluster_name:
-        
+
             try:
                 request_id = sky.status(cluster_names=[existing_session.sky_cluster_name])
                 cluster_records = sky.get(request_id)
-                
+
                 if not cluster_records:
-    
-                    existing_session.status = SessionStatus.STOPPED
-                    existing_session.ended_at = datetime.utcnow()
-                    self.db.commit()
-        
+
+                    self._end_session(existing_session, SessionStatus.STOPPED,
+                                      self._gone_reason(existing_session))
+
                     existing_session = None
                 else:
-                
+
                     cluster_status = cluster_records[0].get('status')
                     from sky import ClusterStatus
-                    
-                    if cluster_status == ClusterStatus.STOPPED:
+
+                    if cluster_status in [ClusterStatus.STOPPED, ClusterStatus.AUTOSTOPPING]:
                         # Cluster หยุดแล้ว → อัพเดท status เป็น STOPPED
-                        existing_session.status = SessionStatus.STOPPED
-                        existing_session.ended_at = datetime.utcnow()
-                        self.db.commit()
-                        
+                        self._end_session(existing_session, SessionStatus.STOPPED,
+                                          self._gone_reason(existing_session))
+
                         existing_session = None
-                
+
             except Exception as e:
-                raise ClusterOperationError(
-                    "Could not verify the existing cluster state; refusing to start a duplicate"
-                ) from e
+
+                print(f"[Warning] Failed to check cluster status: {e}")
+                # ไม่รู้จริงว่า cluster ยังอยู่ไหม เลยไม่ใส่ end_reason
+                self._end_session(existing_session, SessionStatus.STOPPED, None)
+                existing_session = None
         
         if existing_session:
             raise SessionAlreadyExistsError(
@@ -197,64 +288,72 @@ run: |
         ):
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
-        cluster_name = f"music-lab-{uuid4().hex[:12]}"
-       
-        
+        cluster_name = self._cluster_name(lab_image)
+        run_target = lab.run_target or RunTarget.KUBERNETES
+        is_cloud = run_target == RunTarget.AWS
 
-        task_yaml = self.create_fastapi_task(
+        task_config = self.create_fastapi_task(
             lab_image=lab_image,
             app_name=cluster_name,
             env="staging",
+            run_target=run_target,
         )
+        # ขอ token ก่อนสร้าง record จะได้ไม่มี session ค้างถ้าแค่ขอ token ไม่ผ่าน
+        secrets = None
+        if run_target == RunTarget.AWS:
+            try:
+                secrets = [("ECR_TOKEN", get_ecr_token(settings.AWS_REGION))]
+            except Exception as e:
+                raise ClusterOperationError(f"Failed to get ECR token: {e}")
+        task = sky.Task.from_yaml_config(task_config, secrets_overrides=secrets)
 
-        task = sky.Task.from_yaml_config(yaml.safe_load(task_yaml))
-        compute_hours, storage_mb = self._quota_requirements(lab_image)
-        reservation_ids = self.quota_reservation_service.reserve_personal_cluster(
-            user_id, compute_hours, storage_mb
+        # บันทึกเป็น PENDING ก่อน launch ถ้า launch พังกลางทางจะยังรู้ชื่อ cluster ไว้ตามลบ
+        # (บน AWS cluster ที่ไม่มี record คือ EC2 ที่เปิดค้างเสียเงินโดยไม่มีใครเห็น)
+        new_session = SessionModel(
+            user_id=user_id,
+            lab_id=lab_id,
+            lab_image_id=lab_image.id,
+            service_type=ServiceType.LAB,
+            sky_cluster_name=cluster_name,
+            status=SessionStatus.PENDING,
+            started_at=datetime.utcnow(),
+            is_remote=False,
+            is_cloud=is_cloud,
         )
-        is_cluster_launch_attempted = False
+        self.db.add(new_session)
+        self.db.commit()
+        self.db.refresh(new_session)
+
+        job_id = None
         try:
-            is_cluster_launch_attempted = True
             request_id = sky.launch(task, cluster_name=cluster_name)
-            job_id, _ = sky.stream_and_get(request_id)
+            job_id, handle = sky.stream_and_get(request_id)
+            self._wait_job_running(cluster_name, job_id)
             endpoints = sky.get(sky.endpoints(cluster=cluster_name))
+        except Exception as e:
+            self._end_session(new_session, SessionStatus.FAILED, SessionEndReason.LAUNCH_FAILED)
+            if job_id is not None:
+                logger.warning(
+                    f"[launch failed] {cluster_name} job {job_id} log tail:\n"
+                    f"{self._job_log_tail(cluster_name, job_id)}"
+                )
+            self._down_quietly(cluster_name)
+            raise ClusterOperationError(f"Failed to launch cluster {cluster_name}: {e}")
 
-            formatted_endpoints = {
-                str(port): f"http://{url}" if not url.startswith("http") else url
-                for port, url in endpoints.items()
-            }
+        formatted_endpoints = {
+            str(port): f"http://{url}" if not url.startswith("http") else url
+            for port, url in endpoints.items()
+        }
 
-            new_session = SessionModel(
-                user_id=user_id,
-                lab_id=lab_id,
-                lab_image_id=lab_image.id,
-                service_type=ServiceType.LAB,
-                sky_cluster_name=cluster_name,
-                sky_job_id=job_id,
-                endpoints=formatted_endpoints,
-                status=SessionStatus.RUNNING,
-                started_at=datetime.utcnow(),
-                is_remote=False,
-                is_cloud=False,
-            )
-
-            self.db.add(new_session)
-            self.quota_reservation_service.mark_committed(reservation_ids)
-            self.db.commit()
-            self.db.refresh(new_session)
-        except Exception as error:
-            self.db.rollback()
-            if is_cluster_launch_attempted:
-                try:
-                    sky.down(cluster_name)
-                except Exception as cleanup_error:
-                    raise ClusterOperationError(
-                        "Cluster provisioning failed and cleanup could not be verified; quota remains reserved"
-                    ) from cleanup_error
-            self.quota_reservation_service.release(reservation_ids)
-            if isinstance(error, ClusterOperationError):
-                raise
-            raise ClusterOperationError("Cluster provisioning failed") from error
+        new_session.sky_job_id = job_id
+        new_session.endpoints = formatted_endpoints
+        new_session.status = SessionStatus.RUNNING
+        # autostop เริ่มนับตอน launch เสร็จ (wait_for: none) หน้าเว็บใช้นับถอยหลังได้
+        new_session.expires_at = datetime.utcnow() + timedelta(
+            minutes=lab_image.lifespan_minutes or 60
+        )
+        self.db.commit()
+        self.db.refresh(new_session)
 
         return {
             "session_id": new_session.id,
@@ -266,21 +365,129 @@ run: |
             "endpoints": formatted_endpoints,
             "status": "running",
             "started_at": new_session.started_at,
+            "expires_at": new_session.expires_at,
         }
 
-    @staticmethod
-    def _quota_requirements(lab_image: LabImage) -> tuple[Decimal, int]:
-        cpu_match = re.match(r"\s*(\d+(?:\.\d+)?)", lab_image.cpu_requirement)
-        if cpu_match is None:
-            raise LabImageMissingError("Lab image has an invalid CPU requirement")
+    def _wait_job_running(self, cluster_name: str, job_id: int) -> None:
+        """sky.launch คืนตั้งแต่ส่ง job ส่วน setup ไปรันต่อเองทีหลัง ถ้าไม่รอ setup ที่พัง
+        (เช่น docker pull tag ที่ไม่มี) จะถูกบันทึกเป็น RUNNING ทั้งที่ job เป็น FAILED_SETUP
+        และเครื่องค้างอยู่ (เทสกับ AWS จริงแล้ว) raise แล้ว create_session จะลบ cluster ให้เอง
+        """
+        deadline = time.monotonic() + JOB_START_TIMEOUT.total_seconds()
+        while True:
+            status = sky.get(sky.job_status(cluster_name, [job_id])).get(job_id)
+            status = getattr(status, "value", status)
+            if status == "RUNNING":
+                return
+            if status not in JOB_STARTING_STATUSES:
+                raise ClusterOperationError(f"Lab job {job_id} did not start: {status}")
+            if time.monotonic() > deadline:
+                raise ClusterOperationError(f"Lab job {job_id} still {status} after {JOB_START_TIMEOUT}")
+            time.sleep(JOB_POLL_SECONDS)
 
-        cpu_count = Decimal(cpu_match.group(1))
-        lifespan_hours = Decimal(lab_image.lifespan_minutes or 60) / Decimal(60)
-        compute_hours = (cpu_count * lifespan_hours).quantize(
-            Decimal("0.01"), rounding=ROUND_UP
+    def _is_stale_pending(self, session: SessionModel) -> bool:
+        if not session.started_at:
+            return True
+        started_at = session.started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - started_at > PENDING_TIMEOUT
+
+    def _end_session(
+        self,
+        session: SessionModel,
+        status: SessionStatus,
+        reason: Optional[SessionEndReason],
+    ) -> None:
+        session.status = status
+        session.ended_at = datetime.utcnow()
+        session.end_reason = reason
+        self.db.commit()
+
+    def _gone_reason(self, session: SessionModel) -> SessionEndReason:
+        """cluster หายหลัง expires_at = autostop ตามเวลา ก่อนหน้านั้น = เครื่อง/pod ตายเอง"""
+        expires_at = session.expires_at
+        if expires_at is None:
+            return SessionEndReason.LOST
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) >= expires_at:
+            return SessionEndReason.EXPIRED
+        return SessionEndReason.LOST
+
+    def _job_log_tail(self, cluster_name: str, job_id: int) -> str:
+        buf = io.StringIO()
+        try:
+            sky.tail_logs(cluster_name, job_id, follow=False,
+                          tail=FAILED_LOG_TAIL_LINES, output_stream=buf)
+        except Exception as e:
+            return f"(cannot fetch job log: {e})"
+        # ตัดรหัสสีของ terminal ที่ SkyPilot ใส่มา ไม่งั้นอ่านใน log file ลำบาก
+        return re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+
+    def _down_quietly(self, cluster_name: str) -> None:
+        """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
+        try:
+            sky.get(sky.down(cluster_name))
+        except ClusterDoesNotExist:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to clean up cluster {cluster_name}: {e}")
+
+    def reconcile_sessions(self) -> dict:
+        """ปิด session ที่เครื่องหายไปแล้วแต่ DB ยังไม่รู้ (autostop, pod/EC2 ตายเอง) และ
+        PENDING ที่ค้างเกิน timeout ให้ session_reconciler เรียกเป็นระยะ
+
+        เรียก sky.status ครั้งเดียวต่อรอบ ถ้าเรียกไม่ได้ (API server ล่ม) จะไม่แตะ session
+        RUNNING เลย เพราะไม่รู้จริงว่าเครื่องยังอยู่ไหม
+        """
+        active = (
+            self.db.query(SessionModel)
+            .filter(
+                SessionModel.status.in_([SessionStatus.RUNNING, SessionStatus.PENDING]),
+                SessionModel.deleted_at.is_(None),
+            )
+            .all()
         )
-        storage_mb = max(int(lab_image.disk_size or 0) * 1024, 1)
-        return compute_hours, storage_mb
+        result = {"checked": len(active), "stopped": [], "failed": []}
+
+        for session in active:
+            if session.status == SessionStatus.PENDING and self._is_stale_pending(session):
+                self._end_session(session, SessionStatus.FAILED, SessionEndReason.STALE_PENDING)
+                if session.sky_cluster_name:
+                    self._down_quietly(session.sky_cluster_name)
+                result["failed"].append(session.sky_cluster_name)
+
+        # ไม่มีชื่อ cluster = record ที่ไม่ได้มาจาก launch จริง (เช่น seed) ไม่ใช่งานของ reconciler
+        running = [
+            s for s in active
+            if s.status == SessionStatus.RUNNING and s.sky_cluster_name
+        ]
+        if not running:
+            return result
+
+        # AUTO = refresh เฉพาะ cluster ที่ตั้ง autostop ไว้ ซึ่ง lab ทุกตัวตั้ง ไม่ refresh
+        # แล้ว API server จะยังเห็นเครื่องที่ skylet ลบตัวเองไปแล้วเป็น UP อยู่
+        records = sky.get(sky.status(
+            cluster_names=[s.sky_cluster_name for s in running],
+            refresh=sky.StatusRefreshMode.AUTO,
+        ))
+        alive = {r.get("name"): r.get("status") for r in records}
+        for session in running:
+            # AUTOSTOPPING ยังไม่นับว่าหาย เคยเห็นค้างสถานะนี้ตอน autostop ลบเครื่องไม่สำเร็จ
+            if alive.get(session.sky_cluster_name) in (None, sky.ClusterStatus.STOPPED):
+                self._end_session(session, SessionStatus.STOPPED, self._gone_reason(session))
+                result["stopped"].append(session.sky_cluster_name)
+        return result
+
+    def _down_quietly(self, cluster_name: str) -> None:
+        """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
+        try:
+            sky.get(sky.down(cluster_name))
+        except ClusterDoesNotExist:
+            pass
+        except Exception as e:
+            print(f"[Warning] Failed to clean up cluster {cluster_name}: {e}")
 
     def delete_session(self, session_id: UUID) -> dict:
         """ลบ session - stop cluster (ถ้ายังรัน) และ soft delete"""
@@ -289,8 +496,8 @@ run: |
         if not session:
             raise SessionNotFoundError(f"Session with id {session_id} not found")
         
-        is_cluster_stopped = False
-        if session.status == SessionStatus.RUNNING:
+        cluster_stopped = False
+        if session.status in (SessionStatus.RUNNING, SessionStatus.PENDING):
             # RUNNING แต่ไม่มี sky_cluster_name = record ค้าง ไม่ใช่ cluster ที่รันอยู่จริง
             # เกิดได้จาก seed, จาก create ที่พังกลางทางก่อนบันทึกชื่อ cluster, หรือ
             # จากการแก้ DB ตรง ๆ
@@ -302,23 +509,23 @@ run: |
             # ไม่มี cluster ก็แค่ไม่มีอะไรให้ปิด ปล่อยให้ไปลบต่อได้ตามปกติ
             if session.sky_cluster_name:
                 try:
-                    sky.down(session.sky_cluster_name)
-                    is_cluster_stopped = True
+                    # sky.down คืน request_id ต้อง sky.get ถึงจะรู้ว่าลบเสร็จหรือพังจริง
+                    sky.get(sky.down(session.sky_cluster_name))
+                    cluster_stopped = True
+                except ClusterDoesNotExist:
+                    # autostop ลบไปเองแล้ว ไม่มีอะไรให้ปิด
+                    pass
                 except Exception as e:
                     raise ClusterOperationError(
                         f"Failed to stop cluster {session.sky_cluster_name}: {str(e)}"
                     )
 
-            session.status = SessionStatus.STOPPED
-            session.ended_at = datetime.utcnow()
-            self.db.commit()
+            self._end_session(session, SessionStatus.STOPPED, SessionEndReason.USER_DELETE)
 
         self.session_repository.soft_delete(session)
         
         return {
             "session_id": session_id,
             "cluster_name": session.sky_cluster_name,
-            "isClusterStopped": is_cluster_stopped,
-            "message": "Session deleted successfully" if not is_cluster_stopped
-                      else "Session stopped and deleted successfully"
+            "cluster_stopped": cluster_stopped,
         }

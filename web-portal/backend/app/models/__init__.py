@@ -8,7 +8,7 @@ from .enrollment import Enrollment, RoleInCourse
 from .lab import Lab, LabStatus
 from .lab_image import LabImage, ImageStatus
 from .lab_progress import LabProgress, ProgressStatus
-from .session import Session, ServiceType, SessionStatus
+from .session import Session, ServiceType, SessionStatus, SessionEndReason
 from .usage_record import UsageRecord
 from .quota import Quota, QuotaPeriod
 from .quota_reservation import QuotaReservation
@@ -31,6 +31,7 @@ __all__ = [
     "Session",
     "ServiceType",
     "SessionStatus",
+    "SessionEndReason",
     "UsageRecord",
     "Quota",
     "QuotaPeriod",

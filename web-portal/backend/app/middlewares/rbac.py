@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import Depends, Request
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
@@ -44,7 +46,15 @@ def verify_permission(
             and not allow_collection
         )
         if is_context_required and not is_global_access:
-            if scope == "course":
+            if scope == "course" and resource_domain == "courses":
+                # สำหรับ courses:*:course ให้ใช้ course_id จาก path params
+                resource_id = request.path_params.get("course_id")
+                course_id_value = resource_id
+            elif scope == "self" and resource_domain == "courses":
+                # สำหรับ courses:read:self ให้ใช้ course_id จาก path params
+                resource_id = request.path_params.get("course_id")
+                course_id_value = None
+            elif scope == "course":
                 course_id_value = request.path_params.get("course_id")
                 resource_keys = (
                     ("cluster_name", "cluster_id", "resource_id")

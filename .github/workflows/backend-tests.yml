@@ -1,0 +1,102 @@
+# รัน pytest ของ backend ทุก PR / push ที่แตะ web-portal/backend
+# ไม่ต่อ SkyPilot / cluster / AWS จริง (ใช้ FakeSky) ต้องการแค่ Postgres สำหรับเทส
+#
+# 1 job ต่อ 1 โฟลเดอร์ใน tests/ ชื่อ job คือชื่อ check ที่เห็นใน PR (และที่ branch protection ผูกไว้)
+# มีโฟลเดอร์เทสใหม่ → เพิ่ม job ใหม่ ไม่งั้นเทสนั้นจะไม่ถูกรันใน CI
+name: Backend tests
+
+on:
+  pull_request:
+    paths:
+      - "web-portal/backend/**"
+      - ".github/workflows/backend-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "web-portal/backend/**"
+      - ".github/workflows/backend-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  session:
+    name: Sky launch & session tests
+    # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: virtual_lab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d virtual_lab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web-portal/backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: web-portal/backend/requirement.txt
+
+      - name: Install dependencies
+        run: pip install -r requirement.txt
+
+      - name: Run tests/session
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/session --color=yes
+
+  course:
+    name: Course & RBAC tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: virtual_lab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d virtual_lab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web-portal/backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: web-portal/backend/requirement.txt
+
+      - name: Install dependencies
+        run: pip install -r requirement.txt
+
+      - name: Run tests/course
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/course --color=yes

@@ -3,6 +3,7 @@ FastAPI Main Application
 Entry point for the FastAPI backend
 """
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
@@ -10,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -17,6 +19,7 @@ from sqladmin import Admin, ModelView
 
 from app.configs import settings, check_db_connection
 from app.configs.db import engine
+from app.services.session_reconciler import run_reconciler
 from app.models import (
     User,
     Course,
@@ -150,12 +153,26 @@ async def lifespan(app: FastAPI):
         logger.error("Cannot connect to database. Server will not start.")
         sys.exit(1)  # ออกจากโปรแกรมถ้าเชื่อมต่อ DB ไม่สำเร็จ
 
+    reconciler_stop = asyncio.Event()
+    reconciler_task = None
+    if settings.SESSION_RECONCILE_INTERVAL_SECONDS > 0:
+        reconciler_task = asyncio.create_task(
+            run_reconciler(settings.SESSION_RECONCILE_INTERVAL_SECONDS, reconciler_stop)
+        )
+
     logger.info("Application started successfully!")
 
     yield  # Server กำลังทำงาน
 
     # Shutdown
     logger.info("Shutting down application...")
+    if reconciler_task:
+        reconciler_stop.set()
+        # รอบที่กำลังเรียก SkyPilot อยู่หยุดกลางทางไม่ได้ (อยู่ใน thread) รอสั้น ๆ แล้วปล่อย
+        try:
+            await asyncio.wait_for(reconciler_task, timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("Session reconciler did not stop within 10s")
 
 
 # สร้าง FastAPI app
@@ -221,6 +238,18 @@ async def domain_exception_handler(request, exc: DomainError):
             break
 
     logger.warning(f"[{exc.code}] {exc.message}")
+    
+    # Generic message based on error type for top-level message
+    generic_messages = {
+        status.HTTP_404_NOT_FOUND: "Resource not found",
+        status.HTTP_403_FORBIDDEN: "Access denied",
+        status.HTTP_401_UNAUTHORIZED: "Authentication required",
+        status.HTTP_409_CONFLICT: "Resource conflict",
+        status.HTTP_400_BAD_REQUEST: "Invalid request",
+        status.HTTP_500_INTERNAL_SERVER_ERROR: "Internal server error",
+    }
+    
+    generic_message = generic_messages.get(status_code, "Request failed")
 
     return JSONResponse(
         status_code=status_code,
@@ -246,6 +275,39 @@ async def http_exception_handler(request, exc: StarletteHTTPException):
         status_code=exc.status_code,
         content=error_response_content("http_error", message),
         headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """
+    จับ Pydantic validation errors (เช่น UUID ผิดรูปแบบ, required field หาย)
+    แปลงให้เป็น format เดียวกับระบบ
+    """
+    # ดึง error message แรก (ปกติจะมีหลาย errors)
+    errors = exc.errors()
+    first_error = errors[0] if errors else {}
+    
+    # สร้าง error message ที่อ่านง่าย
+    field_name = " -> ".join(str(loc) for loc in first_error.get("loc", []))
+    error_msg = first_error.get("msg", "Validation error")
+    
+    message = f"Invalid {field_name}: {error_msg}"
+    
+    logger.warning(f"Validation error: {message}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "success": False,
+            "message": message,
+            "data": None,
+            "error": {
+                "code": "validation_error",
+                "message": message,
+                "details": errors,  # รายละเอียดเต็มสำหรับ debug
+            },
+        },
     )
 
 
