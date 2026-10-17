@@ -33,6 +33,8 @@ webportal_k8s_enabled: true
 webportal_seed: false
 
 # SkyPilot กลางที่ backend ส่ง launch ไป (role skypilot-node) — "" = ใช้ SkyPilot ใน container แทน
-webportal_skypilot_endpoint: "{{ ('https://' + skypilot_domain) if skypilot_domain is defined else '' }}"
+# ชี้ NodePort 30880 บน master ผ่าน Tailscale (k8s/skypilot-api-tailnet-service.yaml) ไม่ใช่ https://<skypilot_domain>
+# เพราะทาง Cloudflare ช้าจน sky SDK timeout — เครื่อง web-portal ต้องติด tag:vlab-server ถึงเข้าพอร์ตนี้ได้
+webportal_skypilot_endpoint: "http://{{ webportal_k8s_master_ip }}:30880"
 # token ของ service account (สร้างจาก dashboard) ต้องตั้งใน group_vars เมื่อใช้ SkyPilot กลาง
 webportal_skypilot_token: "{{ skypilot_backend_token | default('') }}"

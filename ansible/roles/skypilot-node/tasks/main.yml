@@ -241,6 +241,16 @@
 - name: Apply SkyPilot Ingress
   ansible.builtin.command: k3s kubectl apply -f /tmp/skypilot-ingress.yaml
 
+# ทางเข้าของ backend ผ่าน Tailscale (NodePort 30880) แทน Cloudflare ที่ช้า / สะดุดจน sky SDK
+# (health check timeout 2.5s) launch พัง เหตุผลเต็มอยู่ในไฟล์ manifest
+- name: Apply SkyPilot API NodePort for the backend (Tailscale)
+  ansible.builtin.shell: |
+    cat <<'YAML' | k3s kubectl apply -f -
+    {{ lookup('file', playbook_dir + '/../k8s/skypilot-api-tailnet-service.yaml') }}
+    YAML
+  register: skypilot_tailnet_svc
+  changed_when: "'unchanged' not in skypilot_tailnet_svc.stdout"
+
 - name: Wait for Ingress to be created
   ansible.builtin.command: |
     k3s kubectl get ingress skypilot-api-ingress -n skypilot

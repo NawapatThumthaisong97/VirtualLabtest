@@ -105,10 +105,47 @@ Corefile เดิมเป็นค่าเริ่มต้นของ k3s 
 | เทส | ผล |
 |---|---|
 | NetworkPolicy ใน ns `skypilot` (ทาง A) | ✅ pod label `vlab/lab=true` บน thinkpad: thinkpad เปิดได้ / master เปิดไม่ได้ · pod ไม่มี label: เปิดได้ทั้งคู่ · API server ยัง 200 |
-| backend อ่าน `SKYPILOT_*` จาก `.env` (ไม่ใช้ `--env-file`) | ✅ log `SkyPilot API server: https://skypilot.bell-lab.space (token: yes)` |
+| backend อ่าน `SKYPILOT_*` จาก `.env` (ไม่ใช้ `--env-file`) | ✅ log `SkyPilot API server: ... (token: yes)` |
 | เทส backend ทั้งหมด | ✅ 137/137 (แก้ `tests/conftest.py` ให้ทุกเทสใช้ค่า default ของ Settings ไม่อ่าน `.env` ของเครื่อง dev — เดิม warm pod 2 ตัว fail เพราะ `.env` ตั้ง `LAB_ISOLATION_ENABLED=true`) |
 | launch ผ่าน `/api/sessions` + ลบ | ✅ 325s, IDE 302, ลบสะอาด (รวมทั้งวัน 5/5 หลังแก้ CoreDNS) |
 | `ansible-playbook --syntax-check` | ✅ |
 | render manifest ของ role + `kubectl apply --dry-run=server` | ✅ NetworkPolicy spec ตรงกับของจริง, coredns-custom unchanged |
 | รัน playbook จริงกับ cluster | ⏳ ยังไม่ได้รัน (role skypilot-node จะ `helm upgrade` ด้วย values ใหม่) |
-| กด Start จากเครื่อง worker จริง (pin_node + label) | ⏳ ยังไม่ได้เทส |
+| กด Start จากเครื่อง worker จริง (pin_node + label) | ✅ ดูหัวข้อ 7 |
+
+## 7. ย้าย endpoint ของ backend ออกจาก Cloudflare + เทส Start จากเครื่องแลป (2026-10-17 ค่ำ)
+
+### ปัญหา
+เทส Start จาก worker-pete ได้ `Could not connect to SkyPilot API server` (ลบ session ก็เจอ) ทั้งที่ server ปกติ
+sky SDK เช็ก `/api/health` ด้วย timeout 2.5s และไม่ retry เมื่อ ConnectionError วัดแล้ว:
+
+| เส้นทาง | min | median | max |
+|---|---|---|---|
+| ตรงเข้า ClusterIP (จาก master) | 0.006s | 0.007s | 0.011s |
+| `https://skypilot.bell-lab.space` (Cloudflare tunnel) | 0.07s | 0.34s | **2.1s** |
+| NodePort 30880 ผ่าน Tailscale (หลังแก้) | 0.010s | 0.029s | 0.17s |
+
+### แก้
+- `k8s/skypilot-api-tailnet-service.yaml`: Service NodePort 30880 → pod API server ตัวเดิม (chart ล็อก Service เป็น ClusterIP)
+  role skypilot-node apply ให้ ยังต้องใช้ token / รหัสเหมือนเดิม (ไม่มีรหัส = 401)
+- backend: `SKYPILOT_API_SERVER_ENDPOINT=http://<master Tailscale IP>:30880` (role web-portal ตั้งเป็นค่าเริ่มต้น)
+- Tailscale ACL ไม่ต้องแก้: worker เข้า master ได้แค่ 6443/8000/5173/80/443 → เข้า 30880 ไม่ได้
+  เครื่องที่รัน backend ต้องติด `tag:vlab-server`
+- dashboard สำหรับคนยังเข้าทาง Cloudflare ได้ตามเดิม
+
+### บั๊กที่เจอระหว่างเทส (มีอยู่ก่อน)
+`create_session` เช็ก session เดิมด้วย `sky.status` ถ้าเรียกไม่ได้จะเดาว่า cluster หยุดแล้ว → ตั้ง STOPPED แล้ว launch ต่อ
+cluster เดิมไม่ถูก down (ลบ session ทีหลังก็ข้ามเพราะเห็น STOPPED) ค้างจน autostop 1 ชม. และเปิดซ้อนได้
+แก้: ตอบ `ClusterOperationError` ("please try again") ไม่แตะ session เดิม ไม่ launch + เทส regression
+
+### ผลเทส Start จากเครื่องแลป (จำลองด้วย IP ของเครื่อง: thinkpad ยิงผ่าน Tailscale IP,
+worker-pete ใช้ pod hostNetwork บน worker-pete ยิงหา backend)
+
+| เทส | ผล |
+|---|---|
+| A. Start จาก thinkpad | ✅ pod ลง thinkpad, label `vlab/lab=true`, nodeSelector thinkpad (243s) |
+| B. Start จาก worker-pete | ✅ pod ลง worker-pete, label + nodeSelector worker-pete |
+| lab ของ thinkpad: thinkpad / master / worker-pete เปิด | ✅ 302,200 / ❌ / ❌ |
+| lab ของ worker-pete: worker-pete / thinkpad / master เปิด | ✅ 302,200 / ❌ / ❌ |
+| เทส backend ทั้งหมด | ✅ 138/138 (เทสใหม่ fail กับโค้ดเก่า ผ่านกับโค้ดใหม่) |
+| launch + ลบ 3 รอบติด ผ่าน NodePort | ✅ 3/3: 151s / 164s / 164s (ผ่าน Cloudflare เดิม 173–325s) IDE 302 ลบแบบ down cluster จริงทุกรอบ |

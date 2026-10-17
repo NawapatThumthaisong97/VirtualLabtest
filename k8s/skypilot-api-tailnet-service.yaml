@@ -1,0 +1,28 @@
+# ทางเข้า SkyPilot API server สำหรับ backend ผ่าน Tailscale (http://<Tailscale IP ของ master>:30880)
+#
+# ทำไมไม่ใช้ https://skypilot.bell-lab.space: request ต้องออกเน็ตไป Cloudflare แล้ววนกลับเข้า tunnel
+# วัดแล้ว /api/health ช้าสุด ~2.1s (median 0.34s) ส่วนยิงตรงใน cluster ~0.01s
+# sky SDK เช็ก health ด้วย timeout 2.5s และไม่ retry เมื่อ ConnectionError → launch / down พังเป็นพัก ๆ
+# ด้วย "Could not connect to SkyPilot API server"
+#
+# chart ของ SkyPilot ล็อก Service ตัวเองเป็น ClusterIP จึงสร้างแยก selector เดียวกับ skypilot-api-api-service
+# ยังต้องใช้ token / รหัสเหมือนเดิม (auth อยู่ใน API server) ทราฟฟิกใน Tailscale เข้ารหัสด้วย WireGuard
+# NodePort เปิดบนทุก IP ของทุก node (รวม LAN) — Tailscale ACL จำกัดว่าเครื่องไหนเข้าพอร์ตนี้ได้
+# dashboard สำหรับคนยังเข้าทาง Cloudflare ได้ตามเดิม
+#
+# ใช้: kubectl apply -f k8s/skypilot-api-tailnet-service.yaml   (role skypilot-node apply ให้)
+apiVersion: v1
+kind: Service
+metadata:
+  name: skypilot-api-tailnet
+  namespace: skypilot
+spec:
+  type: NodePort
+  selector:
+    app: skypilot-api-api
+    skypilot.co/ready: "true"
+  ports:
+    - name: http
+      port: 80
+      targetPort: 46580
+      nodePort: 30880
