@@ -320,3 +320,88 @@ venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 2>&1 | grep --line-buff
 
 เรื่องที่เจอ: worker-pete NotReady ซ้ำทุก ~10 นาที แต่ Tailscale ping จาก ThinkPad ตอบ 16 ms → น่าจะเป็น heartbeat
 ของ k3s-agent ไป master ไม่ใช่เครื่องดับ ต้องดู `journalctl -u k3s-agent` บน worker-pete
+
+---
+
+## Exp4 — กันเครื่องอื่นเปิด lab ของเรา (branch `feature/lab-isolation`)
+
+ปัญหา: นักศึกษาเครื่องข้าง ๆ เปิด IDE ของเราได้ 2 ทาง
+1. **hostPort ผูกทุก IP ของเครื่อง** → `http://<Tailscale IP เครื่องเรา>:8080` เปิดได้จากทุกเครื่องใน tailnet
+2. **pod IP (10.42.x.x) ไปถึงได้จากทุกเครื่องใน cluster** ผ่าน flannel → **Tailscale ACL กันไม่ได้** เพราะห่ออยู่ใน
+   VXLAN 8472/udp ที่ cluster ต้องเปิด
+
+จึงกัน 2 ชั้น (Pete ตัดสินใจ 2026-10-17: fallback SkyPilot บังคับลงเครื่องตัวเอง, ACL เขียน + tests แล้ว Pete apply เอง,
+ThinkPad เป็น server)
+
+| ชั้น | ทำอะไร | ไฟล์ |
+|---|---|---|
+| K3s | warm pod: hostPort `hostIP: 127.0.0.1` → endpoint `http://localhost:<port>` | `warm_pod_service.py` |
+| K3s | SkyPilot fallback จากเครื่องแลป: `kubernetes.pod_config` nodeSelector = เครื่องที่กด Start + label `vlab/lab` | `session_service._build_k8s_task` |
+| K3s | NetworkPolicy `vlab-lab-isolation` ปิดขาเข้าของ pod ที่มี `vlab/lab=true` | `k8s/lab-isolation-networkpolicy.yaml` |
+| Tailscale | tag server / worker / registry + เปิดเฉพาะพอร์ตที่ cluster ต้องใช้ + `tests` | `tailscale/vlab-acl.hujson` |
+
+สวิตช์: `LAB_ISOLATION_ENABLED` (default false) DaemonSet ที่สร้างก่อนเปิดสวิตช์ไม่เปลี่ยนเอง ต้องลบให้ scheduler สร้างใหม่
+
+### กฎ ACL ที่แก้จากที่ร่างไว้
+
+| ร่าง | ที่ใช้จริง | เหตุผล |
+|---|---|---|
+| 1. server → worker ทุกพอร์ต | server → `*:*` | ThinkPad (SkyPilot) ต้องถึง AWS subnet ผ่าน router ด้วย |
+| 2. worker → master เฉพาะ 6443 | + `8472/udp` + backend / หน้าเว็บ (8000, 5173, 80, 443) | coredns / traefik / metrics-server อยู่บน master / นักศึกษาต้องเข้าเว็บ |
+| 3. worker ↔ worker 8472 + 10250 | เฉพาะ `8472/udp` | มีแต่ master ที่เรียก kubelet |
+| (ไม่มี) | worker → registry 5001 | ไม่งั้น pull image ไม่ได้ |
+| (ไม่มี) | `autogroup:member → *:*` | policy ใช้ทั้ง tailnet เครื่องของคนในทีม (Film, Windows, AWS router) ต้องใช้งานได้เหมือนเดิม |
+
+### ข้อจำกัดที่รู้แล้ว
+
+- SkyPilot บน K3s เปิดพอร์ตแบบ **LoadBalancer** เป็นค่าเริ่มต้น k3s ใช้ servicelb สร้าง pod รับ traffic บน**ทุกเครื่อง**
+  แล้วส่งต่อไป pod ของ lab → เข้าจากเครื่องไหนก็ได้ และ NetworkPolicy ปิดขาเข้าจะตัด servicelb ทิ้งด้วย
+  (รวมทางจากเครื่องตัวเอง) → ต้องตั้ง SkyPilot `kubernetes.ports: podip` (ตั้งที่ API server มีผลทุก lab K3s)
+  endpoint จะเป็น pod IP ซึ่งเครื่องตัวเองเปิดได้ เครื่องอื่นโดน NetworkPolicy กัน (ยังไม่ได้ทดลอง)
+- เครื่องของ `autogroup:member` (คนในทีม) ยังเปิด lab ของ worker ได้ ห้องแลปจริงเครื่องนักศึกษาต้องติด tag worker ทุกเครื่อง
+- NetworkPolicy อาศัยพฤติกรรมของ kube-router ที่ปล่อย traffic จาก address ของเครื่องตัวเองเข้า pod บนเครื่องนั้น
+  ถ้าไม่เป็นอย่างนั้นจริง localhost จะเปิดไม่ได้ (ทดลองข้อ A2)
+
+### ทดลอง
+
+**A. ชั้น K3s (warm pod)** — ทดสอบจากเครื่อง worker-pete ด้วย debug pod ที่ใช้ `hostNetwork` (= เหมือนนั่งที่เครื่องนั้น)
+ไม่ต้อง ssh
+
+| ข้อ | จาก | ไป | ก่อนใส่ NetworkPolicy | หลังใส่ |
+|---|---|---|---|---|
+| A1 | thinkpad host | `localhost:8080` | ต้องเปิดได้ (hostIP 127.0.0.1 ใช้กับ CNI ของ k3s ได้ไหม) | ต้องเปิดได้ |
+| A2 | thinkpad host | pod IP ของตัวเอง:8080 | เปิดได้ | **ต้องเปิดได้** (kube-router ปล่อยเครื่องตัวเอง) |
+| A3 | thinkpad host | `100.93.121.17:8080` | **ต้องเปิดไม่ได้** (ไม่ได้ผูก Tailscale IP แล้ว) | เปิดไม่ได้ |
+| A4 | worker-pete host | `100.93.121.17:8080` | เปิดไม่ได้ | เปิดไม่ได้ |
+| A5 | worker-pete host | pod IP ของ thinkpad:8080 | **เปิดได้ (= รูที่ต้องปิด)** | **ต้องเปิดไม่ได้** |
+| A6 | pod บน worker-pete | pod IP ของ thinkpad:8080 | เปิดได้ | ต้องเปิดไม่ได้ |
+
+**B. SkyPilot fallback** (ยังไม่ทำรอบนี้ ต้องเปลี่ยน config ของ SkyPilot API server เป็น `kubernetes.ports: podip` และ launch จริง ~5 นาที)
+
+**C. Tailscale ACL** (Pete apply) แล้วทดสอบจาก worker-pete:
+`nc -zv 100.93.121.17 22` (ต้องโดนปิด), `nc -zv 100.125.244.48 6443` (ต้องเปิด), `curl 100.127.74.48:5001/v2/` (ต้องเปิด),
+`kubectl get nodes` ต้องยัง Ready ทุกเครื่อง และ pod บน worker-pete ยัง pull image / เรียก DNS ได้
+
+### ผล (2026-10-17 11:10, warm pod hello:v1 — thinkpad pod `10.42.3.15`, worker-pete pod `10.42.2.254`)
+
+เครื่อง worker-pete ทดสอบด้วย debug pod `hostNetwork` (= เหมือนนั่งที่เครื่อง) และ pod ธรรมดา ลบทิ้งแล้วหลังเทส
+
+| ข้อ | จาก → ไป | ก่อน NetworkPolicy | หลัง NetworkPolicy |
+|---|---|---|---|
+| A1 | thinkpad → `localhost:8080` | ✅ เปิดได้ (hostIP 127.0.0.1 ใช้กับ CNI ของ k3s ได้) | ✅ เปิดได้ |
+| A2 | thinkpad → pod IP ตัวเอง | เปิดได้ | ✅ **เปิดได้** (kube-router ปล่อยเครื่องตัวเองจริง) |
+| A3 | thinkpad → `100.93.121.17:8080` | ✅ ปิด | ✅ ปิด |
+| A4 | worker-pete → `100.93.121.17:8080` | ✅ ปิด | ✅ ปิด |
+| A5 | worker-pete host → pod IP ของ thinkpad | ❌ **เปิดได้ (รูจริง)** | ✅ ปิด |
+| A6 | pod บน worker-pete → pod IP ของ thinkpad | ❌ **เปิดได้** | ✅ ปิด |
+| ทิศกลับ | thinkpad → pod IP ของ worker-pete | – | ✅ ปิด |
+| ของตัวเอง | worker-pete → `localhost:8080` / pod IP ตัวเอง | เปิดได้ | ✅ เปิดได้ |
+| launch | กด Start จาก thinkpad | – | ✅ `warm_pod` endpoint `http://localhost:8080` |
+
+สรุป: hostIP 127.0.0.1 ปิดทาง Tailscale IP / NetworkPolicy ปิดทาง pod IP ข้ามเครื่อง และยังเปิด lab ของเครื่องตัวเองได้
+NetworkPolicy `vlab-lab-isolation` ยัง apply ค้างไว้ใน cluster (มีผลเฉพาะ pod ที่มี `vlab/lab=true`)
+
+| ข้อ | ผล |
+|---|---|
+| B (SkyPilot `ports: podip`) | ⏳ ยังไม่ได้ทำ |
+| C (Tailscale ACL) | ⏳ รอ Pete apply |
