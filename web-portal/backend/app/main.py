@@ -5,6 +5,20 @@ Entry point for the FastAPI backend
 
 import asyncio
 import sys
+from types import ModuleType
+
+if sys.platform == "win32":
+    for _unix_mod in ("resource", "fcntl", "termios", "tty", "pty", "pwd", "grp", "syslog"):
+        if _unix_mod not in sys.modules:
+            _m = ModuleType(_unix_mod)
+            _m.__all__ = []  # type: ignore[attr-defined]
+            _m.getpagesize = lambda: 4096  # type: ignore[attr-defined]
+            _m.getrlimit = lambda *_: (1024, 4096)  # type: ignore[attr-defined]
+            _m.setrlimit = lambda *_: None  # type: ignore[attr-defined]
+            _m.ioctl = lambda _fd, _req, buf=b"", *_: buf  # type: ignore[attr-defined]
+            _m.__getattr__ = lambda _name: 0  # type: ignore[attr-defined]
+            sys.modules[_unix_mod] = _m
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
 from fastapi.exceptions import RequestValidationError

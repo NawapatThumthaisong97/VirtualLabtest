@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: virtual-lab-backend
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/name: virtual-lab-backend
+    app.kubernetes.io/component: api-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: virtual-lab-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: virtual-lab-backend
+    spec:
+      serviceAccountName: auth-service-account
+      containers:
+        - name: backend
+          image: virtual-lab-backend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DEBUG
+              value: "false"
+            - name: ALLOWED_EMAIL_DOMAINS_STR
+              value: "dome.tu.ac.th,tu.ac.th"
+            - name: AUTH_COOKIE_SECURE
+              value: "true"
+            - name: AUTH_COOKIE_SAMESITE
+              value: "lax"
+            # Kubernetes-native Secrets binding (Constraint 1)
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: secret-key
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: google-oauth-secret
+                  key: client-id
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-oauth-secret
+                  key: client-secret
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: database-url
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1024Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: virtual-lab-backend
+  namespace: virtual-lab
+  labels:
+    app.kubernetes.io/name: virtual-lab-backend
+    app.kubernetes.io/component: api-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  selector:
+    app.kubernetes.io/name: virtual-lab-backend
+

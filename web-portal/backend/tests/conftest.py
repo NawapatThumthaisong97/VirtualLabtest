@@ -15,7 +15,21 @@ constraint ของ Postgres ใช้ SQLite ไม่ได้)
 (ไม่มี docstring จะใช้ชื่อ class / ฟังก์ชันแทน) ปิดได้ด้วย `pytest --no-case-table`
 """
 import os
+import sys
 from collections import Counter
+from types import ModuleType
+
+if sys.platform == "win32":
+    for _unix_mod in ("resource", "fcntl", "termios", "tty", "pty", "pwd", "grp", "syslog"):
+        if _unix_mod not in sys.modules:
+            _m = ModuleType(_unix_mod)
+            _m.__all__ = []  # type: ignore[attr-defined]
+            _m.getpagesize = lambda: 4096  # type: ignore[attr-defined]
+            _m.getrlimit = lambda *_: (1024, 4096)  # type: ignore[attr-defined]
+            _m.setrlimit = lambda *_: None  # type: ignore[attr-defined]
+            _m.ioctl = lambda _fd, _req, buf=b"", *_: buf  # type: ignore[attr-defined]
+            _m.__getattr__ = lambda _name: 0  # type: ignore[attr-defined]
+            sys.modules[_unix_mod] = _m
 
 import pytest
 from sqlalchemy import create_engine
@@ -36,6 +50,8 @@ REGISTRY = "10.0.0.1:5001"
 
 @pytest.fixture
 def service():
+    from app.services.session_service import SessionService
+
     # builder ไม่ใช้ db / repository เลยส่ง None ได้
     return SessionService(db=None, session_repository=None,
                           lab_repository=None, lab_image_repository=None)

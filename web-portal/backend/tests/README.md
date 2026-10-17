@@ -15,6 +15,7 @@ pytest --no-case-table      # ไม่เอาตาราง
 |---|---|---|
 | task builder | `test_task_builder.py` | ไม่ต้องมีอะไร |
 | create / delete / reconcile | `test_create_session.py`, `test_delete_session.py`, `test_reconcile.py` | Postgres DB ชื่อ `virtual_lab_test` |
+| SSO & JWT auth | `test_sso_auth.py` | ตรวจโดเมน/สร้าง JWT ไม่ต้องใช้ DB, เทส endpoint ใช้ `virtual_lab_test` |
 
 สร้าง DB เทสครั้งเดียว (ใน container `virtual_lab_db`):
 
@@ -43,5 +44,6 @@ docker exec virtual_lab_db psql -U postgres -c "CREATE DATABASE virtual_lab_test
 |---|---|
 | Sky launch & session tests | `pytest tests/session` |
 | Prewarm & class schedule tests | `pytest tests/prewarm` |
+| SSO & JWT auth tests | `pytest tests/auth` |
 
 เพิ่มโฟลเดอร์เทสใหม่ → เพิ่ม job ใหม่ใน workflow ด้วย

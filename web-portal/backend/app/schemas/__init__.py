@@ -3,7 +3,17 @@ Pydantic Schemas (Data Validation)
 """
 
 from .example import ExampleBase, ExampleCreate, ExampleUpdate, ExampleResponse
-from .auth_schema import LoginRequest, MeResponse, TokenResponse
+from .auth_schema import (
+    AuthTokens,
+    JWTPayload,
+    LoginRequest,
+    LogoutResponse,
+    MeResponse,
+    RefreshTokenRequest,
+    SSOAuthorizeResponse,
+    SSOLoginRequest,
+    TokenResponse,
+)
 from .lab_schema import (
     CourseBrief,
     LabCreateRequest,
@@ -18,8 +28,11 @@ __all__ = [
     "ExampleCreate",
     "ExampleUpdate",
     "ExampleResponse",
+    "JWTPayload",
     "LoginRequest",
     "MeResponse",
+    "SSOAuthorizeResponse",
+    "SSOLoginRequest",
     "TokenResponse",
     "CourseBrief",
     "LabCreateRequest",

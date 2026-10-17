@@ -41,6 +41,25 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(min_length=32)
     ADMIN_SESSION_SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Cookie Security Settings
+    AUTH_COOKIE_SECURE: bool = False  # True ใน Production (HTTPS) / False ใน Dev (HTTP/Tailscale)
+    AUTH_COOKIE_SAMESITE: str = "lax"  # "lax", "strict", "none"
+    AUTH_COOKIE_DOMAIN: Optional[str] = None
+    ACCESS_TOKEN_COOKIE_NAME: str = "access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "refresh_token"
+
+    # University SSO (Google OAuth2 / OIDC) & Allowed Email Domains
+    ALLOWED_EMAIL_DOMAINS_STR: str = "dome.tu.ac.th,tu.ac.th"
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/sso/callback"
+    GOOGLE_AUTH_URI: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URI: str = "https://openidconnect.googleapis.com/v1/userinfo"
+    GOOGLE_TOKENINFO_URI: str = "https://oauth2.googleapis.com/tokeninfo"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     TAILSCALE_TRUSTED_PROXY_CIDRS_STR: str = ""
     
@@ -101,7 +120,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True
+        case_sensitive=True,
+        extra="ignore",
     )
     
     @property
@@ -110,6 +130,13 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.CORS_ORIGINS_STR.split(",")]
 
     @property
+    def allowed_email_domains(self) -> list[str]:
+        """Parse allowed university email domains from comma-separated string"""
+        return [
+            domain.strip().lower().lstrip("@")
+            for domain in self.ALLOWED_EMAIL_DOMAINS_STR.split(",")
+            if domain.strip()
+        ]
     def tailscale_trusted_proxy_cidrs(self) -> list[str]:
         return [
             cidr.strip()

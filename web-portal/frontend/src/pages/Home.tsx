@@ -5,10 +5,10 @@
  * then two list cards whose top third overlaps the hero.
  * The navbar comes from RootLayout, so it is not repeated here.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { authService } from '../services/auth.ts';
+import { useAuth } from '../contexts/AuthContext';
 import { coursesService } from '../services/courses.ts';
 import { courseService } from '../services/course.ts';
 import TabNav from '../components/TabNav.tsx';
@@ -75,6 +75,7 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
   const [tab, setTab] = useState('service');
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
+  const { user: currentUser } = useAuth();
   // 🔧 DEV MODE: Disable auth check during development
   const ENABLE_AUTH_CHECK = false;
 
@@ -92,7 +93,7 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
 
   const { data: announcements } = useQuery({
     queryKey: ['home-announcements'],
-    enabled: Boolean(token),
+    enabled: Boolean(currentUser),
     queryFn: async () => {
       // /courses กรองตามคนล็อกอินแล้ว ที่ได้มาจึงเป็นวิชาของเขาล้วน ๆ
       // ยิงรายวิชาเพราะยังไม่มีเส้นรวมประกาศ — นักศึกษาลงไม่กี่วิชาเลยรับไหว
