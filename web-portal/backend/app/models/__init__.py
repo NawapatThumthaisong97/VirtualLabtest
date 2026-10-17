@@ -11,13 +11,15 @@ from .lab_progress import LabProgress, ProgressStatus
 from .session import Session, ServiceType, SessionStatus, SessionEndReason
 from .usage_record import UsageRecord
 from .quota import Quota, QuotaPeriod
+from .quota_reservation import QuotaReservation
 from .announcement import Announcement
+from .rbac import Permission, Role, RolePermission, UserRoleAssignment
 from .class_schedule import ClassSchedule
 from .class_slot import ClassSlot, ClassSlotStatus
 
 __all__ = [
     "User",
-    "UserRole",
+    "UserRoleAssignment",
     "Course",
     "CourseImage",
     "Enrollment",
@@ -35,7 +37,12 @@ __all__ = [
     "UsageRecord",
     "Quota",
     "QuotaPeriod",
+    "QuotaReservation",
     "Announcement",
+    "Role",
+    "Permission",
+    "UserRole",
+    "RolePermission",
     "ClassSchedule",
     "ClassSlot",
     "ClassSlotStatus",

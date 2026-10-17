@@ -66,6 +66,10 @@ class SessionAlreadyExistsError(ConflictError):
     code = "session_already_exists"
 
 
+class QuotaExceededError(ConflictError):
+    code = "quota_exceeded"
+
+
 # ---------- 401 ----------
 class UnauthorizedError(DomainError):
     """ยังไม่ได้ล็อกอิน หรือ token ใช้ไม่ได้"""

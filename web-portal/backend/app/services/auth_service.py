@@ -1,7 +1,5 @@
-from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.adapters import sso_adapter as sso_adapter_module
@@ -16,6 +14,10 @@ from app.exceptions.domain import (
 from app.models.user import User, UserRole
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth_schema import SSOLoginRequest
+from app.exceptions.domain import InvalidCredentialsError, InvalidTokenError
+from app.models.user import User
+from app.repositories.user_repository import UserRepository
+from app.services.jwt_service import JWTService
 from app.utils.security import verify_password
 
 
@@ -23,6 +25,7 @@ class AuthService:
     def __init__(self, db: Session, user_repo: UserRepository):
         self.db = db
         self.user_repo = user_repo
+        self.jwt_service = JWTService(db)
 
     @staticmethod
     def validate_university_email(email: str) -> str:
@@ -189,6 +192,14 @@ class AuthService:
             return payload
         except (JWTError, KeyError, ValueError, TypeError) as e:
             raise InvalidTokenError("token ไม่ถูกต้องหรือหมดอายุแล้ว") from e
+        return self.jwt_service.create_access_token(user)
+
+    def get_user_from_token(self, token: str) -> User:
+        claims = self.jwt_service.decode_access_token(token)
+        subject = claims.user_id or claims.sub
+        if subject is None:
+            raise InvalidTokenError("token ไม่ถูกต้องหรือหมดอายุแล้ว")
+        user_id = UUID(subject)
 
     def decode_refresh_token(self, token: str) -> dict:
         try:

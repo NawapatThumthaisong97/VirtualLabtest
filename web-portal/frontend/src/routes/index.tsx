@@ -12,6 +12,7 @@ import CourseDetailPage from '../pages/CourseDetail.tsx';
 import LabDetailPage from '../pages/LabDetail.tsx';
 import LoginPage from '../pages/Login.tsx';
 import SSOCallbackPage from '../pages/SSOCallback.tsx';
+import InstructorPage from '../pages/Instructor.tsx';
 
 export const router = createBrowserRouter([
   // Public auth pages: no navbar, no footer
@@ -22,6 +23,29 @@ export const router = createBrowserRouter([
   {
     path: '/auth/callback',
     element: <SSOCallbackPage />,
+    element: <RootLayout />,
+    children: [
+      {
+        path: '/',
+        element: <HomePage />,
+      },
+      {
+        path: '/images',
+        element: <ImagesPage />,
+      },
+      {
+        path: '/courses',
+        element: <CoursesPage />,
+      },
+      {
+        path: '/courses/:courseId',
+        element: <CourseDetailPage />,
+      },
+      {
+        path: '/instructor',
+        element: <InstructorPage />,
+      },
+    ],
   },
   // Protected Application Routes (Acceptance Criteria 2)
   {

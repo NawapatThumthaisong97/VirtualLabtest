@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
@@ -28,6 +28,7 @@ from app.exceptions.domain import (
     LabImageMissingError,
     SessionAlreadyExistsError,
     ClusterOperationError,
+    ForbiddenError,
 )
 from app.utils.logger import logger
 
@@ -51,7 +52,7 @@ class SessionService:
         db: Session,
         session_repository: SessionRepository,
         lab_repository: LabRepository,
-        lab_image_repository: LabImageRepository
+        lab_image_repository: LabImageRepository,
     ):
         self.db = db
         self.session_repository = session_repository
@@ -199,8 +200,20 @@ class SessionService:
             raise UserNotFoundError(f"User with id {user_id} not found")
         
         lab = self.lab_repository.find_by_id(lab_id)
-        if not lab:
+        if not lab or lab.deleted_at is not None or lab.status != LabStatus.PUBLISHED:
             raise LabNotFoundError(f"Lab with id {lab_id} not found")
+
+        enrollment = (
+            self.db.query(Enrollment.user_id)
+            .filter(
+                Enrollment.user_id == user_id,
+                Enrollment.course_id == lab.course_id,
+                Enrollment.role_in_course == RoleInCourse.STUDENT,
+            )
+            .first()
+        )
+        if enrollment is None:
+            raise ForbiddenError("ต้องลงทะเบียนในวิชานี้ก่อนเริ่ม lab")
         
         existing_session = (
             self.db.query(SessionModel)
@@ -268,7 +281,11 @@ class SessionService:
             raise LabImageMissingError(f"Lab {lab_id} does not have an image assigned")
         
         lab_image = self.lab_image_repository.find_by_id(lab.image_id)
-        if not lab_image:
+        if (
+            not lab_image
+            or lab_image.status != ImageStatus.APPROVED
+            or lab_image.course_id != lab.course_id
+        ):
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
         cluster_name = self._cluster_name(lab_image)
@@ -408,6 +425,15 @@ class SessionService:
         # ตัดรหัสสีของ terminal ที่ SkyPilot ใส่มา ไม่งั้นอ่านใน log file ลำบาก
         return re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
 
+    def _down_quietly(self, cluster_name: str) -> None:
+        """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
+        try:
+            sky.get(sky.down(cluster_name))
+        except ClusterDoesNotExist:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to clean up cluster {cluster_name}: {e}")
+
     def reconcile_sessions(self) -> dict:
         """ปิด session ที่เครื่องหายไปแล้วแต่ DB ยังไม่รู้ (autostop, pod/EC2 ตายเอง) และ
         PENDING ที่ค้างเกิน timeout ให้ session_reconciler เรียกเป็นระยะ
@@ -502,6 +528,4 @@ class SessionService:
             "session_id": session_id,
             "cluster_name": session.sky_cluster_name,
             "cluster_stopped": cluster_stopped,
-            "message": "Session deleted successfully" if not cluster_stopped 
-                      else "Session stopped and deleted successfully"
         }

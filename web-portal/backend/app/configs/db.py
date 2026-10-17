@@ -64,14 +64,6 @@ def check_db_connection() -> bool:
         return False
 
 
-def create_tables():
-    """
-    สร้างตารางทั้งหมดใน database
-    (ใช้สำหรับ development, production ควรใช้ Alembic)
-    """
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
-    except Exception as e:
-        logger.error(f"Failed to create database tables: {str(e)}")
-        raise
+# Database schema changes are managed exclusively through Alembic migrations.
+
+__all__ = ["Base", "engine", "SessionLocal", "get_db", "check_db_connection"]

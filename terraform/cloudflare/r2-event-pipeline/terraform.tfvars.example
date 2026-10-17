@@ -1,0 +1,31 @@
+# Cloudflare Configuration Example
+# Copy this file to terraform.tfvars and fill in your actual values
+
+# Your Cloudflare Account ID
+# Find this in your Cloudflare dashboard: https://dash.cloudflare.com/
+cloudflare_account_id = "your-cloudflare-account-id-here"
+
+# Your Cloudflare API Token
+# Create this token at: https://dash.cloudflare.com/profile/api-tokens
+# Required permissions:
+#   - Account.R2 Read/Write
+#   - Account.Cloudflare Queues Read/Write
+#   - Account.Workers Scripts Read/Write
+cloudflare_api_token = "your-cloudflare-api-token-here"
+
+# Webhook Configuration
+# URL where R2 events will be sent
+webhook_url = "https://your-webhook-endpoint.com/webhook"
+
+# Secret token for webhook authentication
+# Used in the Webhook-Secret header
+webhook_secret = "your-webhook-secret-token-here"
+
+# R2 Bucket Configuration
+# Name of the R2 bucket to create
+bucket_name = "film-mini-project"
+
+# Production Domain Configuration (optional)
+# Add your custom domain for CORS access
+# Leave empty to allow only localhost origins
+app_domain = "cloudflare-test.panupong-suttikasem.xyz"
