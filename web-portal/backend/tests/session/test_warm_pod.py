@@ -10,7 +10,7 @@ from app.configs.settings import settings
 from app.exceptions.domain import SessionAlreadyExistsError
 from app.models.session import SessionEndReason, SessionStatus
 from app.services import session_service
-from app.services.warm_pod_service import WarmPodService, warm_daemonset_name
+from app.services.warm_pod_service import WarmPodService, build_warm_daemonset, warm_daemonset_name
 from tests.fakes import FakeK8s
 from tests.session.conftest import sessions_of
 
@@ -206,3 +206,56 @@ class TestWarmDeleteAndReconcile:
         db.refresh(s)
         assert s.status == SessionStatus.RUNNING
         assert k8s.deleted_pods == []
+
+
+class TestLabIsolation:
+    """LAB_ISOLATION_ENABLED: other lab machines cannot open my lab"""
+
+    @pytest.fixture
+    def isolated(self, monkeypatch):
+        monkeypatch.setattr(settings, "LAB_ISOLATION_ENABLED", True)
+
+    def test_warm_daemonset_localhost_only(self, world, isolated):
+        """Warm pod hostPort is bound to 127.0.0.1 and pod has the vlab/lab label"""
+        spec = build_warm_daemonset(world.k8s_image)["spec"]["template"]
+        ports = spec["spec"]["containers"][0]["ports"]
+
+        assert {p["hostIP"] for p in ports} == {"127.0.0.1"}
+        assert spec["metadata"]["labels"]["vlab/lab"] == "true"
+
+    def test_warm_daemonset_without_isolation(self, world):
+        """Isolation off: hostPort on every IP of the machine (old behaviour)"""
+        ports = build_warm_daemonset(world.k8s_image)["spec"]["template"]["spec"]["containers"][0]["ports"]
+
+        assert all("hostIP" not in p for p in ports)
+
+    def test_warm_endpoints_localhost(self, svc, world, fake_sky, k8s, warm_pod, isolated):
+        """Warm pod endpoint is localhost (only the machine you sit at)"""
+        result = svc.create_session(world.user.id, world.k8s_lab.id, client_ip=PETE_IP)
+
+        assert result["launch_mode"] == "warm_pod"
+        assert result["endpoints"]["8080"] == "http://localhost:8080"
+
+    def test_skypilot_pinned_to_own_machine(self, svc, world, fake_sky, k8s, isolated, monkeypatch):
+        """No warm pod: SkyPilot pod is forced onto the machine that pressed Start, with vlab/lab label"""
+        monkeypatch.setattr(settings, "WARM_POD_ENABLED", False)
+
+        svc.create_session(world.user.id, world.k8s_lab.id, client_ip=PETE_IP)
+
+        [(_, task)] = fake_sky.launched
+        [res] = list(task.resources)
+        pod_config = res._cluster_config_overrides["kubernetes"]["pod_config"]
+        assert pod_config["spec"]["nodeSelector"] == {"kubernetes.io/hostname": "worker-pete"}
+        assert pod_config["metadata"]["labels"] == {"vlab/lab": "true"}
+
+    @pytest.mark.parametrize("ip, enabled", [(OUTSIDE_IP, True), (PETE_IP, False)],
+                             ids=["not from a lab machine", "isolation off"])
+    def test_skypilot_not_pinned(self, svc, world, fake_sky, k8s, monkeypatch, ip, enabled):
+        """Not from a lab machine, or isolation off: SkyPilot task unchanged (no pin, no label)"""
+        monkeypatch.setattr(settings, "WARM_POD_ENABLED", False)
+        monkeypatch.setattr(settings, "LAB_ISOLATION_ENABLED", enabled)
+
+        svc.create_session(world.user.id, world.k8s_lab.id, client_ip=ip)
+
+        [(_, task)] = fake_sky.launched
+        assert all(not r._cluster_config_overrides for r in task.resources)
