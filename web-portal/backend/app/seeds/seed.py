@@ -31,7 +31,7 @@ from app.models.class_schedule import ClassSchedule
 from app.models.class_slot import ClassSlot
 from app.models.courses import Course
 from app.models.enrollment import Enrollment, RoleInCourse
-from app.models.lab import Lab, LabStatus
+from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
 from app.models.lab_progress import LabProgress, ProgressStatus
 from app.models.quota import Quota, QuotaPeriod
@@ -257,6 +257,7 @@ def seed_database(db: Session):
         image_id=se_image.id,
         due_at=datetime.utcnow() + timedelta(days=14),
         status=LabStatus.PUBLISHED,
+        run_target=RunTarget.KUBERNETES,
     )
 
     polymorphism_doc = Lab(
@@ -269,6 +270,7 @@ def seed_database(db: Session):
         image_id=None,
         due_at=None,
         status=LabStatus.PUBLISHED,
+        run_target=RunTarget.KUBERNETES,
     )
 
     # DevOps — mock ไว้ให้หน้าตาไม่โล่ง ยังไม่มีเอกสารจริง
@@ -282,6 +284,7 @@ def seed_database(db: Session):
             image_id=devops_image.id,
             due_at=datetime.utcnow() + timedelta(days=10),
             status=LabStatus.PUBLISHED,
+            run_target=RunTarget.KUBERNETES,
         ),
         Lab(
             id=uuid.uuid4(),
@@ -291,6 +294,7 @@ def seed_database(db: Session):
             description="เขียน Dockerfile แล้วลดขนาด image ด้วย multi-stage build",
             due_at=datetime.utcnow() + timedelta(days=21),
             status=LabStatus.PUBLISHED,
+            run_target=RunTarget.KUBERNETES,
         ),
         Lab(
             id=uuid.uuid4(),
@@ -299,6 +303,7 @@ def seed_database(db: Session):
             order_no=3,
             description="ยังไม่เปิดให้นักศึกษา",
             status=LabStatus.DRAFT,
+            run_target=RunTarget.KUBERNETES,
         ),
     ]
 
@@ -308,6 +313,7 @@ def seed_database(db: Session):
         title="Linked List & Stack",
         order_no=1,
         status=LabStatus.PUBLISHED,
+        run_target=RunTarget.KUBERNETES,
     )
 
     db.add_all([oop_lab, polymorphism_doc, *devops_labs, other_lab])

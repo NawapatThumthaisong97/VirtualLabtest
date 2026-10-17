@@ -1,6 +1,6 @@
 /**
  * Root Layout Component
- * Main HTML structure and shared layout (like Next.js layout.tsx)
+ * Shared layout with Navigation and Footer (like Next.js layout.tsx)
  */
 import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
@@ -11,7 +11,6 @@ import Footer from './Footer.tsx';
 const APP_METADATA = {
   title: 'Virtual Lab',
   description: 'Virtual Lab Application',
-  generator: 'vite',
   themeColor: '#ffffff',
   colorScheme: 'light',
 } as const;
@@ -59,22 +58,12 @@ export default function RootLayout({ showFooter = true }: RootLayoutProps) {
   }, []);
 
   return (
-    <html lang="th" className="scroll-smooth">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="generator" content={APP_METADATA.generator} />
-      </head>
-      <body className="antialiased font-sans bg-white text-black">
-        <div className="flex flex-col min-h-screen">
-          <Navigation />
-          <main className="flex-1">
-            <Outlet />
-          </main>
-          {showFooter && <Footer />}
-        </div>
-      </body>
-    </html>
+    <div className="flex flex-col min-h-screen">
+      <Navigation />
+      <main className="flex-1">
+        <Outlet />
+      </main>
+      {showFooter && <Footer />}
+    </div>
   );
 }
-

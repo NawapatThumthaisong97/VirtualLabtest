@@ -39,7 +39,7 @@ class ApiResponse(CamelModel, Generic[T]):
     success: bool = Field(examples=[True])
     message: str = Field(examples=["Request successful"])
     data: Optional[T] = Field(default=None, examples=[{}])
-    error: Optional[ErrorDetail] = Field(default=None, exclude=True)  # ✅ ไม่ serialize ถ้าเป็น None
+    error: Optional[ErrorDetail] = None
     
     class Config:
         # เมื่อ serialize เป็น JSON จะไม่ส่ง fields ที่เป็น None

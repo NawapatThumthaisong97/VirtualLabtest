@@ -1,6 +1,7 @@
 /**
  * Footer Component
  */
+import { Link } from 'react-router-dom'
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
@@ -8,7 +9,7 @@ export default function Footer() {
   return (
     <footer className="bg-black text-white py-8 border-t">
       <div className="max-w-7xl mx-auto px-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           <div>
             <h3 className="font-bold text-lg mb-4">Virtual Lab</h3>
             <p className="text-gray-400 text-sm">
@@ -18,9 +19,15 @@ export default function Footer() {
           <div>
             <h4 className="font-semibold mb-4">Quick Links</h4>
             <ul className="space-y-2 text-sm text-gray-400">
-              <li><a href="/" className="hover:text-white transition">Home</a></li>
-              <li><a href="/images" className="hover:text-white transition">Images</a></li>
-              <li><a href="/courses" className="hover:text-white transition">Courses</a></li>
+              <li><Link to="/" className="hover:text-white transition">Home</Link></li>
+              <li><Link to="/images" className="hover:text-white transition">Images</Link></li>
+              <li><Link to="/courses" className="hover:text-white transition">Courses</Link></li>
+            </ul>
+          </div>
+          <div>
+            <h4 className="font-semibold mb-4">Instructor</h4>
+            <ul className="space-y-2 text-sm text-gray-400">
+              <li><Link to="/instructor" className="hover:text-white transition">Course Management</Link></li>
             </ul>
           </div>
           <div>
