@@ -403,5 +403,44 @@ NetworkPolicy `vlab-lab-isolation` ยัง apply ค้างไว้ใน c
 
 | ข้อ | ผล |
 |---|---|
-| B (SkyPilot `ports: podip`) | ⏳ ยังไม่ได้ทำ |
-| C (Tailscale ACL) | ⏳ รอ Pete apply |
+| B (SkyPilot `ports: podip`) | ✅ ดูตารางข้อ B ข้างล่าง |
+
+**ข้อ B (2026-10-17 11:32–11:45)** SkyPilot API server ในเครื่องเปิดด้วย config `kubernetes: ports: podip`
+(`SKYPILOT_GLOBAL_CONFIG` ทั้ง API server และ backend), Nathan กด Start lab OOP (`skypilot/music-lab:lab-01`) จาก thinkpad
+(ไม่มี warm pod ของ image นี้ → ไป SkyPilot)
+
+| เคส | ผล |
+|---|---|
+| launch | ✅ 201 ใน 645 วินาที (pod Pending → Running ~6.5 นาที = pull 640 MB ผ่าน Wi-Fi + setup ของ SkyPilot) |
+| pod ลงเครื่องที่กด Start | ✅ thinkpad (nodeSelector จาก `kubernetes.pod_config`) + label `vlab/lab=true` |
+| endpoint | ✅ pod IP `http://10.42.3.42:8080 / 8443 / 5173` (ไม่มี LoadBalancer / svclb มีแค่ ClusterIP ของ SkyPilot) |
+| เปิดจาก thinkpad | ✅ 8080 (API 404 ที่ `/`), 8443 (IDE 302 → login), 5173 (200) |
+| เปิดจาก worker-pete (hostNetwork) | ✅ ปิดทั้ง 3 พอร์ต |
+| SkyPilot ยังคุม pod ได้ | ✅ `sky status` UP, `sky queue` RUNNING, `sky exec` รันคำสั่งใน pod ได้ (ไม่ผ่าน pod network) |
+| DELETE | ✅ `sky.down` ลบ pod แล้ว |
+
+ข้อสังเกต: response ของ launch แบบ SkyPilot ยังให้ `node_name = null` แม้จะบังคับเครื่องแล้ว (ใส่ได้ทีหลัง) /
+ต้องตั้ง `ports: podip` ที่ SkyPilot API server ที่ใช้จริง (helm / Ansible) ด้วย ไม่งั้นกลับไปเป็น LoadBalancer
+| C (Tailscale ACL) | ✅ ดูตารางข้อ C ข้างล่าง |
+
+**ข้อ C (2026-10-17 ~11:57)** apply ด้วย `script/tailscale-acl.sh` (Pete ใส่ token เอง ไม่กดใน console)
+`plan` เจอว่า policy เดิมมีส่วน `ssh` (Tailscale SSH check mode) ซึ่งจะหายไป → เพิ่มกลับในไฟล์ก่อน apply
+
+`./script/tailscale-acl.sh check` (debug pod hostNetwork บน worker-pete = ตัวตน Tailscale ของ worker-pete)
+
+| จาก worker-pete ไป | ก่อน ACL | หลัง ACL |
+|---|---|---|
+| master k3s api 6443 | open | ✅ open |
+| registry 5001 (+ pull image ด้วย `imagePullPolicy: Always`) | open | ✅ open |
+| thinkpad backend 8000 | open | ✅ open |
+| thinkpad kubelet 10250 | open | ✅ **closed** |
+| ssh ของ thinkpad / master / registry | open | ✅ **closed** |
+| DNS ของ cluster (coredns บน master ผ่าน VXLAN) | ok | ✅ ok |
+| node ทุกเครื่อง | Ready | ✅ Ready (workerfilm NotReady อยู่แล้วก่อนหน้า) |
+
+ฝั่ง server หลัง ACL: thinkpad → worker-pete 22 / 10250 เปิด, `kubectl logs` / `exec` pod บน worker-pete ได้
+(master → kubelet), `kubectl top nodes` ได้ค่า worker-pete (metrics-server บน master)
+
+ข้อควรรู้: system pod (coredns / metrics-server / traefik) อยู่บน master ทั้งหมด master ไม่มี taint ถ้าย้ายไป worker
+ทางที่มันใช้อาจโดน ACL ตัด → ควร taint master หรือใส่ nodeSelector ให้ system pod
+ถอยกลับ: `./script/tailscale-acl.sh rollback tailscale/backup/acl-20261017-115647.hujson`
