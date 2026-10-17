@@ -14,6 +14,8 @@ from .quota import Quota, QuotaPeriod
 from .quota_reservation import QuotaReservation
 from .announcement import Announcement
 from .rbac import Permission, Role, RolePermission, UserRoleAssignment
+from .class_schedule import ClassSchedule
+from .class_slot import ClassSlot, ClassSlotStatus
 
 __all__ = [
     "User",
@@ -41,4 +43,7 @@ __all__ = [
     "Permission",
     "UserRole",
     "RolePermission",
+    "ClassSchedule",
+    "ClassSlot",
+    "ClassSlotStatus",
 ]

@@ -187,6 +187,8 @@ ansible/artifacts/*
 
 # Ansible inventory/vars with real hosts, IPs, and secrets — commit the .example templates only
 ansible/inventory.yml
+ansible/inventory.*.yml
+!ansible/inventory.yml.example
 ansible/group_vars/all.yml
 
 # -----------------------------------------------------------------------------
@@ -196,6 +198,7 @@ ansible/group_vars/all.yml
 
 # Terraform plugin cache
 .terraform.lock.hcl
+!terraform/.terraform.lock.hcl
 # ^^ Intentionally NOT ignored — commit this for reproducible provider versions
 
 # Local plan files

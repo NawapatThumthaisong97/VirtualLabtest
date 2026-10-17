@@ -117,6 +117,23 @@ def init_database():
 
     command.upgrade(alembic_config, "head")
     print("Database schema is at Alembic head.")
+    print("🔧 Initializing database...")
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database initialized successfully!")
+    print("\n📊 Tables created:")
+    print("  - users")
+    print("  - courses")
+    print("  - course_images")
+    print("  - enrollments")
+    print("  - labs")
+    print("  - lab_images")
+    print("  - lab_progress")
+    print("  - sessions")
+    print("  - usage_records")
+    print("  - quotas")
+    print("  - announcements")
+    print("  - class_schedules")
+    print("  - class_slots (+ extension btree_gist)")
 
 
 if __name__ == "__main__":
