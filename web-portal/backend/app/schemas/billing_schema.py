@@ -15,6 +15,7 @@ from app.schemas.base import CamelModel
 class BillingGroupBy(str, Enum):
     COURSE = "course"
     CLUSTER = "cluster"
+    NAT_SUBNET = "nat_subnet"
     ANON_ID = "anon_id"
 
 
@@ -33,6 +34,7 @@ class BillingItem(CamelModel):
     total_cost_thb: float = Field(default=0.0, description="ยอดค่าใช้จ่ายรวม (บาท)")
     is_cloud: Optional[bool] = Field(None, description="สถานะว่าเป็น Cloud (AWS) หรือไม่")
     course_id: Optional[str] = Field(None, description="ID ของรายวิชา (ถ้าจัดกลุ่มตามวิชา)")
+    nat_subnet: Optional[str] = Field(None, description="วง NAT Subnet (ถ้าจัดกลุ่มตาม nat_subnet)")
     anon_id: Optional[str] = Field(None, description="HMAC-SHA256 Pseudonymized ID (ถ้าจัดกลุ่มตาม anon_id)")
 
 

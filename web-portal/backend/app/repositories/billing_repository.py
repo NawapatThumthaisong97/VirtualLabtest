@@ -173,6 +173,100 @@ class BillingRepository:
             })
         return results
 
+    def aggregate_by_nat_subnet(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        course_id: Optional[UUID] = None,
+        is_cloud: Optional[bool] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        จัดกลุ่มยอดค่าใช้จ่ายตามวง NAT Subnet ของแต่ละห้อง/คลาวด์
+        """
+        query = (
+            self.db.query(
+                SessionModel.is_cloud.label("is_cloud"),
+                SessionModel.node_name.label("node_name"),
+                func.count(func.distinct(UsageRecord.session_id)).label("total_sessions"),
+                func.coalesce(func.sum(UsageRecord.cpu_seconds), 0).label("sum_cpu_seconds"),
+                func.coalesce(func.sum(UsageRecord.gpu_seconds), 0).label("sum_gpu_seconds"),
+                func.coalesce(func.sum(UsageRecord.ram_mb_hours), 0).label("sum_ram_mb_hours"),
+                func.coalesce(func.sum(UsageRecord.est_cost_thb), 0).label("sum_cost_thb"),
+            )
+            .join(SessionModel, UsageRecord.session_id == SessionModel.id)
+            .outerjoin(Lab, SessionModel.lab_id == Lab.id)
+        )
+
+        if start_date:
+            query = query.filter(UsageRecord.recorded_at >= start_date)
+        if end_date:
+            query = query.filter(UsageRecord.recorded_at <= end_date)
+        if course_id:
+            query = query.filter(Lab.course_id == course_id)
+        if is_cloud is not None:
+            query = query.filter(SessionModel.is_cloud == is_cloud)
+
+        rows = query.group_by(SessionModel.is_cloud, SessionModel.node_name).all()
+
+        subnet_buckets: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            is_cloud_val = bool(r.is_cloud)
+            if is_cloud_val:
+                subnet_cidr = "10.0.0.0/16"
+                subnet_name = "AWS Cloud (Private Subnet)"
+            else:
+                node = str(r.node_name or "").lower()
+                if "lab2" in node or "192.168.2" in node:
+                    subnet_cidr = "192.168.2.0/24"
+                    subnet_name = "Local K3s (Room 2 NAT)"
+                elif "lab3" in node or "192.168.3" in node:
+                    subnet_cidr = "192.168.3.0/24"
+                    subnet_name = "Local K3s (Room 3 NAT)"
+                else:
+                    subnet_cidr = "192.168.1.0/24"
+                    subnet_name = "Local K3s (Room 1 NAT)"
+
+            if subnet_cidr not in subnet_buckets:
+                subnet_buckets[subnet_cidr] = {
+                    "group_key": subnet_cidr,
+                    "group_name": f"{subnet_name} - {subnet_cidr}",
+                    "course_id": None,
+                    "total_sessions": 0,
+                    "total_cpu_seconds": 0,
+                    "total_gpu_seconds": 0,
+                    "total_ram_mb_hours": 0.0,
+                    "total_cost_thb": 0.0,
+                    "is_cloud": is_cloud_val,
+                    "nat_subnet": subnet_cidr,
+                    "anon_id": None,
+                }
+
+            b = subnet_buckets[subnet_cidr]
+            b["total_sessions"] += int(r.total_sessions)
+            b["total_cpu_seconds"] += int(r.sum_cpu_seconds)
+            b["total_gpu_seconds"] += int(r.sum_gpu_seconds)
+            b["total_ram_mb_hours"] += float(r.sum_ram_mb_hours)
+            b["total_cost_thb"] += float(r.sum_cost_thb)
+
+        results = []
+        for b in subnet_buckets.values():
+            results.append({
+                "group_key": b["group_key"],
+                "group_name": b["group_name"],
+                "course_id": None,
+                "total_sessions": b["total_sessions"],
+                "total_cpu_hours": round(b["total_cpu_seconds"] / 3600.0, 2),
+                "total_gpu_hours": round(b["total_gpu_seconds"] / 3600.0, 2),
+                "total_ram_mb_hours": round(b["total_ram_mb_hours"], 2),
+                "total_cost_thb": round(b["total_cost_thb"], 2),
+                "is_cloud": b["is_cloud"],
+                "nat_subnet": b["nat_subnet"],
+                "anon_id": None,
+            })
+
+        results.sort(key=lambda x: x["total_cost_thb"], reverse=True)
+        return results
+
     def aggregate_by_user(
         self,
         start_date: Optional[datetime] = None,

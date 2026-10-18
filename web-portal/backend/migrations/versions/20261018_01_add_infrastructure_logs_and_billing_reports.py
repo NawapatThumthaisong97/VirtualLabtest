@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.Column("file_name", sa.String(255), nullable=False),
         sa.Column("total_cost_thb", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00"),
         sa.Column("total_records", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
@@ -94,3 +94,4 @@ def downgrade() -> None:
     op.drop_index("ix_infra_logs_category_severity", table_name="infrastructure_logs")
     op.drop_index("ix_infra_logs_timestamp_severity", table_name="infrastructure_logs")
     op.drop_table("infrastructure_logs")
+

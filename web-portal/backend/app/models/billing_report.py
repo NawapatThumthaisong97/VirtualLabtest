@@ -26,7 +26,7 @@ class BillingReport(Base):
     file_name = Column(String(255), nullable=False)
     total_cost_thb = Column(Numeric(precision=12, scale=2), nullable=False, default=0.0)
     total_records = Column(Integer, nullable=False, default=0)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 

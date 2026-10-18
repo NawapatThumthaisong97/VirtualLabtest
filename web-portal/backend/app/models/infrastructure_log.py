@@ -39,3 +39,4 @@ class InfrastructureLog(Base):
 
     def __repr__(self) -> str:
         return f"<InfrastructureLog(id={self.id}, event_type='{self.event_type}', severity='{self.severity}')>"
+

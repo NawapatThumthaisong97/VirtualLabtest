@@ -25,8 +25,8 @@ from app.services.billing_export_service import BillingExportService
 from app.services.log_masker_service import LogMaskerService
 
 
-class BillingService:
-    """Service สำหรับจัดการระบบ Billing, Aggregation, Anonymized Export และ Audit Reports"""
+class BillingAggregationService:
+    """Service สำหรับจัดการระบบ Billing Aggregation, Anonymized Export และ Audit Reports"""
 
     def __init__(
         self,
@@ -52,6 +52,7 @@ class BillingService:
         ดึงและคำนวณยอดรวมค่าใช้จ่ายจาก usage_records โดยจัดกลุ่มตาม:
         - course: รายวิชา
         - cluster: รูปแบบ Cluster (AWS SkyPilot vs Local K3s)
+        - nat_subnet: วง NAT Subnet (ห้องเรียน / คลาวด์)
         - anon_id: รหัสแฝงแบบทางเดียว (HMAC-SHA256) ของกลุ่มผู้ใช้งาน (Strict Anonymity)
         """
         clean_group_by = str(group_by).strip().lower()
@@ -67,6 +68,15 @@ class BillingService:
 
         elif clean_group_by == BillingGroupBy.CLUSTER.value:
             raw_items = self.billing_repo.aggregate_by_cluster(
+                start_date=start_date,
+                end_date=end_date,
+                course_id=course_id,
+                is_cloud=is_cloud,
+            )
+            billing_items = [BillingItem(**item) for item in raw_items]
+
+        elif clean_group_by in (BillingGroupBy.NAT_SUBNET.value, "subnet", "nat"):
+            raw_items = self.billing_repo.aggregate_by_nat_subnet(
                 start_date=start_date,
                 end_date=end_date,
                 course_id=course_id,
@@ -101,7 +111,7 @@ class BillingService:
                     )
                 )
         else:
-            raise ValidationError(f"Invalid group_by parameter: '{group_by}'. Allowed: course, cluster, anon_id")
+            raise ValidationError(f"Invalid group_by parameter: '{group_by}'. Allowed: course, cluster, nat_subnet, anon_id")
 
         total_cost_thb = round(sum(item.total_cost_thb for item in billing_items), 2)
         total_sessions = sum(item.total_sessions for item in billing_items)
@@ -222,3 +232,7 @@ class BillingService:
         if not is_success:
             raise NotFoundError(f"Billing report with id {report_id} not found")
         return True
+
+
+# Alias for backward compatibility
+BillingService = BillingAggregationService

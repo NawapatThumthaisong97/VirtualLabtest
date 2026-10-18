@@ -293,6 +293,17 @@ class TestRBACBilling:
         resp_legacy = client.get("/api/billing/summary", headers=headers)
         assert resp_legacy.status_code == http_status.HTTP_200_OK
 
+    def test_admin_can_access_plural_endpoints(self, client, populated_billing_data):
+        """Admin can access plural endpoints (/api/v1/billings and /api/v1/billings/exports)"""
+        headers = {"Authorization": f"Bearer {populated_billing_data['admin_token']}"}
+
+        resp_plural = client.get("/api/v1/billings", headers=headers)
+        assert resp_plural.status_code == http_status.HTTP_200_OK
+        assert resp_plural.json()["success"] is True
+
+        resp_plural_reports = client.get("/api/v1/billings/reports", headers=headers)
+        assert resp_plural_reports.status_code == http_status.HTTP_200_OK
+
 
 # =====================================================================
 # Group 2: Billing Aggregation & Calculations Tests
@@ -386,6 +397,32 @@ class TestBillingAggregation:
         assert str(populated_billing_data["student1"].id) not in raw_json_str
         assert str(populated_billing_data["student2"].id) not in raw_json_str
 
+    def test_aggregate_by_nat_subnet(self, client, populated_billing_data):
+        """Aggregate total costs, sessions, and resource hours by NAT subnet"""
+        headers = {"Authorization": f"Bearer {populated_billing_data['admin_token']}"}
+        resp = client.get("/api/v1/billings?group_by=nat_subnet", headers=headers)
+        assert resp.status_code == http_status.HTTP_200_OK
+
+        payload = resp.json()["data"]
+        assert payload["groupBy"] == "nat_subnet"
+        assert payload["totalSessions"] == 3
+        assert payload["totalCostThb"] == pytest.approx(431.25, 0.01)
+
+        items = payload["items"]
+        assert len(items) >= 2
+
+        # Check AWS cloud subnet (10.0.0.0/16)
+        cloud_item = next(it for it in items if it["natSubnet"] == "10.0.0.0/16")
+        assert cloud_item["isCloud"] is True
+        assert cloud_item["totalSessions"] == 2
+        assert cloud_item["totalCostThb"] == pytest.approx(400.75, 0.01)
+
+        # Check local K3s subnet (192.168.1.0/24)
+        local_item = next(it for it in items if it["natSubnet"] == "192.168.1.0/24")
+        assert local_item["isCloud"] is False
+        assert local_item["totalSessions"] == 1
+        assert local_item["totalCostThb"] == pytest.approx(30.50, 0.01)
+
     def test_invalid_group_by_returns_400(self, client, populated_billing_data):
         """Unsupported group_by parameter returns 400 Bad Request"""
         headers = {"Authorization": f"Bearer {populated_billing_data['admin_token']}"}
@@ -453,6 +490,20 @@ class TestBillingExport:
         headers = {"Authorization": f"Bearer {populated_billing_data['admin_token']}"}
         resp = client.get("/api/v1/billing/export?format=docx", headers=headers)
         assert resp.status_code == http_status.HTTP_400_BAD_REQUEST
+
+    def test_export_plural_endpoint_and_nat_subnet(self, client, populated_billing_data):
+        """Plural export endpoint /api/v1/billings/exports with nat_subnet grouping"""
+        headers = {"Authorization": f"Bearer {populated_billing_data['admin_token']}"}
+        resp = client.get("/api/v1/billings/exports?format=csv&group_by=nat_subnet", headers=headers)
+        assert resp.status_code == http_status.HTTP_200_OK
+
+        assert "text/csv" in resp.headers["content-type"]
+        assert resp.content.startswith(b"\xef\xbb\xbf")
+
+        decoded_text = resp.content.decode("utf-8-sig")
+        assert "NAT_SUBNET" in decoded_text
+        assert "10.0.0.0/16" in decoded_text
+        assert "192.168.1.0/24" in decoded_text
 
 
 # =====================================================================

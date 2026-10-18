@@ -21,7 +21,7 @@ from app.schemas.billing_schema import (
     BillingSummaryResponse,
 )
 from app.schemas.response import ApiResponse
-from app.services.billing_service import BillingService
+from app.services.billing_service import BillingAggregationService, BillingService
 
 router = APIRouter(
     dependencies=[Depends(verify_permission("billing:read:global"))]
@@ -30,17 +30,37 @@ router = APIRouter(
 
 def get_billing_controller(db: Session = Depends(get_db)) -> BillingController:
     """Dependency provider สำหรับ BillingController"""
-    service = BillingService(db=db)
+    service = BillingAggregationService(db=db)
     return BillingController(service)
 
 
 # ---------- Billing Aggregation Summary Endpoints ----------
 
 @router.get(
+    "/billings",
+    response_model=ApiResponse[BillingSummaryResponse],
+    summary="Get Aggregated Billing Summary (Plural)",
+    description="ดึงและคำนวณยอดรวมค่าใช้จ่ายจากตาราง usage_records โดยจัดกลุ่มตามรายวิชา (course), รูปแบบคลัสเตอร์ (cluster), วงเน็ตเวิร์ก (nat_subnet), หรือรหัสแฝง (anon_id)",
+)
+@router.get(
+    "/v1/billings",
+    response_model=ApiResponse[BillingSummaryResponse],
+    include_in_schema=False,
+)
+@router.get(
+    "/billings/summary",
+    response_model=ApiResponse[BillingSummaryResponse],
+    include_in_schema=False,
+)
+@router.get(
+    "/v1/billings/summary",
+    response_model=ApiResponse[BillingSummaryResponse],
+    include_in_schema=False,
+)
+@router.get(
     "/billing/summary",
     response_model=ApiResponse[BillingSummaryResponse],
-    summary="Get Aggregated Billing Summary",
-    description="ดึงและคำนวณยอดรวมค่าใช้จ่ายจากตาราง usage_records โดยจัดกลุ่มตามรายวิชา (course), รูปแบบคลัสเตอร์ (cluster), หรือรหัสแฝง (anon_id)",
+    include_in_schema=False,
 )
 @router.get(
     "/v1/billing/summary",
@@ -58,7 +78,7 @@ def get_billing_controller(db: Session = Depends(get_db)) -> BillingController:
     include_in_schema=False,
 )
 async def get_billing_summary(
-    group_by: str = Query("course", description="เกณฑ์การจัดกลุ่ม: course, cluster, หรือ anon_id"),
+    group_by: str = Query("course", description="เกณฑ์การจัดกลุ่ม: course, cluster, nat_subnet, หรือ anon_id"),
     start_date: Optional[datetime] = Query(None, description="เวลาเริ่มต้น (ISO Format)"),
     end_date: Optional[datetime] = Query(None, description="เวลาสิ้นสุด (ISO Format)"),
     course_id: Optional[UUID] = Query(None, description="กรองเฉพาะรายวิชา"),
@@ -82,10 +102,30 @@ async def get_billing_summary(
 # ---------- Export Endpoints ----------
 
 @router.get(
+    "/billings/exports",
+    dependencies=[Depends(verify_permission("billing:export:all"))],
+    summary="Export Billing Report as CSV or PDF (Plural)",
+    description="ประมวลผลและส่งออกไฟล์รายงานค่าใช้จ่ายในรูปแบบ CSV หรือ PDF สำหรับฝ่ายบริหาร โดยบังคับใช้ Strict Anonymity (ไม่มี PII)",
+)
+@router.get(
+    "/v1/billings/exports",
+    dependencies=[Depends(verify_permission("billing:export:all"))],
+    include_in_schema=False,
+)
+@router.get(
+    "/billings/export",
+    dependencies=[Depends(verify_permission("billing:export:all"))],
+    include_in_schema=False,
+)
+@router.get(
+    "/v1/billings/export",
+    dependencies=[Depends(verify_permission("billing:export:all"))],
+    include_in_schema=False,
+)
+@router.get(
     "/billing/export",
     dependencies=[Depends(verify_permission("billing:export:all"))],
-    summary="Export Billing Report as CSV or PDF",
-    description="ประมวลผลและส่งออกไฟล์รายงานค่าใช้จ่ายในรูปแบบ CSV หรือ PDF สำหรับฝ่ายบริหาร โดยบังคับใช้ Strict Anonymity (ไม่มี PII)",
+    include_in_schema=False,
 )
 @router.get(
     "/v1/billing/export",
@@ -94,7 +134,7 @@ async def get_billing_summary(
 )
 async def export_billing_report(
     format: str = Query("csv", description="รูปแบบไฟล์ที่ต้องการ: csv หรือ pdf"),
-    group_by: str = Query("course", description="เกณฑ์การจัดกลุ่ม: course, cluster, หรือ anon_id"),
+    group_by: str = Query("course", description="เกณฑ์การจัดกลุ่ม: course, cluster, nat_subnet, หรือ anon_id"),
     start_date: Optional[datetime] = Query(None, description="เวลาเริ่มต้น (ISO Format)"),
     end_date: Optional[datetime] = Query(None, description="เวลาสิ้นสุด (ISO Format)"),
     course_id: Optional[UUID] = Query(None, description="กรองเฉพาะรายวิชา"),
@@ -122,10 +162,20 @@ async def export_billing_report(
 # ---------- Report History & Soft-Delete Endpoints ----------
 
 @router.get(
-    "/billing/reports",
+    "/billings/reports",
     response_model=ApiResponse[BillingReportListResponse],
     summary="List Billing Export Reports History",
     description="ดึงรายการประวัติการออกรายงานค่าใช้จ่ายที่ผ่านมา (ซ่อนรายการที่ถูก Soft-Delete แล้ว)",
+)
+@router.get(
+    "/v1/billings/reports",
+    response_model=ApiResponse[BillingReportListResponse],
+    include_in_schema=False,
+)
+@router.get(
+    "/billing/reports",
+    response_model=ApiResponse[BillingReportListResponse],
+    include_in_schema=False,
 )
 @router.get(
     "/v1/billing/reports",
@@ -150,11 +200,23 @@ async def list_billing_reports(
 
 
 @router.delete(
-    "/billing/reports/{report_id}",
+    "/billings/reports/{report_id}",
     response_model=ApiResponse[dict],
     dependencies=[Depends(verify_permission("billing:manage:global"))],
     summary="Soft-Delete a Billing Report",
     description="ลบประวัติการออกรายงานด้วยกลไก Soft-Delete โดยบันทึกเวลา deleted_at แทนการลบจริง",
+)
+@router.delete(
+    "/v1/billings/reports/{report_id}",
+    response_model=ApiResponse[dict],
+    dependencies=[Depends(verify_permission("billing:manage:global"))],
+    include_in_schema=False,
+)
+@router.delete(
+    "/billing/reports/{report_id}",
+    response_model=ApiResponse[dict],
+    dependencies=[Depends(verify_permission("billing:manage:global"))],
+    include_in_schema=False,
 )
 @router.delete(
     "/v1/billing/reports/{report_id}",
