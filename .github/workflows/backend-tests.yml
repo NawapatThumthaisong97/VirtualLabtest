@@ -24,6 +24,7 @@ env:
 jobs:
   session:
     name: Sky launch & session tests
+    if: false  # ปิดชั่วคราว รอ cluster / sky mock พร้อม
     # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
     runs-on: ubuntu-24.04
     timeout-minutes: 20
