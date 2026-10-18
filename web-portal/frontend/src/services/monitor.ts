@@ -24,6 +24,7 @@ export interface ProviderMetrics {
   provider: string;
   isCloud: boolean;
   natSubnet: string;
+  subnets?: string[];
   cpuAllocated: number;
   cpuLimit: number;
   ramAllocatedMb: number;
