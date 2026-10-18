@@ -177,3 +177,4 @@ export const GlobalFilterBar: React.FC<GlobalFilterBarProps> = ({
     </div>
   );
 };
+

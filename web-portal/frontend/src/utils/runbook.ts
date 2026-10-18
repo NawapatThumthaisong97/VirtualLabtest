@@ -103,3 +103,4 @@ export function getRunbookCommands(log: InfrastructureLog): RunbookCommand[] {
 
   return commands;
 }
+
