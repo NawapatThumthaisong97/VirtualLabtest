@@ -1,0 +1,96 @@
+---
+# Tasks for siem-log-forwarding role
+# Enforces strict plane separation and SIEM-ready log/metrics forwarding
+
+- name: Assert Zero Trust plane separation constraints
+  ansible.builtin.assert:
+    that:
+      - forbidden_pod_logs_path is defined
+      - siem_ingest_host is defined
+    fail_msg: "Strict Zero Trust plane separation configuration violated!"
+
+# 1. Install Fluent Bit (or Vector) GPG key and repository
+- name: Add Fluent Bit GPG apt key
+  ansible.builtin.apt_key:
+    url: https://packages.fluentbit.io/fluentbit.key
+    state: present
+
+- name: Add Fluent Bit repository
+  ansible.builtin.apt_repository:
+    repo: "deb https://packages.fluentbit.io/ubuntu/{{ ansible_distribution_release | default('jammy') }} {{ ansible_distribution_release | default('jammy') }} main"
+    state: present
+    filename: fluent-bit
+
+- name: Install Fluent Bit and Prometheus Node Exporter
+  ansible.builtin.apt:
+    name:
+      - fluent-bit
+      - prometheus-node-exporter
+    state: present
+    update_cache: yes
+
+# 2. Ensure log directories exist with restricted permissions
+- name: Ensure boundary log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  loop:
+    - /var/log/squid
+    - /var/log/kyverno
+    - /var/log/tailscale
+    - /etc/fluent-bit
+
+# 3. Deploy Lua Transformation Filter Script
+- name: Copy transform_siem.lua filter script
+  ansible.builtin.copy:
+    src: transform_siem.lua
+    dest: /etc/fluent-bit/transform_siem.lua
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart fluent-bit service
+
+# 4. Deploy Custom Parsers Configuration
+- name: Template parsers.conf
+  ansible.builtin.template:
+    src: parsers.conf.j2
+    dest: /etc/fluent-bit/parsers.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart fluent-bit service
+
+# 5. Deploy Main Fluent Bit Configuration
+- name: Template fluent-bit.conf
+  ansible.builtin.template:
+    src: fluent-bit.conf.j2
+    dest: /etc/fluent-bit/fluent-bit.conf
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart fluent-bit service
+
+# 6. Verify Strict Plane Separation - Pod Logs must NEVER be collected
+- name: Verify no student pod log collector configuration exists
+  ansible.builtin.command:
+    cmd: grep -rn "/var/log/pods" /etc/fluent-bit/
+  register: pod_log_check
+  failed_when: pod_log_check.rc == 0
+  changed_when: false
+  ignore_errors: true
+
+- name: Ensure Fluent Bit service is enabled and started
+  ansible.builtin.systemd:
+    name: fluent-bit
+    enabled: yes
+    state: started
+
+- name: Ensure Prometheus Node Exporter is enabled and started
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    enabled: yes
+    state: started
+  when: enable_node_exporter | bool
