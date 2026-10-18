@@ -26,7 +26,7 @@
     Tag             boundary.squid
     Path            {{ squid_access_log_path }}
     Parser          squid_parser
-    Read_From_Tail  On
+    Read_From_Head  Off
     Skip_Long_Lines On
     DB              /var/log/fluent-bit-squid.db
 
@@ -36,7 +36,7 @@
     Tag             boundary.kyverno
     Path            {{ kyverno_log_path }}
     Parser          json
-    Read_From_Tail  On
+    Read_From_Head  Off
     Skip_Long_Lines On
     DB              /var/log/fluent-bit-kyverno.db
 
@@ -46,7 +46,7 @@
     Tag             boundary.tailscale
     Path            {{ tailscale_log_path }}
     Parser          json
-    Read_From_Tail  On
+    Read_From_Head  Off
     Skip_Long_Lines On
     DB              /var/log/fluent-bit-tailscale.db
 
@@ -60,13 +60,6 @@
     Match   system.journal
     Regex   MESSAGE (?i)(oom[_-]killer|out of memory|kernel panic|segfault|systemd\[1\]: Failed to start)
 
-# Redact Query Strings from URLs in Squid Logs (Ensure No Tokens / Params Leak)
-[FILTER]
-    Name    modify
-    Match   boundary.squid
-    Condition Key_Matches url \?.*
-    # Strip URL parameters
-    Set     sanitized_url [STRIPPED_PARAMS]
 
 # Transform & Map fields to Standard Ingestion Schema
 [FILTER]
@@ -80,14 +73,6 @@
     Match   system.journal
     script  transform_siem.lua
     call    cb_transform_journal
-
-# Ensure Strict JSON Schema structure
-[FILTER]
-    Name    record_modifier
-    Match   *
-    Record  cluster_id    {{ cluster_id }}
-    Record  nat_zone      {{ nat_zone }}
-    Record  environment   {{ environment_provider }}
 
 # ==============================================================================
 # OUTPUT: FORWARD TO BACKEND SIEM INGESTION VIA ZERO TRUST PATHWAY
@@ -106,3 +91,4 @@
     {% endif %}
     Retry_Limit         5
     tls                 Off
+

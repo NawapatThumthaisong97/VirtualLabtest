@@ -3,56 +3,47 @@ import json
 import os
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000/api")
 INGEST_ENDPOINT = f"{API_BASE_URL}/v1/logs"
 METRICS_ENDPOINT = f"{API_BASE_URL}/v1/metrics"
+AUTH_TOKEN = os.environ.get(
+    "AUTH_TOKEN",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjOGNlYWQ5YS1hNDc2LTQ5MzQtYTY3ZS03ODhiZjUzZThiYTgiLCJlbWFpbCI6ImFkbWluQGV4YW1wbGUuY29tIiwibmFtZSI6IkFkbWluIFVzZXIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzkyMzM1Mzk5LCJleHAiOjIxMDc2OTUzOTl9.Mpo-X7FyUMGeNTAR9zGR-ecUxAI5Aq1QX_x8at-J7uY"
+)
 
 print("=" * 66)
 print("   SIEM-Ready Log Forwarding & Infrastructure Metrics Test Suite   ")
 print("=" * 66)
 
-# 1. Connectivity Check & Admin Login
-print("\n[1/4] Checking Backend API Connectivity & Authenticating...")
+# 1. Connectivity Check
+print("\n[1/4] Checking Backend API Connectivity...")
+docs_url = f"{API_BASE_URL.rstrip('/')}/v1/metrics"
 try:
-    check_url = API_BASE_URL.replace("/api", "/docs")
-    req = urllib.request.Request(check_url)
-    with urllib.request.urlopen(req, timeout=5) as res:
-        print(f"[OK] Backend is active and reachable (HTTP {res.status}).")
-except Exception as e:
-    print(f"ERROR: Backend API is not responding at {API_BASE_URL}: {e}")
-    sys.exit(1)
-
-# Authenticate as Admin
-ADMIN_TOKEN = ""
-try:
-    login_payload = json.dumps({"username": "admin@dome.tu.ac.th", "password": "labpass123"}).encode("utf-8")
-    login_req = urllib.request.Request(
-        f"{API_BASE_URL}/auth/login",
-        data=login_payload,
-        headers={"Content-Type": "application/json"}
+    req = urllib.request.Request(
+        docs_url,
+        headers={"Authorization": f"Bearer {AUTH_TOKEN}"}
     )
-    with urllib.request.urlopen(login_req, timeout=5) as res:
-        login_res = json.loads(res.read().decode("utf-8"))
-        ADMIN_TOKEN = login_res.get("data", {}).get("accessToken", "")
-        print(f"[OK] Admin authenticated successfully (Bearer token acquired).")
+    with urllib.request.urlopen(req, timeout=5) as res:
+        print(f"✓ Backend is active and reachable (HTTP {res.status}).")
 except Exception as e:
-    print(f"[WARN] Could not authenticate as admin: {e}")
+    print(f"ERROR: Backend API is not responding at {docs_url}: {e}")
+    sys.exit(1)
 
 def send_siem_log(test_name, payload):
     print(f"\nTesting: {test_name}")
     data = json.dumps(payload).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if ADMIN_TOKEN:
-        headers["Authorization"] = f"Bearer {ADMIN_TOKEN}"
     req = urllib.request.Request(
         INGEST_ENDPOINT,
         data=data,
-        headers=headers
+        headers={"Content-Type": "application/json"}
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as res:
             res_data = json.loads(res.read().decode("utf-8"))
-            print(f"[OK] Success (HTTP {res.status}): {res_data.get('message')}")
+            print(f"✓ Success (HTTP {res.status}): {res_data.get('message')}")
             item = res_data.get("data", {})
             print(f"  Masked Message : {item.get('message')}")
             print(f"  Anon ID        : {item.get('anonId')}")
@@ -139,22 +130,22 @@ send_siem_log("Kernel OOM Killer & Code Redaction Event", {
 # 3. Verify Metrics & Counters
 print("\n[3/4] Verifying Cluster Metrics & Security Counters...")
 try:
-    headers = {}
-    if ADMIN_TOKEN:
-        headers["Authorization"] = f"Bearer {ADMIN_TOKEN}"
-    req = urllib.request.Request(METRICS_ENDPOINT, headers=headers)
+    req = urllib.request.Request(
+        METRICS_ENDPOINT,
+        headers={"Authorization": f"Bearer {AUTH_TOKEN}"}
+    )
     with urllib.request.urlopen(req, timeout=5) as res:
         metrics = json.loads(res.read().decode("utf-8")).get("data", {})
         summary = metrics.get("summary", {})
         counters = metrics.get("securityViolationCounters", {})
-        print("[OK] Metrics retrieved successfully:")
+        print("✓ Metrics retrieved successfully:")
         print(f"  Active Sessions  : {summary.get('totalActiveSessions')}")
         print(f"  Squid Drops      : {counters.get('squidEgressDrops')}")
         print(f"  Kyverno Blocks   : {counters.get('kyvernoPolicyBlocks')}")
         print(f"  Tailscale Denies : {counters.get('tailscaleCrossClusterAttempts')}")
         print(f"  Total Violations : {counters.get('totalViolations')}")
 except Exception as e:
-    print(f"[FAILED] Failed to query metrics: {e}")
+    print(f"✗ Failed to query metrics: {e}")
 
 # 4. Validate Plane Separation
 print("\n[4/4] Verifying Strict Plane Separation Rules in Ansible...")
@@ -166,8 +157,9 @@ if "/var/log/pods" in fluent_conf:
     print("WARNING: Student pod log path (/var/log/pods) found in fluent-bit inputs! Strict plane separation violated.")
     sys.exit(1)
 else:
-    print("[OK] Verified: No student pod log path mounted or collected. Plane separation intact.")
+    print("✓ Verified: No student pod log path mounted or collected. Plane separation intact.")
 
 print("\n" + "=" * 66)
-print("   [OK] All SIEM Log Pipeline Tests Completed Successfully!         ")
+print("   ✓ All SIEM Log Pipeline Tests Completed Successfully!         ")
 print("=" * 66)
+

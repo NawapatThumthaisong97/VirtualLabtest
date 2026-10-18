@@ -38,31 +38,29 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
   securityCounters,
   isLoading,
 }) => {
-  const summary = metrics?.summary || {
-    totalCpuAllocated: 0,
-    totalCpuLimit: 1,
-    totalRamAllocatedMb: 0,
-    totalRamLimitMb: 1,
-    activeSessions: 0,
-    clusterCount: 0,
-  };
+  const rawSummary = (metrics?.summary || {}) as any;
+  const totalCpuAllocated = rawSummary.cpu?.allocated ?? rawSummary.totalCpuAllocated ?? 0;
+  const totalCpuLimit = rawSummary.cpu?.total ?? rawSummary.totalCpuLimit ?? 1;
+  const totalRamAllocatedMb = rawSummary.ram?.allocated ?? rawSummary.totalRamAllocatedMb ?? 0;
+  const totalRamLimitMb = rawSummary.ram?.total ?? rawSummary.totalRamLimitMb ?? 1;
+  const activeSessions = rawSummary.totalActiveSessions ?? rawSummary.activeSessions ?? 0;
+  const clusterCount = metrics?.byProvider?.length ?? rawSummary.clusterCount ?? 2;
 
   const cpuPct = Math.min(
     100,
-    Math.round((summary.totalCpuAllocated / Math.max(1, summary.totalCpuLimit)) * 100)
+    Math.round((totalCpuAllocated / Math.max(1, totalCpuLimit)) * 100)
   );
   const ramPct = Math.min(
     100,
-    Math.round((summary.totalRamAllocatedMb / Math.max(1, summary.totalRamLimitMb)) * 100)
+    Math.round((totalRamAllocatedMb / Math.max(1, totalRamLimitMb)) * 100)
   );
 
-  const security = securityCounters || {
-    squidEgressDrops: 0,
-    squidEgressAllowed: 0,
-    kyvernoBlocks: 0,
-    tailscaleDenies: 0,
-    totalViolations: 0,
-  };
+  const rawSec = (securityCounters || (metrics as any)?.securityViolationCounters || {}) as any;
+  const squidEgressDrops = rawSec.squidEgressDrops ?? 0;
+  const squidEgressAllowed = rawSec.squidEgressAllowed ?? 0;
+  const kyvernoBlocks = rawSec.kyvernoPolicyBlocks ?? rawSec.kyvernoBlocks ?? 0;
+  const tailscaleDenies = rawSec.tailscaleCrossClusterAttempts ?? rawSec.tailscaleDenies ?? 0;
+  const totalViolations = rawSec.totalViolations ?? (squidEgressDrops + kyvernoBlocks + tailscaleDenies);
 
   // Prepare chart data
   const timeSeries = (metrics?.timeSeries || []).map((pt) => ({
@@ -76,18 +74,18 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
   const securityBarData = [
     {
       category: 'Squid Egress',
-      Allowed: security.squidEgressAllowed,
-      Blocked: security.squidEgressDrops,
+      Allowed: squidEgressAllowed,
+      Blocked: squidEgressDrops,
     },
     {
       category: 'Kyverno Policy',
       Allowed: 0,
-      Blocked: security.kyvernoBlocks,
+      Blocked: kyvernoBlocks,
     },
     {
       category: 'Tailscale Mesh',
       Allowed: 0,
-      Blocked: security.tailscaleDenies,
+      Blocked: tailscaleDenies,
     },
   ];
 
@@ -102,8 +100,8 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
             <Cpu className="h-4 w-4 text-sky-400" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-white">{summary.totalCpuAllocated}</span>
-            <span className="text-xs text-white/40">/ {summary.totalCpuLimit} Cores</span>
+            <span className="text-2xl font-bold text-white">{totalCpuAllocated}</span>
+            <span className="text-xs text-white/40">/ {totalCpuLimit} Cores</span>
             <span className="ml-auto text-xs font-semibold text-sky-400">{cpuPct}%</span>
           </div>
           <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
@@ -124,9 +122,9 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white">
-              {(summary.totalRamAllocatedMb / 1024).toFixed(1)}
+              {(totalRamAllocatedMb / 1024).toFixed(1)}
             </span>
-            <span className="text-xs text-white/40">/ {(summary.totalRamLimitMb / 1024).toFixed(1)} GB</span>
+            <span className="text-xs text-white/40">/ {(totalRamLimitMb / 1024).toFixed(1)} GB</span>
             <span className="ml-auto text-xs font-semibold text-purple-400">{ramPct}%</span>
           </div>
           <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
@@ -146,11 +144,11 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
             <Activity className="h-4 w-4 text-emerald-400" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-white">{summary.activeSessions}</span>
+            <span className="text-2xl font-bold text-white">{activeSessions}</span>
             <span className="text-xs text-emerald-400">Live Pods</span>
           </div>
           <p className="mt-3 text-[11px] text-white/40">
-            Across {summary.clusterCount} cluster zones (AWS + K3s)
+            Across {clusterCount} cluster zones (AWS + K3s)
           </p>
         </div>
 
@@ -163,13 +161,13 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
             <ShieldAlert className="h-4 w-4 text-rose-400" />
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-rose-200">{security.totalViolations}</span>
+            <span className="text-2xl font-bold text-rose-200">{totalViolations}</span>
             <span className="text-xs text-rose-400">Total Dropped</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-white/60">
-            <span>Squid: {security.squidEgressDrops}</span>
-            <span>Kyverno: {security.kyvernoBlocks}</span>
-            <span>Tailscale: {security.tailscaleDenies}</span>
+            <span>Squid: {squidEgressDrops}</span>
+            <span>Kyverno: {kyvernoBlocks}</span>
+            <span>Tailscale: {tailscaleDenies}</span>
           </div>
         </div>
       </div>
@@ -184,15 +182,21 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
             >
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5">
-                  {prov.isCloud ? (
+                  {(prov.isCloud ?? prov.provider.toLowerCase().includes('aws')) ? (
                     <Cloud className="h-5 w-5 text-indigo-400" />
                   ) : (
                     <Server className="h-5 w-5 text-emerald-400" />
                   )}
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-white">{prov.provider}</h4>
-                  <p className="text-xs text-white/50">Subnet: {prov.natSubnet || 'Default NAT'}</p>
+                  <h4 className="text-sm font-semibold text-white">
+                    {prov.provider === 'local_k3s' ? 'Local K3s Edge' : prov.provider === 'aws' ? 'AWS SkyPilot Cloud' : prov.provider}
+                  </h4>
+                  <p className="text-xs text-white/50">
+                    {prov.subnets && prov.subnets.length > 0
+                      ? `${prov.subnets.length} NAT Subnets`
+                      : (prov.natSubnet || 'Cloud Subnet')}
+                  </p>
                 </div>
               </div>
 

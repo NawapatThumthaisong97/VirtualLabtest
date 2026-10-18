@@ -9,15 +9,22 @@
       - siem_ingest_host is defined
     fail_msg: "Strict Zero Trust plane separation configuration violated!"
 
-# 1. Install Fluent Bit (or Vector) GPG key and repository
-- name: Add Fluent Bit GPG apt key
-  ansible.builtin.apt_key:
+# 1. Install Fluent Bit (or Vector) GPG key and repository using modern keyring
+- name: Ensure keyrings directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Fluent Bit GPG key
+  ansible.builtin.get_url:
     url: https://packages.fluentbit.io/fluentbit.key
-    state: present
+    dest: /usr/share/keyrings/fluentbit-keyring.asc
+    mode: '0644'
 
 - name: Add Fluent Bit repository
   ansible.builtin.apt_repository:
-    repo: "deb https://packages.fluentbit.io/ubuntu/{{ ansible_distribution_release | default('jammy') }} {{ ansible_distribution_release | default('jammy') }} main"
+    repo: "deb [signed-by=/usr/share/keyrings/fluentbit-keyring.asc] https://packages.fluentbit.io/ubuntu/jammy jammy main"
     state: present
     filename: fluent-bit
 
@@ -94,3 +101,4 @@
     enabled: yes
     state: started
   when: enable_node_exporter | bool
+

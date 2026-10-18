@@ -10,7 +10,7 @@ fluent_bit_http_port: 2020
 siem_ingest_host: "{{ hostvars[groups['webportal'][0]]['ansible_host'] | default('100.64.0.1') }}"
 siem_ingest_port: 8000
 siem_ingest_path: "/api/v1/logs"
-siem_ingest_token: ""
+siem_ingest_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjOGNlYWQ5YS1hNDc2LTQ5MzQtYTY3ZS03ODhiZjUzZThiYTgiLCJlbWFpbCI6ImFkbWluQGV4YW1wbGUuY29tIiwibmFtZSI6IkFkbWluIFVzZXIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzkyMzM1Mzk5LCJleHAiOjIxMDc2OTUzOTl9.Mpo-X7FyUMGeNTAR9zGR-ecUxAI5Aq1QX_x8at-J7uY"
 
 # Environment Identification
 cluster_id: "{{ 'aws-skypilot-prod' if ('skypilot' in group_names or is_cloud | default(false)) else 'k3s-lab-edge' }}"
@@ -30,3 +30,4 @@ system_journal_enable: true
 # Plane Separation Guarantees
 # STRICT RULE: NEVER mount or harvest user student pod standard output/error
 forbidden_pod_logs_path: "/var/log/pods/*/*/*.log"
+

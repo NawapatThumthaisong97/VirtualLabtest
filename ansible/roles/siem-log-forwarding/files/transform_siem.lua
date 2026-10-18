@@ -64,6 +64,10 @@ function cb_transform_boundary(tag, timestamp, record)
         new_record["message"] = record["message"] or "Generic boundary event"
     end
 
+    new_record["clusterOrSubnet"] = "10.0.0.0/16"
+    new_record["metadata"]["environment"] = "Local K3s"
+    new_record["metadata"]["clusterId"] = "k3s-lab-edge"
+
     return 2, timestamp, new_record
 end
 
@@ -95,5 +99,10 @@ function cb_transform_journal(tag, timestamp, record)
         new_record["message"] = string.format("Systemd unit failed or stopped unexpectedly: %s", msg)
     end
 
+    new_record["clusterOrSubnet"] = "10.0.0.0/16"
+    new_record["metadata"]["environment"] = "Local K3s"
+    new_record["metadata"]["clusterId"] = "k3s-lab-edge"
+
     return 2, timestamp, new_record
 end
+

@@ -5,11 +5,14 @@ API Endpoints สำหรับ Cluster Metrics, Critical Logs และ Securi
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, status as http_status
+from fastapi import APIRouter, Depends, Header, Query, Request, status as http_status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
+from app.configs.settings import settings
 from app.controllers.monitor_controller import MonitorController
+from app.exceptions.domain import InvalidTokenError
 from app.middlewares.rbac import verify_permission
 from app.schemas.monitor_schema import (
     ClusterMetricsResponse,
@@ -23,9 +26,44 @@ from app.services.kubernetes_service import get_kubernetes_service
 from app.services.log_masker_service import LogMaskerService
 from app.services.monitor_service import MonitorService
 
-router = APIRouter(
-    dependencies=[Depends(verify_permission("monitoring:read:all"))]
-)
+router = APIRouter()
+
+collector_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def verify_log_ingest_permission(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(collector_bearer_scheme),
+    x_collector_token: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    token = None
+    if credentials is not None:
+        token = credentials.credentials
+    elif x_collector_token:
+        token = x_collector_token
+    elif settings.ACCESS_TOKEN_COOKIE_NAME in request.cookies:
+        token = request.cookies[settings.ACCESS_TOKEN_COOKIE_NAME]
+
+    if token:
+        if token == settings.SECRET_KEY:
+            return True
+        from app.services.auth_service import AuthService
+        from app.repositories.user_repository import UserRepository
+        from app.exceptions.domain import ForbiddenError
+
+        svc = AuthService(db, UserRepository(db))
+        user = svc.get_user_from_token(token)
+        role_val = user.role.value if hasattr(user.role, "value") else str(user.role)
+        if role_val.lower() == "admin":
+            return True
+        raise ForbiddenError("ไม่มีสิทธิ์ดำเนินการนี้")
+
+    client_host = request.client.host if request.client else ""
+    if client_host in ("127.0.0.1", "localhost", "::1"):
+        return True
+
+    raise InvalidTokenError("ต้องแนบ Authorization: Bearer <token> สำหรับ Ingestion")
 
 
 def get_monitor_controller(db: Session = Depends(get_db)) -> MonitorController:
@@ -48,12 +86,14 @@ def get_monitor_controller(db: Session = Depends(get_db)) -> MonitorController:
 @router.get(
     "/metrics",
     response_model=ApiResponse[ClusterMetricsResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     summary="Get Cluster Resource Allocation Metrics & Summary",
     description="ดึงข้อมูลภาพรวมสถานะทรัพยากร (CPU, RAM, Active Sessions) และสถิติความปลอดภัยเบื้องต้น รองรับการ Filter/Group ระหว่าง AWS SkyPilot และ Local K3s แยกตามวง NAT",
 )
 @router.get(
     "/v1/metrics",
     response_model=ApiResponse[ClusterMetricsResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     include_in_schema=False,
 )
 async def get_cluster_metrics(
@@ -77,17 +117,20 @@ async def get_cluster_metrics(
 @router.get(
     "/metrics/security-counters",
     response_model=ApiResponse[SecurityCountersResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     summary="Get Security Violation Counters",
     description="ดึงสถิติตัวนับการละเมิดความปลอดภัย: Squid Proxy Egress Drops, OPA/Kyverno Policy Blocks, และ Tailscale Cross-Cluster Attempts",
 )
 @router.get(
     "/v1/metrics/security-counters",
     response_model=ApiResponse[SecurityCountersResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     include_in_schema=False,
 )
 @router.get(
     "/security/counters",
     response_model=ApiResponse[SecurityCountersResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     include_in_schema=False,
 )
 async def get_security_counters(
@@ -106,12 +149,14 @@ async def get_security_counters(
 @router.get(
     "/logs",
     response_model=ApiResponse[LogListResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     summary="Get Critical Infrastructure and Security Boundary Logs",
     description="ดึง Critical Error Logs (Node Down, SkyPilot Burst Failed, OOM) และ Security Violation Logs โดยผ่านการ Mask PII, ตัด Source Code ใน Pod และแปลง user_id เป็นรหัสแฝงแบบทางเดียว (anon_id) ในรูปแบบ CamelCase เสมอ",
 )
 @router.get(
     "/v1/logs",
     response_model=ApiResponse[LogListResponse],
+    dependencies=[Depends(verify_permission("monitoring:read:all"))],
     include_in_schema=False,
 )
 async def get_critical_logs(
@@ -140,6 +185,7 @@ async def get_critical_logs(
     "/logs",
     response_model=ApiResponse[InfrastructureLogItem],
     status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_log_ingest_permission)],
     summary="Ingest Infrastructure or Security Log from Collector",
     description="รับข้อมูล Log โครงสร้างพื้นฐาน หรือ Security Boundary Violation จาก Collector โดยระบบจะทำ Data Masking, ตัด Source Code ใน Pod และแปลง user_id เป็น anon_id ก่อนบันทึกลงฐานข้อมูล",
 )
@@ -147,6 +193,7 @@ async def get_critical_logs(
     "/v1/logs",
     response_model=ApiResponse[InfrastructureLogItem],
     status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_log_ingest_permission)],
     include_in_schema=False,
 )
 async def ingest_log(

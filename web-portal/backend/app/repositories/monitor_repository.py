@@ -217,11 +217,27 @@ class MonitorRepository:
 
             db_records = db_query.order_by(InfrastructureLog.timestamp.desc()).all()
             for r in db_records:
+                sev_str = str(r.severity or "").upper()
+                if sev_str in ("CRITICAL", "ERROR", "WARNING", "INFO"):
+                    clean_sev = LogSeverity(sev_str)
+                else:
+                    clean_sev = LogSeverity.INFO
+
+                cat_str = str(r.category or "").upper()
+                if cat_str in ("SECURITY_VIOLATION", "SQUID", "KYVERNO", "TAILSCALE"):
+                    clean_cat = LogCategory.SECURITY_VIOLATION
+                elif cat_str in ("BURST", "SKY_BURST"):
+                    clean_cat = LogCategory.BURST
+                elif cat_str in ("CONTAINER", "OOM", "OOM_KILL"):
+                    clean_cat = LogCategory.CONTAINER
+                else:
+                    clean_cat = LogCategory.INFRASTRUCTURE
+
                 all_logs.append({
                     "id": str(r.id),
                     "timestamp": r.timestamp,
-                    "severity": r.severity,
-                    "category": r.category,
+                    "severity": clean_sev,
+                    "category": clean_cat,
                     "event_type": r.event_type,
                     "source": r.source,
                     "message": r.message,
@@ -306,9 +322,9 @@ class MonitorRepository:
 
         timestamp = entry.get("timestamp") or datetime.now(timezone.utc)
         sev = entry.get("severity")
-        severity_val = sev.value.lower() if hasattr(sev, "value") else str(sev).lower()
+        severity_val = sev.value.upper() if hasattr(sev, "value") else str(sev).upper()
         cat = entry.get("category")
-        category_val = cat.value.lower() if hasattr(cat, "value") else str(cat).lower()
+        category_val = cat.value.upper() if hasattr(cat, "value") else str(cat).upper()
 
         db_log = InfrastructureLog(
             id=log_id,
