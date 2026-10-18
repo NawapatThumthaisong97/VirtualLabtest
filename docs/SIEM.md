@@ -149,3 +149,4 @@ python script/test_monitoring_siem_pipeline.py
 2. การ Ingest และ Mask PII ข้อมูล Log สำเร็จ
 3. การอัปเดต Counter การละเมิดความปลอดภัยบนหน้าระบบ
 4. การทวนสอบการรักษา Zero Trust Plane Separation ในระดับ Ansible Configuration
+
