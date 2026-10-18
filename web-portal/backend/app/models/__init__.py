@@ -16,10 +16,12 @@ from .announcement import Announcement
 from .rbac import Permission, Role, RolePermission, UserRoleAssignment
 from .class_schedule import ClassSchedule
 from .class_slot import ClassSlot, ClassSlotStatus
+from .billing_report import BillingReport
 
 __all__ = [
     "User",
     "UserRoleAssignment",
+    "BillingReport",
     "Course",
     "CourseImage",
     "Enrollment",
