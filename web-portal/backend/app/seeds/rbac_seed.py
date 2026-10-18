@@ -38,10 +38,12 @@ PERMISSIONS = {
     "courses:update:course": "Update course information for courses you teach.",
     "courses:delete:course": "Delete courses you created or teach.",
     "courses:manage:global": "Full course management access (Admin).",
-    # Course Announcements Permissions
     "courses:announcements:create:course": "Create announcements for courses you teach.",
     "courses:announcements:update:course": "Update announcements for courses you teach.",
     "courses:announcements:delete:course": "Delete announcements for courses you teach.",
+    # Monitoring & SIEM Permissions
+    "metrics:read:global": "Read cluster metrics, resource allocations, and security counters (Admin only).",
+    "logs:read:global": "Read critical infrastructure logs and boundary violation logs (Admin only).",
 }
 
 ROLE_PERMISSIONS = {
@@ -85,6 +87,8 @@ ROLE_PERMISSIONS = {
         "storage:registry:manage:global",
         "storage:quotas:manage:global",
         "courses:manage:global",
+        "metrics:read:global",
+        "logs:read:global",
     },
 }
 

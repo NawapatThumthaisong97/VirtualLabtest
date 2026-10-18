@@ -86,7 +86,8 @@ apiClient.interceptors.response.use(
           }
         }
       }
-  (error) => {
+    }
+
     if (error.response?.status === 401 && ENABLE_AUTO_REDIRECT) {
       // Handle unauthorized
       localStorage.removeItem('access_token');
