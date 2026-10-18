@@ -17,6 +17,10 @@ on:
       - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
 
+env:
+  SECRET_KEY: "test-secret-key-at-least-32-characters-long-123456"
+  ADMIN_SESSION_SECRET_KEY: "test-admin-session-secret-key-at-least-32-characters"
+
 jobs:
   session:
     name: Sky launch & session tests
