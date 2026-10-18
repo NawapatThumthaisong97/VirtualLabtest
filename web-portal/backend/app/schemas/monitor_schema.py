@@ -90,3 +90,16 @@ class InfrastructureLogItem(CamelModel):
 class LogListResponse(CamelModel):
     logs: list[InfrastructureLogItem] = Field(default_factory=list, description="รายการ Log")
     total: int = Field(default=0, description="จำนวน Log ทั้งหมดตามเงื่อนไข")
+
+
+class CreateInfrastructureLogRequest(CamelModel):
+    timestamp: Optional[datetime] = Field(None, description="วันเวลาที่เกิดเหตุการณ์ (หากไม่ระบุจะใช้เวลาปัจจุบัน)")
+    severity: LogSeverity = Field(..., description="ระดับความรุนแรงของ Log (critical, error, warning, info)")
+    category: LogCategory = Field(..., description="หมวดหมู่ของเหตุการณ์")
+    event_type: str = Field(..., description="ประเภทเหตุการณ์ เช่น NODE_DOWN, SKY_BURST_FAILED, SQUID_EGRESS_DROP")
+    source: str = Field(..., description="ต้นทางของเหตุการณ์")
+    message: str = Field(..., description="ข้อความแจ้งเตือนดิบ (จะถูก Masking อัตโนมัติก่อนบันทึก)")
+    user_id: Optional[str] = Field(None, description="UUID ของผู้ใช้งานที่เกี่ยวข้อง (จะถูกแปลงเป็น anon_id อัตโนมัติ)")
+    cluster_or_subnet: Optional[str] = Field(None, description="Cluster หรือวง NAT ที่เกี่ยวข้อง")
+    metadata: Optional[dict[str, Any]] = Field(default_factory=dict, description="ข้อมูลแวดล้อมเพิ่มเติม")
+

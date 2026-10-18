@@ -27,6 +27,7 @@ GLOBAL_PERMISSION_BY_DOMAIN_AND_ACTION = {
     ("courses", "announcements"): "courses:manage:global",
     ("metrics", "*"): "clusters:manage:global",
     ("logs", "*"): "clusters:manage:global",
+    ("monitoring", "*"): "clusters:manage:global",
     ("billing", "*"): "clusters:manage:global",
 }
 

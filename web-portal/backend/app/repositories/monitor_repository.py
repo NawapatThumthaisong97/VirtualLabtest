@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy import func
 
+from app.models.infrastructure_log import InfrastructureLog
 from app.models.lab import Lab, RunTarget
 from app.models.lab_image import LabImage
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason
@@ -200,11 +201,43 @@ class MonitorRepository:
     ) -> tuple[list[dict[str, Any]], int]:
         """
         ดึง Critical Error Logs และ Security Violation Logs พร้อมรองรับ Filter
-        และดึง Session failures ใน DB ร่วมด้วย
+        ดึงจากตาราง infrastructure_logs ในฐานข้อมูล และรวม Session failures
         """
-        all_logs = list(self._infrastructure_logs)
+        all_logs: list[dict[str, Any]] = []
 
-        # ดึง sessions ที่ failed ใน DB เพื่อสร้าง log entry เชื่อมโยงเหตุการณ์
+        # 1. ดึงจากตาราง infrastructure_logs ใน DB ก่อน
+        try:
+            db_query = self.db.query(InfrastructureLog)
+            if severity:
+                db_query = db_query.filter(func.lower(InfrastructureLog.severity) == severity.lower())
+            if category:
+                db_query = db_query.filter(func.lower(InfrastructureLog.category) == category.lower())
+            if event_type:
+                db_query = db_query.filter(func.lower(InfrastructureLog.event_type) == event_type.lower())
+
+            db_records = db_query.order_by(InfrastructureLog.timestamp.desc()).all()
+            for r in db_records:
+                all_logs.append({
+                    "id": str(r.id),
+                    "timestamp": r.timestamp,
+                    "severity": r.severity,
+                    "category": r.category,
+                    "event_type": r.event_type,
+                    "source": r.source,
+                    "message": r.message,
+                    "anon_id": r.anon_id,
+                    "user_id": None,
+                    "cluster_or_subnet": r.cluster_or_subnet,
+                    "metadata": r.metadata_json or {},
+                })
+        except Exception:
+            pass
+
+        # 2. รวม in-memory default logs หากยังไม่มีข้อมูลใน DB
+        if not all_logs:
+            all_logs.extend(self._infrastructure_logs)
+
+        # 3. ดึง sessions ที่ failed ใน DB เพื่อสร้าง log entry เชื่อมโยงเหตุการณ์
         failed_sessions = (
             self.db.query(SessionModel)
             .filter(
@@ -241,10 +274,10 @@ class MonitorRepository:
         filtered = all_logs
         if severity:
             sev_upper = severity.upper()
-            filtered = [item for item in filtered if (item.get("severity").value if hasattr(item.get("severity"), "value") else str(item.get("severity"))) == sev_upper]
+            filtered = [item for item in filtered if (item.get("severity").value if hasattr(item.get("severity"), "value") else str(item.get("severity"))).upper() == sev_upper]
         if category:
             cat_upper = category.upper()
-            filtered = [item for item in filtered if (item.get("category").value if hasattr(item.get("category"), "value") else str(item.get("category"))) == cat_upper]
+            filtered = [item for item in filtered if (item.get("category").value if hasattr(item.get("category"), "value") else str(item.get("category"))).upper() == cat_upper]
         if event_type:
             et_upper = event_type.upper()
             filtered = [item for item in filtered if str(item.get("event_type", "")).upper() == et_upper]
@@ -259,6 +292,54 @@ class MonitorRepository:
         paginated = filtered[offset : offset + limit]
         return paginated, total
 
+    def save_log(self, entry: dict[str, Any]) -> InfrastructureLog:
+        """
+        บันทึก Log Entry ลงฐานข้อมูล table infrastructure_logs
+        และอัปเดต Security Violation Counters
+        """
+        log_id = uuid4()
+        if entry.get("id"):
+            try:
+                log_id = UUID(str(entry["id"]))
+            except Exception:
+                pass
+
+        timestamp = entry.get("timestamp") or datetime.now(timezone.utc)
+        sev = entry.get("severity")
+        severity_val = sev.value.lower() if hasattr(sev, "value") else str(sev).lower()
+        cat = entry.get("category")
+        category_val = cat.value.lower() if hasattr(cat, "value") else str(cat).lower()
+
+        db_log = InfrastructureLog(
+            id=log_id,
+            timestamp=timestamp,
+            severity=severity_val,
+            category=category_val,
+            event_type=str(entry.get("event_type")),
+            source=str(entry.get("source")),
+            message=str(entry.get("message")),
+            anon_id=entry.get("anon_id"),
+            cluster_or_subnet=entry.get("cluster_or_subnet"),
+            metadata_json=entry.get("metadata") or {},
+        )
+        self.db.add(db_log)
+        self.db.commit()
+        self.db.refresh(db_log)
+
+        # อัปเดต security counters หากเป็น security violation
+        event_type_str = str(entry.get("event_type", "")).upper()
+        if "SQUID" in event_type_str:
+            self._security_counters["squid_egress_drops"] += 1
+            self._security_counters["last_violation_timestamp"] = timestamp
+        elif "KYVERNO" in event_type_str or "OPA" in event_type_str:
+            self._security_counters["kyverno_policy_blocks"] += 1
+            self._security_counters["last_violation_timestamp"] = timestamp
+        elif "TAILSCALE" in event_type_str:
+            self._security_counters["tailscale_cross_cluster_attempts"] += 1
+            self._security_counters["last_violation_timestamp"] = timestamp
+
+        return db_log
+
     def add_log_entry(self, entry: dict[str, Any]) -> None:
         """บันทึก Log Entry ใหม่"""
         if "id" not in entry:
@@ -266,3 +347,4 @@ class MonitorRepository:
         if "timestamp" not in entry:
             entry["timestamp"] = datetime.now(timezone.utc)
         self._infrastructure_logs.append(entry)
+

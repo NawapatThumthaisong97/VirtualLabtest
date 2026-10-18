@@ -83,11 +83,13 @@ async def get_billing_summary(
 
 @router.get(
     "/billing/export",
+    dependencies=[Depends(verify_permission("billing:export:all"))],
     summary="Export Billing Report as CSV or PDF",
     description="ประมวลผลและส่งออกไฟล์รายงานค่าใช้จ่ายในรูปแบบ CSV หรือ PDF สำหรับฝ่ายบริหาร โดยบังคับใช้ Strict Anonymity (ไม่มี PII)",
 )
 @router.get(
     "/v1/billing/export",
+    dependencies=[Depends(verify_permission("billing:export:all"))],
     include_in_schema=False,
 )
 async def export_billing_report(

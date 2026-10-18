@@ -44,9 +44,12 @@ PERMISSIONS = {
     # Monitoring & SIEM Permissions
     "metrics:read:global": "Read cluster metrics, resource allocations, and security counters (Admin only).",
     "logs:read:global": "Read critical infrastructure logs and boundary violation logs (Admin only).",
+    "monitoring:read:all": "Read all cluster metrics, critical logs, and security counters (Admin only).",
+    "monitoring:write:all": "Ingest collector logs into infrastructure log store (Admin & Collectors only).",
     # Billing & Financial Reporting Permissions
     "billing:read:global": "Read aggregated billing reports and export financial statements (Admin only).",
     "billing:manage:global": "Manage and delete billing report records (Admin only).",
+    "billing:export:all": "Export executive billing reports in CSV/PDF with strict anonymity (Admin only).",
 }
 
 ROLE_PERMISSIONS = {
@@ -92,8 +95,11 @@ ROLE_PERMISSIONS = {
         "courses:manage:global",
         "metrics:read:global",
         "logs:read:global",
+        "monitoring:read:all",
+        "monitoring:write:all",
         "billing:read:global",
         "billing:manage:global",
+        "billing:export:all",
     },
 }
 

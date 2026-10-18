@@ -4,6 +4,7 @@ Business logic สำหรับคำนวณ Cluster Resource Metrics, Secur
 และจัดการ Infrastructure & Security Logs พร้อมทั้งทำ Data Masking ผ่าน LogMaskerService
 """
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 from sqlalchemy.orm import Session as DbSession
 
@@ -11,6 +12,7 @@ from app.repositories.monitor_repository import MonitorRepository
 from app.schemas.monitor_schema import (
     ClusterMetricsResponse,
     ClusterMetricsSummary,
+    CreateInfrastructureLogRequest,
     InfrastructureLogItem,
     LogListResponse,
     ProviderMetrics,
@@ -264,12 +266,16 @@ class MonitorService:
         sanitized_logs: list[InfrastructureLogItem] = []
         for raw_entry in raw_logs:
             masked = self.log_masker.mask_log_record(raw_entry)
+            sev = masked.get("severity")
+            cat = masked.get("category")
+            sev_val = sev.upper() if isinstance(sev, str) else (sev.value if hasattr(sev, "value") else str(sev))
+            cat_val = cat.upper() if isinstance(cat, str) else (cat.value if hasattr(cat, "value") else str(cat))
             sanitized_logs.append(
                 InfrastructureLogItem(
                     id=str(masked.get("id")),
                     timestamp=masked.get("timestamp"),
-                    severity=masked.get("severity"),
-                    category=masked.get("category"),
+                    severity=sev_val,
+                    category=cat_val,
                     event_type=str(masked.get("event_type")),
                     source=str(masked.get("source")),
                     message=str(masked.get("message")),
@@ -280,3 +286,44 @@ class MonitorService:
             )
 
         return LogListResponse(logs=sanitized_logs, total=total)
+
+    def ingest_log(
+        self,
+        request: CreateInfrastructureLogRequest,
+    ) -> InfrastructureLogItem:
+        """
+        รับและบันทึก Log โครงสร้างพื้นฐานหรือ Security Event จาก Collector
+        โดยทำ Data Masking (ตัด Source Code/stdout ภายใน Pod และลบ PII)
+        และแปลง user_id เป็น HMAC-SHA256 anon_id ก่อนบันทึกลงฐานข้อมูล
+        """
+        raw_record = {
+            "timestamp": request.timestamp or datetime.now(timezone.utc),
+            "severity": request.severity.value if hasattr(request.severity, "value") else str(request.severity),
+            "category": request.category.value if hasattr(request.category, "value") else str(request.category),
+            "event_type": request.event_type,
+            "source": request.source,
+            "message": request.message,
+            "user_id": request.user_id,
+            "cluster_or_subnet": request.cluster_or_subnet,
+            "metadata": request.metadata or {},
+        }
+
+        # 1. ทำ Data Masking และ Pseudonymization ก่อนบันทึก
+        masked = self.log_masker.mask_log_record(raw_record)
+
+        # 2. บันทึกลงฐานข้อมูลผ่าน Repository
+        saved_db_log = self.monitor_repo.save_log(masked)
+
+        return InfrastructureLogItem(
+            id=str(saved_db_log.id),
+            timestamp=saved_db_log.timestamp,
+            severity=saved_db_log.severity.upper() if isinstance(saved_db_log.severity, str) else saved_db_log.severity,
+            category=saved_db_log.category.upper() if isinstance(saved_db_log.category, str) else saved_db_log.category,
+            event_type=saved_db_log.event_type,
+            source=saved_db_log.source,
+            message=saved_db_log.message,
+            anon_id=saved_db_log.anon_id,
+            cluster_or_subnet=saved_db_log.cluster_or_subnet,
+            metadata=saved_db_log.metadata_json or {},
+        )
+

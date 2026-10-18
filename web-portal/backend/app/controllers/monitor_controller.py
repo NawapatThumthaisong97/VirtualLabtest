@@ -7,6 +7,8 @@ Controller สำหรับระบบ Monitor / Metrics / Logs
 from typing import Optional
 from app.schemas.monitor_schema import (
     ClusterMetricsResponse,
+    CreateInfrastructureLogRequest,
+    InfrastructureLogItem,
     LogListResponse,
     SecurityCountersResponse,
 )
@@ -52,3 +54,11 @@ class MonitorController:
             limit=limit,
             offset=offset,
         )
+
+    def create_log(
+        self,
+        request: CreateInfrastructureLogRequest,
+    ) -> InfrastructureLogItem:
+        """รับและบันทึก Log โครงสร้างพื้นฐานหรือ Security Event จาก Collector"""
+        return self.monitor_service.ingest_log(request)
+

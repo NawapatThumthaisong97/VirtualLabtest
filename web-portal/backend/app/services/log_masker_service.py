@@ -56,10 +56,12 @@ class LogMaskerService:
     }
 
     def __init__(self, secret_key: Optional[str] = None):
-        # ใช้ SECRET_KEY ของระบบเป็น HMAC key
-        self.secret_key = (
-            secret_key or getattr(settings, "SECRET_KEY", "virtual-lab-pseudonym-salt")
-        ).encode("utf-8")
+        key = secret_key if secret_key is not None else getattr(settings, "SECRET_KEY", None)
+        if not key or len(key) < 32:
+            raise ValueError(
+                "SECRET_KEY must be configured via environment variable and have length >= 32 characters"
+            )
+        self.secret_key = key.encode("utf-8")
 
     def pseudonymize_user_id(self, user_id: UUID | str | None) -> Optional[str]:
         """

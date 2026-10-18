@@ -5,7 +5,7 @@ API Endpoints สำหรับ Cluster Metrics, Critical Logs และ Securi
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status as http_status
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
@@ -13,6 +13,8 @@ from app.controllers.monitor_controller import MonitorController
 from app.middlewares.rbac import verify_permission
 from app.schemas.monitor_schema import (
     ClusterMetricsResponse,
+    CreateInfrastructureLogRequest,
+    InfrastructureLogItem,
     LogListResponse,
     SecurityCountersResponse,
 )
@@ -22,7 +24,7 @@ from app.services.log_masker_service import LogMaskerService
 from app.services.monitor_service import MonitorService
 
 router = APIRouter(
-    dependencies=[Depends(verify_permission("metrics:read:global"))]
+    dependencies=[Depends(verify_permission("monitoring:read:all"))]
 )
 
 
@@ -132,3 +134,29 @@ async def get_critical_logs(
         message="Infrastructure and security logs retrieved successfully",
         data=data,
     )
+
+
+@router.post(
+    "/logs",
+    response_model=ApiResponse[InfrastructureLogItem],
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Ingest Infrastructure or Security Log from Collector",
+    description="รับข้อมูล Log โครงสร้างพื้นฐาน หรือ Security Boundary Violation จาก Collector โดยระบบจะทำ Data Masking, ตัด Source Code ใน Pod และแปลง user_id เป็น anon_id ก่อนบันทึกลงฐานข้อมูล",
+)
+@router.post(
+    "/v1/logs",
+    response_model=ApiResponse[InfrastructureLogItem],
+    status_code=http_status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
+async def ingest_log(
+    body: CreateInfrastructureLogRequest,
+    controller: MonitorController = Depends(get_monitor_controller),
+) -> ApiResponse[InfrastructureLogItem]:
+    data = controller.create_log(body)
+    return ApiResponse(
+        success=True,
+        message="Log ingested and masked successfully",
+        data=data,
+    )
+

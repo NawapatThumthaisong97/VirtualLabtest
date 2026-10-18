@@ -122,7 +122,7 @@ class TestLogMaskerService:
 
     def test_pseudonymize_user_id_is_deterministic_and_one_way(self):
         """HMAC-SHA256 pseudonymization produces anon_<8-char> and is deterministic"""
-        masker = LogMaskerService(secret_key="secret-key-123")
+        masker = LogMaskerService(secret_key="secret-key-salt-with-at-least-32-chars-long")
         uid = uuid.uuid4()
 
         anon_1 = masker.pseudonymize_user_id(uid)
@@ -140,6 +140,14 @@ class TestLogMaskerService:
         # None or empty returns None
         assert masker.pseudonymize_user_id(None) is None
         assert masker.pseudonymize_user_id("") is None
+
+    def test_secret_key_length_validation_rejects_weak_keys(self):
+        """Secret key < 32 chars or empty raises ValueError"""
+        with pytest.raises(ValueError, match="SECRET_KEY must be configured"):
+            LogMaskerService(secret_key="too-short")
+
+        with pytest.raises(ValueError, match="SECRET_KEY must be configured"):
+            LogMaskerService(secret_key="")
 
     def test_mask_pii_redacts_emails_and_student_ids(self):
         """PII such as student emails and 10-digit student IDs are redacted"""
@@ -250,14 +258,15 @@ class TestMonitorRBAC:
         assert resp_logs.json()["success"] is True
 
     def test_read_only_constraint_rejects_mutations(self, db, client, seed_rbac):
-        """Constraint: Read-only nature rejects POST, PUT, DELETE, PATCH with 405 Method Not Allowed"""
+        """Constraint: Read-only nature for UI rejects PUT, DELETE, PATCH with 405 Method Not Allowed"""
         _, admin_token = create_role_user(db, "admin@dome.tu.ac.th", UserRole.ADMIN)
         headers = {"Authorization": f"Bearer {admin_token}"}
 
         assert client.post("/api/v1/metrics", headers=headers).status_code == 405
         assert client.delete("/api/v1/metrics", headers=headers).status_code == 405
-        assert client.post("/api/v1/logs", headers=headers).status_code == 405
+        assert client.put("/api/v1/logs", headers=headers).status_code == 405
         assert client.delete("/api/v1/logs", headers=headers).status_code == 405
+        assert client.delete("/api/v1/metrics/security-counters", headers=headers).status_code == 405
 
 
 # =====================================================================
@@ -523,3 +532,126 @@ class TestCriticalLogs:
         logs_node = resp_node.json()["data"]["logs"]
         for item in logs_node:
             assert item["eventType"] == "NODE_DOWN"
+
+
+# =====================================================================
+# Group 6: Log Ingestion from Collector (POST /api/v1/logs)
+# =====================================================================
+
+class TestLogIngestion:
+    """Collector Log Ingestion with Data Masking, Pseudonymization, and Storage"""
+
+    def test_ingest_log_masks_pii_and_pseudonymizes_user_id(self, db, client, seed_rbac):
+        """Collector posts raw log with PII & code, backend sanitizes and persists it"""
+        _, admin_token = create_role_user(db, "admin@dome.tu.ac.th", UserRole.ADMIN)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        user_uuid = str(uuid.uuid4())
+
+        payload = {
+            "severity": "CRITICAL",
+            "category": "SECURITY_VIOLATION",
+            "eventType": "SQUID_EGRESS_DROP",
+            "source": "squid-proxy-edge",
+            "message": "Student 6709616099 (sophia.dav@dome.tu.ac.th) tried illegal egress with script:\n```python\nimport socket\ns=socket.socket()\n```",
+            "userId": user_uuid,
+            "clusterOrSubnet": "192.168.1.0/24",
+            "metadata": {"destination": "malicious.example.com", "port": 443},
+        }
+
+        resp = client.post("/api/v1/logs", json=payload, headers=headers)
+        assert resp.status_code == http_status.HTTP_201_CREATED
+        data = resp.json()["data"]
+
+        # 1. PII and Source Code are masked
+        assert "sophia.dav@dome.tu.ac.th" not in data["message"]
+        assert "6709616099" not in data["message"]
+        assert "import socket" not in data["message"]
+        assert "[REDACTED_EMAIL]" in data["message"]
+        assert "[REDACTED_STUDENT_ID]" in data["message"]
+        assert "[REDACTED_SOURCE_CODE]" in data["message"]
+
+        # 2. anon_id is generated and raw user_id is NOT returned
+        assert data["anonId"] is not None
+        assert data["anonId"].startswith("anon_")
+        assert len(data["anonId"]) == 13
+        assert "userId" not in data
+
+    def test_ingest_log_increments_security_counters(self, db, client, seed_rbac):
+        """Ingesting security violation log increments security violation counter"""
+        _, admin_token = create_role_user(db, "admin@dome.tu.ac.th", UserRole.ADMIN)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        # Check initial counter
+        resp_before = client.get("/api/v1/metrics/security-counters", headers=headers)
+        initial_squid = resp_before.json()["data"]["squidEgressDrops"]
+
+        # Ingest Squid drop log
+        payload = {
+            "severity": "WARNING",
+            "category": "SECURITY_VIOLATION",
+            "eventType": "SQUID_EGRESS_DROP",
+            "source": "squid-proxy",
+            "message": "Dropped external connection",
+            "clusterOrSubnet": "192.168.1.0/24",
+        }
+        resp = client.post("/api/v1/logs", json=payload, headers=headers)
+        assert resp.status_code == http_status.HTTP_201_CREATED
+
+        # Verify counter incremented
+        resp_after = client.get("/api/v1/metrics/security-counters", headers=headers)
+        after_squid = resp_after.json()["data"]["squidEgressDrops"]
+        assert after_squid == initial_squid + 1
+
+    def test_ingest_log_persists_in_db_and_shows_in_get_logs(self, db, client, seed_rbac):
+        """Ingested log is persisted in database and queryable via GET /api/v1/logs"""
+        _, admin_token = create_role_user(db, "admin@dome.tu.ac.th", UserRole.ADMIN)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        unique_source = f"k3s-worker-test-{uuid.uuid4().hex[:6]}"
+        payload = {
+            "severity": "CRITICAL",
+            "category": "INFRASTRUCTURE",
+            "eventType": "NODE_DOWN",
+            "source": unique_source,
+            "message": "Node heartbeat timeout detected",
+            "clusterOrSubnet": "192.168.1.0/24",
+        }
+        post_resp = client.post("/api/v1/logs", json=payload, headers=headers)
+        assert post_resp.status_code == http_status.HTTP_201_CREATED
+        created_id = post_resp.json()["data"]["id"]
+
+        # Verify queryable in GET /api/v1/logs
+        get_resp = client.get("/api/v1/logs?event_type=NODE_DOWN", headers=headers)
+        assert get_resp.status_code == http_status.HTTP_200_OK
+        logs = get_resp.json()["data"]["logs"]
+        matching = [l for l in logs if l["id"] == created_id]
+        assert len(matching) == 1
+        assert matching[0]["source"] == unique_source
+
+    def test_ingest_log_forbidden_for_student_and_instructor(self, db, client, seed_rbac):
+        """Students and Instructors cannot push logs to /api/v1/logs"""
+        _, student_token = create_role_user(db, "student@dome.tu.ac.th", UserRole.STUDENT)
+        _, instructor_token = create_role_user(db, "prof@tu.ac.th", UserRole.INSTRUCTOR)
+
+        payload = {
+            "severity": "INFO",
+            "category": "INFRASTRUCTURE",
+            "eventType": "TEST_EVENT",
+            "source": "fake-source",
+            "message": "test",
+        }
+
+        resp_s = client.post(
+            "/api/v1/logs",
+            json=payload,
+            headers={"Authorization": f"Bearer {student_token}"},
+        )
+        assert resp_s.status_code == http_status.HTTP_403_FORBIDDEN
+
+        resp_i = client.post(
+            "/api/v1/logs",
+            json=payload,
+            headers={"Authorization": f"Bearer {instructor_token}"},
+        )
+        assert resp_i.status_code == http_status.HTTP_403_FORBIDDEN
+
