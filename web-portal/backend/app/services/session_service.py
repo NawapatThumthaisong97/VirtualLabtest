@@ -50,6 +50,16 @@ def get_warm_pod_service() -> WarmPodService:
     return WarmPodService(get_kubernetes_service())
 
 
+def resolve_run_target(lab_target: RunTarget, client_node: Optional[tuple[str, str]]) -> RunTarget:
+    """target ที่จะ launch จริง: AUTO = กดจากเครื่อง worker ในห้องแลป → KUBERNETES, ที่อื่น → AWS
+
+    client_node = ผลของ _client_node (None = ไม่ใช่เครื่องแลป หรือเช็กไม่ได้) KUBERNETES / AWS ใช้ตามที่ตั้ง
+    """
+    if lab_target == RunTarget.AUTO:
+        return RunTarget.KUBERNETES if client_node is not None else RunTarget.AWS
+    return lab_target
+
+
 def _is_warm_session(session) -> bool:
     """session ที่ได้ warm pod (ไม่มี cluster ของ SkyPilot) แยกจาก seed ที่มี k8s_pod_name แต่ไม่มี pod จริง"""
     return not session.sky_cluster_name and (session.k8s_pod_name or "").startswith(WARM_POD_PREFIX)
@@ -314,9 +324,18 @@ class SessionService:
         if not lab_image:
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
-        run_target = lab.run_target or RunTarget.KUBERNETES
+        lab_target = lab.run_target or RunTarget.KUBERNETES
         # เครื่องแลปที่กด Start (None = ไม่ได้กดจากเครื่องแลป / ไม่ได้เปิดฟีเจอร์ที่ต้องใช้)
-        node = self._client_node(client_ip) if run_target == RunTarget.KUBERNETES else None
+        # AUTO ต้องรู้เสมอว่ากดจากเครื่องแลปไหม (ใช้เลือก K8s / AWS) ไม่ขึ้นกับ WARM_POD / LAB_ISOLATION
+        node = None
+        if lab_target == RunTarget.AUTO:
+            node = self._client_node(client_ip, always=True)
+        elif lab_target == RunTarget.KUBERNETES:
+            node = self._client_node(client_ip)
+        run_target = resolve_run_target(lab_target, node)
+        if lab_target == RunTarget.AUTO:
+            where = f"lab machine {node[0]}" if node else f"outside ({client_ip or 'unknown ip'})"
+            logger.info(f"[auto] Start from {where} -> {run_target.value}")
         if node is not None:
             # นั่งอยู่ที่เครื่องแลปที่มี warm pod ว่าง → ใช้เลย ไม่ต้องรอ SkyPilot
             warm = self._try_warm_pod(user_id, lab, lab_image, node)
@@ -395,6 +414,7 @@ class SessionService:
             "session_id": new_session.id,
             "cluster_name": cluster_name,
             "launch_mode": "skypilot",
+            "run_target": run_target.value,
             "lab_id": lab_id,
             "lab_title": lab.title,
             "image_repository": lab_image.repository,
@@ -405,12 +425,15 @@ class SessionService:
             "expires_at": new_session.expires_at,
         }
 
-    def _client_node(self, client_ip: Optional[str]) -> Optional[tuple[str, str]]:
+    def _client_node(self, client_ip: Optional[str], always: bool = False) -> Optional[tuple[str, str]]:
         """(ชื่อ node, IP) ถ้า IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (= นั่งเครื่องนั้นจริง)
 
-        หาเฉพาะตอนเปิด WARM_POD_ENABLED หรือ LAB_ISOLATION_ENABLED ต่อ K3s ไม่ได้ = None (launch ต่อได้)
+        หาเฉพาะตอนเปิด WARM_POD_ENABLED หรือ LAB_ISOLATION_ENABLED (always = หาเสมอ ใช้กับ lab AUTO)
+        ต่อ K3s ไม่ได้ = None (launch ต่อได้ — lab AUTO จึงไป AWS แทน)
         """
-        if not client_ip or not (settings.WARM_POD_ENABLED or settings.LAB_ISOLATION_ENABLED):
+        if not client_ip:
+            return None
+        if not always and not (settings.WARM_POD_ENABLED or settings.LAB_ISOLATION_ENABLED):
             return None
         try:
             return get_warm_pod_service().node_for_ip(client_ip)
@@ -478,6 +501,7 @@ class SessionService:
             "session_id": session.id,
             "cluster_name": None,
             "launch_mode": "warm_pod",
+            "run_target": RunTarget.KUBERNETES.value,
             "node_name": node_name,
             "lab_id": lab.id,
             "lab_title": lab.title,
