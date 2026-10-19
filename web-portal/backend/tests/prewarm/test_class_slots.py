@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.configs.settings import settings
+from app.configs.settings import PrewarmTarget, settings
 from app.exceptions.domain import ValidationError
 from app.models.class_schedule import ClassSchedule
 from app.models.class_slot import ClassSlot, ClassSlotStatus
@@ -19,7 +19,7 @@ from app.models.courses import Course
 from app.models.lab import RunTarget
 from app.models.lab_image import LabImage
 from app.models.user import User
-from app.services.prewarm_scheduler import sync_prewarm
+from app.services.prewarm_scheduler import build_schedule, sync_prewarm
 from app.services.prewarm_service import PrewarmService, daemonset_name
 from app.services.schedule_service import generate_slots
 from app.services.warm_pod_service import WarmPodService, build_warm_daemonset, warm_daemonset_name
@@ -269,6 +269,13 @@ class TestSchedulerWithSlots:
         assert sync_prewarm(prewarm, db, NOW + timedelta(hours=2))["removed"] == []
         assert sync_prewarm(prewarm, db, NOW + timedelta(hours=4))["removed"] == [HELLO_V1]
 
+    def test_auto_slot_prewarmed(self, db, prewarm, k8s, add_slot):
+        """AUTO slot is pre-warmed like KUBERNETES (lab-room students get K8s) and shows in the schedule"""
+        add_slot(run_target=RunTarget.AUTO)
+
+        assert sync_prewarm(prewarm, db, NOW)["created"] == [HELLO_V1]
+        assert any(s["image"] == HELLO_V1 for s in build_schedule(db, NOW)["slots"])
+
     @pytest.mark.parametrize("kind", ["aws", "cancelled", "deleted"])
     def test_ignored_slots(self, db, prewarm, k8s, add_slot, kind):
         """AWS / cancelled / soft-deleted slots are not pre-warmed"""
@@ -287,6 +294,68 @@ class TestSchedulerWithSlots:
         db.refresh(slot)
         assert slot.status == ClassSlotStatus.DONE
         assert result["created"] == [] and k8s.created == []
+
+
+class TestScheduleView:
+    """GET /api/prewarm/schedule: when the scheduler will act"""
+
+    @pytest.fixture(autouse=True)
+    def scheduler_on(self, monkeypatch):
+        monkeypatch.setattr(settings, "PREWARM_ENABLED", True)
+        monkeypatch.setattr(settings, "PREWARM_INTERVAL_SECONDS", 20)
+        monkeypatch.setattr(settings, "PREWARM_LEAD_MINUTES", 30)
+
+    def test_prewarm_at_is_start_minus_lead(self, db, world, add_slot):
+        """prewarm_at = starts_at - lead; slot before that time is not active yet"""
+        add_slot(start=timedelta(hours=2))
+
+        data = build_schedule(db, NOW)
+
+        assert (data["enabled"], data["interval_seconds"], data["lead_minutes"]) == (True, 20, 30)
+        mine = [s for s in data["slots"] if s["course_code"] == world.se.code]
+        assert len(mine) == 1
+        assert mine[0]["prewarm_at"] == NOW + timedelta(hours=2) - timedelta(minutes=30)
+        assert mine[0]["image"] == HELLO_V1
+        assert (mine[0]["status"], mine[0]["active"]) == ("SCHEDULED", False)
+
+    def test_active_inside_lead_window(self, db, world, add_slot):
+        """Slot starting within lead time (or in progress) is active"""
+        add_slot(start=timedelta(minutes=10))
+
+        mine = [s for s in build_schedule(db, NOW)["slots"] if s["course_code"] == world.se.code]
+
+        assert mine[0]["active"] is True
+
+    @pytest.mark.parametrize("kind", ["aws", "cancelled", "deleted", "ended"])
+    def test_ignored_slots(self, db, world, add_slot, kind):
+        """Same filter as the scheduler: AWS / cancelled / deleted / ended slots are not listed"""
+        add_slot(run_target=RunTarget.AWS if kind == "aws" else RunTarget.KUBERNETES,
+                 status=ClassSlotStatus.CANCELLED if kind == "cancelled" else ClassSlotStatus.SCHEDULED,
+                 deleted=kind == "deleted",
+                 start=timedelta(days=-1) if kind == "ended" else timedelta(minutes=10))
+
+        assert [s for s in build_schedule(db, NOW)["slots"] if s["course_code"] == world.se.code] == []
+
+    def test_sorted_and_limited(self, db, world, add_slot):
+        """Slots are sorted by start time and limited"""
+        add_slot(start=timedelta(days=2))
+        add_slot(start=timedelta(days=1))
+
+        mine = [s for s in build_schedule(db, NOW, limit=50)["slots"] if s["course_code"] == world.se.code]
+
+        assert [s["starts_at"] for s in mine] == sorted(s["starts_at"] for s in mine)
+        assert len(build_schedule(db, NOW, limit=1)["slots"]) == 1
+
+    def test_env_targets(self, db, monkeypatch):
+        """PREWARM_TARGETS that have not ended are listed with active flag"""
+        monkeypatch.setattr(settings, "PREWARM_TARGETS", [
+            PrewarmTarget(image="r/a:1", start_at=NOW - timedelta(minutes=5), end_at=NOW + timedelta(hours=1)),
+            PrewarmTarget(image="r/b:1", start_at=NOW - timedelta(hours=3), end_at=NOW - timedelta(hours=1)),
+        ])
+
+        targets = build_schedule(db, NOW)["targets"]
+
+        assert [(t["image"], t["active"]) for t in targets] == [("r/a:1", True)]
 
 
 class TestWarmPodScheduler:
