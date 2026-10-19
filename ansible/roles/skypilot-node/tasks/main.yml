@@ -123,14 +123,18 @@
     content: |
       # API Service configuration
       apiService:
-        # Resources for SkyPilot API Server (1.5 CPU, 1.5Gi RAM เพื่อให้พอดีกับ node)
+        # Resources for SkyPilot API Server
+        # memory: เดิม limit 2Gi → container ชนเพดานตลอด (memory.events max หลายร้อยครั้ง) ช้าจน backend
+        # ได้ "Could not connect" และโดน OOMKilled 3 ครั้งใน 1 วัน (2026-10-19) เพราะ server แยก process
+        # ต่อ request ตัวละ 150–290MB ระหว่าง launch — ขยายเป็น 2Gi / 4Gi (master มี RAM 7G)
+        # requests ใช้เป็น SKYPILOT_POD_MEMORY_BYTES_LIMIT ให้ SkyPilot คำนวณจำนวน worker ด้วย
         resources:
           requests:
             cpu: "1500m"
-            memory: "1536Mi"
+            memory: "2Gi"
           limits:
             cpu: "2000m"
-            memory: "2Gi"
+            memory: "4Gi"
         
         # Upgrade strategy (Recreate จำเป็นเมื่อ storage เป็น ReadWriteOnce)
         upgradeStrategy: Recreate
