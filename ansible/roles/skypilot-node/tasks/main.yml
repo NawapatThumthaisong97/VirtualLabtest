@@ -27,11 +27,14 @@
   ansible.builtin.shell: |
     k3s kubectl create namespace skypilot-ingress --dry-run=client -o yaml | k3s kubectl apply -f -
 
+# ล็อกเวอร์ชันตามที่ลงอยู่จริง (2026-08-09) ไม่ล็อก = รัน playbook เมื่อไหร่ได้ chart ล่าสุด
+# ทางเข้า dashboard (Cloudflare → nginx) อาจเปลี่ยนโดยไม่ตั้งใจ
 - name: Install Nginx Ingress Controller via Helm
   ansible.builtin.shell: |
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
     helm repo update
     helm upgrade --install skypilot-ingress ingress-nginx/ingress-nginx \
+      --version {{ skypilot_ingress_nginx_chart_version | default('4.15.1') }} \
       --namespace skypilot-ingress \
       --set controller.service.type=ClusterIP \
       --set controller.service.name=nginx-controller \
@@ -149,9 +152,24 @@
         # (ถ้ามีแล้วจะเอาของ PVC แก้ทีหลังต้องเขียน ~/.sky/config.yaml ใน pod แล้ว restart)
         # ports: podip = เปิดพอร์ต lab ด้วย pod IP แทน LoadBalancer (servicelb รับบนทุกเครื่อง
         # → เครื่องข้าง ๆ เปิด lab ได้ และ NetworkPolicy ตัด servicelb ทิ้ง) ดู skypilot/sky-config.yaml
+        # aws: launch lab บน EC2 ใน private subnet ของ VPC vlab-ecr-pull (SSH ผ่าน Tailscale router
+        # → master ต้อง accept-routes ดู role tailscale) use_ssm: false ไม่งั้น use_internal_ips
+        # ที่ไม่มี ssh_proxy_command ทำให้ SkyPilot 0.12.3 หันไปใช้ SSM ซึ่งใช้ใน VPC นี้ไม่ได้
         config: |
           kubernetes:
             ports: podip
+          aws:
+            vpc_names: vlab-ecr-pull
+            use_internal_ips: true
+            use_ssm: false
+            security_group_name: vlab-lab-instances
+            remote_identity: vlab-lab-ecr-pull
+
+      # AWS credential (IAM user Skypilot-IAM) จาก secret aws-credentials ใน ns skypilot
+      # secret สร้างเองครั้งเดียว (role ไม่สร้าง) ถ้าไม่ตั้งค่านี้ helm upgrade จะถอด credential ออก
+      # แล้ว lab ที่ run_target = AWS launch ไม่ได้
+      awsCredentials:
+        enabled: true
 
       # Service configuration
       service:

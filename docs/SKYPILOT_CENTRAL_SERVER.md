@@ -149,3 +149,31 @@ worker-pete ใช้ pod hostNetwork บน worker-pete ยิงหา backend
 | lab ของ worker-pete: worker-pete / thinkpad / master เปิด | ✅ 302,200 / ❌ / ❌ |
 | เทส backend ทั้งหมด | ✅ 138/138 (เทสใหม่ fail กับโค้ดเก่า ผ่านกับโค้ดใหม่) |
 | launch + ลบ 3 รอบติด ผ่าน NodePort | ✅ 3/3: 151s / 164s / 164s (ผ่าน Cloudflare เดิม 173–325s) IDE 302 ลบแบบ down cluster จริงทุกรอบ |
+
+## 8. เทส 4 เส้นทางด้วย account Sophia (2026-10-19)
+
+ทุกเส้นใช้ SkyPilot กลางบน master (`http://100.125.244.48:30880`) และ lab music-lab (`skypilot/music-lab:lab-01`)
+backend รันด้วย `AWS_PROFILE=skypilot` — ไม่ตั้ง boto3 จะใช้ profile default ของ ThinkPad ซึ่งเป็น **root** ตอนขอ ECR token
+
+| เส้นทาง | ผล | เวลา |
+|---|---|---|
+| 1. prewarm (`PREWARM_TARGETS`, pre-pull อย่างเดียว) | ✅ DaemonSet pull ครบ thinkpad + worker-pete (workerfilm NotReady ไม่นับ) | 1–4s (image มีในเครื่องอยู่แล้ว) |
+| 2. K8s ผ่าน SkyPilot (Start จาก worker-pete) | ✅ pod ลง worker-pete + label, pull image 0.3s, worker-pete เปิดได้ / thinkpad, master เปิดไม่ได้ | 230s |
+| 3. EC2 ผ่าน SkyPilot (cloud burst) | ✅ `m7i-flex.large` private subnet ไม่มี public IP, role `vlab-lab-ecr-pull`, AMI bake r2, IDE ผ่าน router 302 / 5173 200, ไม่พบ ECR token ใน log, DELETE → terminate | 133s (ลบ 15s) |
+| 4. warm pod (class slot ชั่วคราว) | ✅ scheduler สร้าง warm pod 2 เครื่อง, Start จาก worker-pete ได้ `warm_pod`, เปิดได้แค่ `localhost` (IP Tailscale ของเครื่องเอง / เครื่องอื่น / pod IP เปิดไม่ได้) | **1s** |
+
+prewarm ช่วยแค่ pull image ส่วน launch ผ่าน SkyPilot ยังลง runtime (conda / uv / Ray) ใหม่ทุกครั้ง จึงเป็นเวลาส่วนใหญ่
+ทางเร็วจริงคือ warm pod (ไม่ผ่าน SkyPilot) หรือ bake runtime ลง image
+
+### สิ่งที่ต้องตั้งเพิ่มให้ EC2 ผ่าน server กลางบน master
+| อะไร | ทำยังไง | อยู่ในโค้ดแล้ว |
+|---|---|---|
+| ECR repo `skypilot/music-lab` + push `lab-01` จาก register | AWS CLI (admin) | `terraform/ecr.tf` (infra branch, ต้อง import) |
+| `Skypilot-IAM` pull repo ใหม่ | แก้ inline policy `ecr-pull-lab` | ❌ IAM user สร้างมือ |
+| router egress ไป lab 5173 / 8443 (เดิม 8080) | AWS CLI | `terraform/security_groups.tf` (ต้อง import) |
+| master รับ Tailscale subnet route | `sudo tailscale set --accept-routes` | role `tailscale` (เฉพาะ master) |
+| ค่า `aws:` ใน config ของ server (vpc / internal IP / no SSM / SG / role) | เขียน `/root/.sky/config.yaml` ใน pod แล้ว restart | role `skypilot-node` (`apiService.config`) |
+| `awsCredentials.enabled: true` | มีอยู่แล้วใน helm (ตั้งมือ) | role `skypilot-node` |
+| `sky check aws` | ผ่าน token → `AWS [compute]` | – |
+
+หมายเหตุ: ConfigMap `skypilot-api-config` ยังมีแค่ `ports: podip` (server ไม่ sync จาก PVC ทันที) ไม่กระทบเพราะ server อ่านจาก PVC
