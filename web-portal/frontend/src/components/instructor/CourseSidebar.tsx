@@ -17,7 +17,7 @@ interface CourseSidebarProps {
   refreshTrigger?: number
 }
 
-export default function CourseSidebar({ onCreateCourse, onSelectCourse, refreshTrigger }: CourseSidebarProps) {
+export default function CourseSidebar({ onSelectCourse, refreshTrigger }: CourseSidebarProps) {
   const [selectedCourseCode, setSelectedCourseCode] = useState<string | null>(null)
   const [courses, setCourses] = useState<Courses[]>([])
   const [loading, setLoading] = useState(true)

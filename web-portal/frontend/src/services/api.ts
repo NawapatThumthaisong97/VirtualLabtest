@@ -13,9 +13,6 @@ import type { InternalAxiosRequestConfig } from 'axios';
 // to the browser as a plain URL (<img>, <iframe>, pdf.js) instead of axios
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
-// Auto-redirect to login on 401
-const ENABLE_AUTO_REDIRECT = true;
-
 // Create axios instance
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -86,11 +83,6 @@ apiClient.interceptors.response.use(
           }
         }
       }
-  (error) => {
-    if (error.response?.status === 401 && ENABLE_AUTO_REDIRECT) {
-      // Handle unauthorized
-      localStorage.removeItem('access_token');
-      window.location.href = '/login';
     }
 
     return Promise.reject(error);

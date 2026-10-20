@@ -75,21 +75,8 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
   const [tab, setTab] = useState('service');
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
+  // คนที่ login (cookie) — ไม่ login ProtectedRoute เด้งไปหน้า /login ให้แล้ว
   const { user: currentUser } = useAuth();
-  // 🔧 DEV MODE: Disable auth check during development
-  const ENABLE_AUTH_CHECK = false;
-
-  // หน้านี้เป็นของ "คนที่ล็อกอิน" ไม่มี token ก็ไม่มีอะไรให้ดู เด้งไป login เลย
-  const token = authService.getToken();
-  useEffect(() => {
-    if (ENABLE_AUTH_CHECK && !token) navigate('/login', { replace: true });
-  }, [token, navigate]);
-
-  const { data: currentUser } = useQuery({
-    queryKey: ['me'],
-    queryFn: authService.me,
-    enabled: Boolean(token),
-  });
 
   const { data: announcements } = useQuery({
     queryKey: ['home-announcements'],

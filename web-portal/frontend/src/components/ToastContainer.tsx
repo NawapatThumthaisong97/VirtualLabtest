@@ -5,7 +5,8 @@
 import Toast, { type ToastProps } from './Toast'
 
 interface ToastContainerProps {
-  toasts: ToastProps[]
+  // onClose ใส่ให้ทุกตัวตอน render ข้อมูลใน store ไม่ต้องมี
+  toasts: Omit<ToastProps, 'onClose'>[]
   onClose: (id: string) => void
 }
 
