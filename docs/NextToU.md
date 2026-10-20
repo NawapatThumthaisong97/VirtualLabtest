@@ -39,6 +39,15 @@ Pete จะ
 | worker-pete | 100.83.96.97 | worker | worker (เครื่องแลปหลักที่ใช้เทส) |
 | workerfilm | 100.97.13.122 | NotReady มานาน | – |
 | register | 100.127.74.48:5001 | registry on-prem | เหมือนเดิม |
+| **webservice** (VM ใหม่) | **100.102.72.39** (SSH `web@`) | ยังว่าง — ลง Tailscale + openssh แล้ว | **web-portal** (target ของ role `web-portal`) |
+
+webservice (เพิ่ม 2026-10-20):
+- hostname เครื่อง `webservice` ลง Tailscale ด้วย `--hostname=vlab-web --advertise-tags=tag:vlab-server` (เช็ก tag ว่าติดจริงด้วย `tailscale status --self`)
+- **ปิด Tailscale SSH แล้ว** (`tailscale set --ssh=false`) — ถ้าเปิด Tailscale จะดักพอร์ต 22 แล้ว ACL ปฏิเสธเครื่องที่มี tag
+  (`tailnet policy does not permit you to SSH to this node`) ใช้ openssh ปกติแทน (`ufw allow OpenSSH` แล้ว)
+- ต้องเพิ่ม `100.102.72.39  tag:vlab-server` ใน `tailscale/vlab-tags.tsv` ไม่งั้นรัน `tailscale-acl.sh apply` รอบหน้า tag อาจถูกตั้งไม่ตรง
+- ต้องเพิ่มเครื่องนี้ใน `ansible/inventory.home.yml` กลุ่ม `webportal` (ansible_host = 100.102.72.39, ansible_user = web)
+- Claude ยัง SSH ไม่ได้จนกว่า Pete รัน `ssh-copy-id web@100.102.72.39` บน ThinkPad
 
 inventory ที่บ้าน: `ansible/inventory.home.yml` (gitignored), secret: `ansible/group_vars/all.yml` (gitignored)
 
