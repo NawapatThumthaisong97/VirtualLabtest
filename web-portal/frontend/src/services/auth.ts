@@ -11,30 +11,74 @@ export interface CurrentUser {
   role: UserRole;
 }
 
-interface TokenPayload {
+export interface TokenResponseData {
   accessToken: string;
   tokenType: string;
+  refreshToken?: string | null;
 }
 
-const TOKEN_KEY = 'access_token';
+export interface SSOAuthorizeData {
+  authorizationUrl: string;
+}
 
+export interface SSOLoginPayload {
+  code?: string;
+  idToken?: string;
+  accessToken?: string;
+  redirectUri?: string;
+  email?: string;
+  name?: string;
+  studentId?: string;
+}
+
+export interface LogoutResponseData {
+  loggedOut: boolean;
+}
+
+/**
+ * Auth Service
+ * Interacts with backend authentication endpoints.
+ * Note: Tokens are stored strictly in HTTP-Only, Secure cookies managed by the browser.
+ * Never store tokens in localStorage or sessionStorage.
+ */
 export const authService = {
-  login: async (username: string, password: string): Promise<string> => {
-    const response = await apiClient.post<ApiResponse<TokenPayload>>('/auth/login', {
+  login: async (username: string, password: string): Promise<TokenResponseData> => {
+    const response = await apiClient.post<ApiResponse<TokenResponseData>>('/auth/login', {
       username,
       password,
     });
-    const { accessToken } = (response as unknown as ApiResponse<TokenPayload>).data;
-    localStorage.setItem(TOKEN_KEY, accessToken);
-    return accessToken;
+    return (response as unknown as ApiResponse<TokenResponseData>).data;
+  },
+
+  getSsoLoginUrl: async (state?: string, redirectUri?: string): Promise<SSOAuthorizeData> => {
+    const params = new URLSearchParams();
+    if (state) params.set('state', state);
+    if (redirectUri) params.set('redirect_uri', redirectUri);
+
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const response = await apiClient.get<ApiResponse<SSOAuthorizeData>>(`/auth/sso/login${qs}`);
+    return (response as unknown as ApiResponse<SSOAuthorizeData>).data;
+  },
+
+  ssoLogin: async (payload: SSOLoginPayload): Promise<TokenResponseData> => {
+    const response = await apiClient.post<ApiResponse<TokenResponseData>>('/auth/sso', payload);
+    return (response as unknown as ApiResponse<TokenResponseData>).data;
+  },
+
+  refresh: async (): Promise<TokenResponseData> => {
+    const response = await apiClient.post<ApiResponse<TokenResponseData>>('/auth/refresh', {});
+    return (response as unknown as ApiResponse<TokenResponseData>).data;
+  },
+
+  logout: async (): Promise<LogoutResponseData> => {
+    const response = await apiClient.post<ApiResponse<LogoutResponseData>>('/auth/logout', {});
+    return (response as unknown as ApiResponse<LogoutResponseData>).data;
   },
 
   me: async (): Promise<CurrentUser> => {
     const response = await apiClient.get<ApiResponse<CurrentUser>>('/me');
     return (response as unknown as ApiResponse<CurrentUser>).data;
   },
-
-  logout: () => localStorage.removeItem(TOKEN_KEY),
-
-  getToken: () => localStorage.getItem(TOKEN_KEY),
 };
+
+export default authService;

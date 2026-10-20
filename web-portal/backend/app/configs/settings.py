@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 from typing import Optional
 
 
@@ -31,15 +32,37 @@ class Settings(BaseSettings):
     APP_NAME: str = "FastAPI Backend"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    ENVIRONMENT: str = "development"  # "development" or "production"
     API_PREFIX: str = "/api"
     
     # Database
     DATABASE_URL: str = "postgresql://user:password@localhost:5432/dbname"
     
     # Security
-    SECRET_KEY: str = "your-secret-key-change-this-in-production"
+    SECRET_KEY: str = Field(min_length=32)
+    ADMIN_SESSION_SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Cookie Security Settings
+    AUTH_COOKIE_SECURE: bool = False  # True ใน Production (HTTPS) / False ใน Dev (HTTP/Tailscale)
+    AUTH_COOKIE_SAMESITE: str = "lax"  # "lax", "strict", "none"
+    AUTH_COOKIE_DOMAIN: Optional[str] = None
+    ACCESS_TOKEN_COOKIE_NAME: str = "access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "refresh_token"
+
+    # University SSO (Google OAuth2 / OIDC) & Allowed Email Domains
+    ALLOWED_EMAIL_DOMAINS_STR: str = "dome.tu.ac.th,tu.ac.th"
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/sso/callback"
+    GOOGLE_AUTH_URI: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URI: str = "https://openidconnect.googleapis.com/v1/userinfo"
+    GOOGLE_TOKENINFO_URI: str = "https://oauth2.googleapis.com/tokeninfo"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    TAILSCALE_TRUSTED_PROXY_CIDRS_STR: str = ""
     
     # CORS - เก็บเป็น string คั่นด้วย comma แล้ว parse ใน code
     CORS_ORIGINS_STR: str = "http://localhost:3000,http://localhost:5173"
@@ -117,13 +140,39 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True
+        case_sensitive=True,
+        extra="ignore",
     )
     
     @property
     def cors_origins(self) -> list:
         """Parse CORS origins from comma-separated string"""
         return [origin.strip() for origin in self.CORS_ORIGINS_STR.split(",")]
+
+    @property
+    def allowed_email_domains(self) -> list[str]:
+        """Parse allowed university email domains from comma-separated string"""
+        return [
+            domain.strip().lower().lstrip("@")
+            for domain in self.ALLOWED_EMAIL_DOMAINS_STR.split(",")
+            if domain.strip()
+        ]
+    def tailscale_trusted_proxy_cidrs(self) -> list[str]:
+        return [
+            cidr.strip()
+            for cidr in self.TAILSCALE_TRUSTED_PROXY_CIDRS_STR.split(",")
+            if cidr.strip()
+        ]
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production environment"""
+        return self.ENVIRONMENT.lower() == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development environment"""
+        return self.ENVIRONMENT.lower() == "development"
 
 
 SKYPILOT_ENV_KEYS = ("SKYPILOT_API_SERVER_ENDPOINT", "SKYPILOT_SERVICE_ACCOUNT_TOKEN")

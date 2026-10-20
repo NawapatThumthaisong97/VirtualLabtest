@@ -60,6 +60,8 @@ jobs:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
         run: pytest tests/session --color=yes
 
+  course:
+    name: Course & RBAC tests
   prewarm:
     name: Prewarm & class schedule tests
     # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
@@ -97,8 +99,53 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirement.txt
 
+      - name: Run tests/course
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/course --color=yes
       # K3s ปลอม (FakeK8s) ส่วน class_slots ใช้ DB เทสเพราะ exclusion constraint ต้องเป็น Postgres
       - name: Run tests/prewarm
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
         run: pytest tests/prewarm --color=yes
+
+  auth:
+    name: SSO & JWT auth tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: virtual_lab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d virtual_lab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web-portal/backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: web-portal/backend/requirement.txt
+
+      - name: Install dependencies
+        run: pip install -r requirement.txt
+
+      - name: Run tests/auth
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/auth --color=yes
