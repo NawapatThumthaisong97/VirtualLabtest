@@ -160,7 +160,7 @@ Terraform state หาไม่เจอ = ไม่กระทบการใ�
 | master route ไป AWS | บน master `ip route get 10.10.2.10` | `dev tailscale0` |
 | web-portal | role จบด้วย `sky api info` ใน container | endpoint 30880 + user `vlab-backend` HEALTHY |
 
-### 5.2 เส้นทาง launch — ใช้ `script/launch-test.sh` (curl + jq เท่านั้น)
+### 5.2 เส้นทาง launch — ใช้ `script/vlab-tui.py` (TUI รันทั้งชุด ดู docs/TEST_ALL.md) หรือ `script/launch-test.sh` (curl + jq ทีละข้อ)
 IP ที่ backend เห็น = เครื่องที่รัน script → **เทสเครื่องแลป ต้องรัน script บน worker-pete** (copy ไฟล์ไป
 ตั้ง `BACKEND_URL=http://<Tailscale IP ของเครื่อง web-portal>:8000`) หรือใช้ pod `hostNetwork` บน worker-pete ยิง curl
 เทสข้างนอก = รันบนเครื่องที่ไม่ใช่ node (เครื่อง web-portal เอง / laptop ใน tailnet)
