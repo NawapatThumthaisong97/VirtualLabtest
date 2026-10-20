@@ -7,6 +7,8 @@
       - cloudflare_tunnel_token is defined
       - skypilot_chart_version is defined
       - skypilot_admin_password is defined
+      - skypilot_aws_access_key_id is defined
+      - skypilot_aws_secret_access_key is defined
     fail_msg: "Missing required variables. Please check group_vars/all.yml"
     success_msg: "All required variables are defined"
 
@@ -110,6 +112,25 @@
   no_log: true
   when: skypilot_admin_secret.rc != 0
 
+# AWS credential ของ IAM user Skypilot-IAM (ไม่ใช่ root) ให้ server กลาง launch lab บน EC2
+# helm อ่านจาก secret นี้ (awsCredentials.enabled ข้างล่าง) ถ้าไม่มี pod ของ server ขึ้นไม่ได้
+# apply ทับทุกรอบ เปลี่ยน key ใน group_vars แล้วรันใหม่ได้เลย (ต้อง restart pod ให้อ่านค่าใหม่)
+- name: Create AWS credentials secret (Skypilot-IAM)
+  ansible.builtin.shell: |
+    set -o pipefail
+    k3s kubectl create secret generic aws-credentials -n skypilot \
+      --from-literal=aws_access_key_id="$AWS_ACCESS_KEY_ID" \
+      --from-literal=aws_secret_access_key="$AWS_SECRET_ACCESS_KEY" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ skypilot_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ skypilot_aws_secret_access_key }}"
+  register: aws_secret
+  changed_when: "'unchanged' not in aws_secret.stdout"
+  no_log: true
+
 # ติดตั้ง SkyPilot API Server ผ่าน Helm
 - name: Add SkyPilot Helm repo
   ansible.builtin.shell: |
@@ -170,7 +191,7 @@
             remote_identity: vlab-lab-ecr-pull
 
       # AWS credential (IAM user Skypilot-IAM) จาก secret aws-credentials ใน ns skypilot
-      # secret สร้างเองครั้งเดียว (role ไม่สร้าง) ถ้าไม่ตั้งค่านี้ helm upgrade จะถอด credential ออก
+      # secret สร้างใน task "Create AWS credentials secret" ถ้าไม่ตั้งค่านี้ helm upgrade จะถอด credential ออก
       # แล้ว lab ที่ run_target = AWS launch ไม่ได้
       awsCredentials:
         enabled: true

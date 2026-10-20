@@ -55,6 +55,8 @@ services:
       - ./backend/storage:/app/storage
       # kubeconfig ที่ Ansible ดึงมาจาก master แล้วแก้ server เป็น Tailscale IP
       - ./backend/kubeconfig.yaml:/app/kubeconfig.yaml:ro
+      # key ของ IAM user Skypilot-IAM (profile skypilot, AWS_PROFILE ใน .env) ใช้ขอ ECR token — Ansible render ให้
+      - ./backend/aws-credentials:/root/.aws/credentials:ro
 
     ports:
       - "${BIND_IP}:8000:8000"

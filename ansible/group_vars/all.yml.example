@@ -27,9 +27,14 @@ skypilot_chart_version: "<SKYPILOT_CHART_VERSION>"   # ณ ตอนนี้แ
 skypilot_admin_password: <SKYPILOT_ADMIN_PASSWORD>
 
 # token ของ backend (service account) — รัน skypilot-node เสร็จแล้วเข้า dashboard ด้วย admin
-# → Users → Service Accounts → สร้าง token ชื่อ vlab-backend (แสดงครั้งเดียว) แล้วใส่ที่นี่ ก่อนรัน web-portal
+# → Users → Service Accounts → สร้าง token ชื่อ vlab-backend (แสดงครั้งเดียว) แล้วใส่ที่นี่ ก่อนรัน role web-service
 # ถ้า reset namespace skypilot (skypilot_reset=true) token เดิมหาย ต้องสร้างใหม่
 skypilot_backend_token: <SKYPILOT_BACKEND_TOKEN>
+
+# key ของ IAM user Skypilot-IAM (ห้ามใช้ root) — role skypilot-node สร้าง secret aws-credentials ให้ server กลาง
+# launch EC2, role web-service ใส่ให้ backend ขอ ECR token (lab AWS / AUTO จากข้างนอก)
+skypilot_aws_access_key_id: <SKYPILOT_IAM_ACCESS_KEY_ID>
+skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 
 # --- Optional: skypilot-node role ---
 # ปกติ role ไม่ลบ namespace skypilot เดิมทิ้ง (idempotent) จะรีเซ็ตแบบลบทิ้งแล้วลงใหม่ได้ก็ต่อเมื่อ

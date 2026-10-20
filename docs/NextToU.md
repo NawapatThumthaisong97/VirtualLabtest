@@ -22,7 +22,8 @@
 
 Pete จะ
 1. **ลง master ใหม่** ด้วย Ansible (`k3s-server` + `skypilot-node`) — เทส playbook จากศูนย์ครั้งแรก
-2. **ถอน ThinkPad ออกจาก worker** แล้วใช้เป็นเครื่อง web-portal (อาจเป็น **VM บน ThinkPad**) — เทส role `web-portal` ครั้งแรก
+2. **ถอน ThinkPad ออกจาก worker** แล้วใช้เป็นเครื่อง web-portal (อาจเป็น **VM บน ThinkPad**) — เทส role `web-service` ครั้งแรก
+   (2026-10-20 เปลี่ยนชื่อ role `web-portal` → `web-service`, กลุ่ม inventory `webservice`, ตัวแปร `webservice_*` — โฟลเดอร์แอป `web-portal/` ชื่อเดิม)
 3. **AWS ใช้ของเดิมต่อ ไม่ destroy** — แค่ให้ server ตัวใหม่ชี้มาที่ VPC / router / SG / ECR เดิม (หัวข้อ 2.1)
 
 งานของ session ถัดไป: ช่วยลงตามลำดับ แล้ว **เทสทุกเส้นทาง launch ในหัวข้อ 5** ให้ผ่าน
@@ -39,15 +40,15 @@ Pete จะ
 | worker-pete | 100.83.96.97 | worker | worker (เครื่องแลปหลักที่ใช้เทส) |
 | workerfilm | 100.97.13.122 | NotReady มานาน | – |
 | register | 100.127.74.48:5001 | registry on-prem | เหมือนเดิม |
-| **webservice** (VM ใหม่) | **100.102.72.39** (SSH `web@`) | ยังว่าง — ลง Tailscale + openssh แล้ว | **web-portal** (target ของ role `web-portal`) |
+| **webservice** (VM ใหม่) | **100.102.72.39** (SSH `web@`) | ยังว่าง — ลง Tailscale + openssh แล้ว | **web-portal** (target ของ role `web-service`) |
 
 webservice (เพิ่ม 2026-10-20):
 - hostname เครื่อง `webservice` ลง Tailscale ด้วย `--hostname=vlab-web --advertise-tags=tag:vlab-server` (เช็ก tag ว่าติดจริงด้วย `tailscale status --self`)
 - **ปิด Tailscale SSH แล้ว** (`tailscale set --ssh=false`) — ถ้าเปิด Tailscale จะดักพอร์ต 22 แล้ว ACL ปฏิเสธเครื่องที่มี tag
   (`tailnet policy does not permit you to SSH to this node`) ใช้ openssh ปกติแทน (`ufw allow OpenSSH` แล้ว)
 - ต้องเพิ่ม `100.102.72.39  tag:vlab-server` ใน `tailscale/vlab-tags.tsv` ไม่งั้นรัน `tailscale-acl.sh apply` รอบหน้า tag อาจถูกตั้งไม่ตรง
-- ต้องเพิ่มเครื่องนี้ใน `ansible/inventory.home.yml` กลุ่ม `webportal` (ansible_host = 100.102.72.39, ansible_user = web)
-- Claude ยัง SSH ไม่ได้จนกว่า Pete รัน `ssh-copy-id web@100.102.72.39` บน ThinkPad
+- อยู่ใน `ansible/inventory.home.yml` กลุ่ม `webservice` host `vlab-web` (ansible_host = 100.102.72.39, ansible_user = web)
+- `ssh-copy-id` แล้ว (2026-10-20) Claude SSH ได้
 
 inventory ที่บ้าน: `ansible/inventory.home.yml` (gitignored), secret: `ansible/group_vars/all.yml` (gitignored)
 
@@ -120,9 +121,9 @@ Terraform state หาไม่เจอ = ไม่กระทบการใ�
 
 | # | ช่องว่าง | ทำไมสำคัญ |
 |---|---|---|
-| 1 | role `web-portal` ไม่ส่ง **AWS credential** (`Skypilot-IAM`) เข้า container ของ backend | backend ขอ ECR token ไม่ได้ → lab AWS / AUTO จากข้างนอกพังทั้งหมด ห้ามใช้ root (profile `default` บน ThinkPad = root) |
-| 2 | secret `aws-credentials` (ns `skypilot`) role `skypilot-node` ไม่สร้าง | master ใหม่จะไม่มี → server กลางไม่รู้จัก AWS (`sky check aws` ไม่ผ่าน) |
-| 3 | token `vlab-backend` อยู่ใน PVC | master ใหม่ = PVC ใหม่ → ต้องสร้าง token ใหม่จาก dashboard แล้วใส่ `skypilot_backend_token` ใน `group_vars/all.yml` ก่อนรัน role `web-portal` |
+| 1 | ✅ แก้แล้ว 2026-10-20: role `web-service` render `backend/aws-credentials` (profile `skypilot`) mount เข้า container + ค่า AWS / สวิตช์ใน `.env` | เดิม backend ขอ ECR token ไม่ได้ → lab AWS / AUTO จากข้างนอกพัง ห้ามใช้ root |
+| 2 | ✅ แก้แล้ว 2026-10-20: role `skypilot-node` สร้าง secret `aws-credentials` จาก `skypilot_aws_access_key_id/secret_access_key` ใน `group_vars/all.yml` | เดิม master ใหม่จะไม่มี → `sky check aws` ไม่ผ่าน |
+| 3 | token `vlab-backend` อยู่ใน PVC | master ใหม่ = PVC ใหม่ → ต้องสร้าง token ใหม่จาก dashboard แล้วใส่ `skypilot_backend_token` ใน `group_vars/all.yml` ก่อนรัน role `web-service` |
 | 4 | role `k3s-server` เขียน `registries.yaml` ต่างจากของเดิม → restart k3s | master ใหม่ไม่เป็นไร (ลงครั้งแรก) แค่รู้ไว้ |
 | 5 | เครื่อง web-portal ต้องติด `tag:vlab-server` ใน Tailscale | ไม่งั้นเข้าพอร์ต 30880 ของ master ไม่ได้ (ACL) → แก้ `tailscale/vlab-tags.tsv` + `./script/tailscale-acl.sh plan` แล้ว apply (Pete รันเอง ต้องใช้ token) |
 | 6 | ThinkPad ไม่ใช่ worker แล้ว | node `thinkpad` ต้องถูกลบออกจาก cluster (`kubectl delete node`, ถอน k3s-agent ด้วย `script/k3s-remove-local.sh` ถ้าใช้ได้) และ `vlab-tags.tsv` ย้าย tag |

@@ -1,12 +1,12 @@
 # ใช้ SkyPilot กลางแต่ไม่มี token = backend ได้ 401 ทุกครั้งที่ launch เช็กก่อนลงอะไรทั้งหมด
 - name: Require backend token when using the central SkyPilot API server
   ansible.builtin.assert:
-    that: webportal_skypilot_token | length > 0
+    that: webservice_skypilot_token | length > 0
     fail_msg: >-
       ตั้ง skypilot_backend_token ใน group_vars/all.yml (สร้าง service account token จาก
       https://{{ skypilot_domain | default('<skypilot_domain>') }}/dashboard) หรือตั้ง
-      webportal_skypilot_endpoint="" เพื่อใช้ SkyPilot ใน container แทน
-  when: webportal_skypilot_endpoint | length > 0
+      webservice_skypilot_endpoint="" เพื่อใช้ SkyPilot ใน container แทน
+  when: webservice_skypilot_endpoint | length > 0
 
 # ---------- Docker ----------
 # ติดตั้งจาก repo ทางการของ Docker ไม่ใช้ docker.io ของ Ubuntu
@@ -65,9 +65,9 @@
 
 # ---------- Source code ----------
 
-- name: Create web-portal directory
+- name: Create web-service app directory
   ansible.builtin.file:
-    path: "{{ webportal_dir }}"
+    path: "{{ webservice_dir }}"
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
@@ -80,7 +80,7 @@
   become: false
   ansible.posix.synchronize:
     src: "{{ playbook_dir }}/../web-portal/"
-    dest: "{{ webportal_dir }}/"
+    dest: "{{ webservice_dir }}/"
     rsync_path: "rsync"
     delete: yes
     rsync_opts:
@@ -91,10 +91,11 @@
       - "--exclude=storage"
       - "--exclude=dist"
       - "--exclude=kubeconfig.yaml"
+      - "--exclude=aws-credentials"
 
 - name: Ensure storage directory exists (ไฟล์เอกสารแลป — ห้ามถูก rsync ลบ)
   ansible.builtin.file:
-    path: "{{ webportal_dir }}/backend/storage"
+    path: "{{ webservice_dir }}/backend/storage"
     state: directory
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
@@ -115,8 +116,8 @@
     content: >-
       {{ master_kubeconfig.content | b64decode
          | regex_replace('https://127\.0\.0\.1:6443',
-                         'https://' ~ webportal_k8s_master_ip ~ ':6443') }}
-    dest: "{{ webportal_dir }}/backend/kubeconfig.yaml"
+                         'https://' ~ webservice_k8s_master_ip ~ ':6443') }}
+    dest: "{{ webservice_dir }}/backend/kubeconfig.yaml"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0600"
@@ -127,27 +128,41 @@
 - name: Render backend .env
   ansible.builtin.template:
     src: backend.env.j2
-    dest: "{{ webportal_dir }}/backend/.env"
+    dest: "{{ webservice_dir }}/backend/.env"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0600"
-  notify: restart web-portal
+  notify: restart web-service
+
+# สร้างทุกรอบแม้ไม่มี key — compose mount ไฟล์นี้ ถ้าไม่มีไฟล์ docker จะสร้างเป็น directory แทน
+- name: Render AWS credentials for the backend (profile skypilot)
+  ansible.builtin.copy:
+    content: |
+      [skypilot]
+      aws_access_key_id = {{ webservice_aws_access_key_id }}
+      aws_secret_access_key = {{ webservice_aws_secret_access_key }}
+    dest: "{{ webservice_dir }}/backend/aws-credentials"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  no_log: true
+  notify: restart web-service
 
 - name: Render compose .env
   ansible.builtin.template:
     src: compose.env.j2
-    dest: "{{ webportal_dir }}/.env"
+    dest: "{{ webservice_dir }}/.env"
     owner: "{{ ansible_user }}"
     group: "{{ ansible_user }}"
     mode: "0600"
-  notify: restart web-portal
+  notify: restart web-service
 
 # ---------- Deploy ----------
 
 - name: Build and start web-portal stack
   ansible.builtin.command:
     cmd: docker compose -f docker-compose.prod.yml up -d --build
-    chdir: "{{ webportal_dir }}"
+    chdir: "{{ webservice_dir }}"
   register: compose_up
   changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr"
 
@@ -155,7 +170,7 @@
 # ฉะนั้น loopback ไม่มีอะไร listen อยู่ เรียกไปก็ connection refused ตลอด
 - name: Wait for backend to become healthy
   ansible.builtin.uri:
-    url: "http://{{ webportal_bind_ip }}:{{ webportal_api_port }}/health"
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_api_port }}/health"
     status_code: 200
   register: backend_health
   until: backend_health.status == 200
@@ -164,7 +179,7 @@
 
 - name: Wait for frontend to respond
   ansible.builtin.uri:
-    url: "http://{{ webportal_bind_ip }}:{{ webportal_http_port }}/"
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_http_port }}/"
     status_code: 200
   register: frontend_health
   until: frontend_health.status == 200
@@ -178,25 +193,25 @@
     cmd: >-
       docker compose -f docker-compose.prod.yml exec -T backend
       python script/init_db.py
-    chdir: "{{ webportal_dir }}"
+    chdir: "{{ webservice_dir }}"
   register: init_db
   changed_when: "'Database initialized' in init_db.stdout"
 
-# seed เป็น optional เพราะทับข้อมูลเดิมได้ สั่งเปิดด้วย -e webportal_seed=true
+# seed เป็น optional เพราะทับข้อมูลเดิมได้ สั่งเปิดด้วย -e webservice_seed=true
 - name: Seed initial data (ต้องสั่งเปิดเอง)
   ansible.builtin.command:
     cmd: >-
       docker compose -f docker-compose.prod.yml exec -T backend
       python script/run_seed.py
-    chdir: "{{ webportal_dir }}"
-  when: webportal_seed | bool
+    chdir: "{{ webservice_dir }}"
+  when: webservice_seed | bool
   changed_when: true
 
 # ---------- Verify ----------
 # /health เช็คแค่ต่อ DB ติด ต้องยิง endpoint ที่ query ตารางจริงถึงจะจับเคสตารางหายได้
 - name: Verify the API can actually query the database
   ansible.builtin.uri:
-    url: "http://{{ webportal_bind_ip }}:{{ webportal_api_port }}{{ webportal_api_prefix }}/sessions"
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_api_port }}{{ webservice_api_prefix }}/sessions"
     status_code: [200, 401, 403]
   register: db_probe
   retries: 6
@@ -210,14 +225,14 @@
     cmd: >-
       docker compose -f docker-compose.prod.yml exec -T backend
       sky api info
-    chdir: "{{ webportal_dir }}"
+    chdir: "{{ webservice_dir }}"
   register: sky_api_info
   changed_when: false
   failed_when: >-
     sky_api_info.rc != 0
-    or webportal_skypilot_endpoint not in sky_api_info.stdout
+    or webservice_skypilot_endpoint not in sky_api_info.stdout
     or 'HEALTHY' not in sky_api_info.stdout
-  when: webportal_skypilot_endpoint | length > 0
+  when: webservice_skypilot_endpoint | length > 0
 
 # SkyPilot ใน container (ไม่ได้ตั้ง SkyPilot กลาง) ต้องมี kubectl, nc, socat, ssh, rsync ซึ่ง pip
 # ไม่ได้ลงให้ ถ้าขาดจะพังเป็น FileNotFoundError ที่ไม่บอกว่าตัวไหนหาย — ใช้ sky check ตรวจตอน deploy แทน
@@ -226,17 +241,17 @@
     cmd: >-
       docker compose -f docker-compose.prod.yml exec -T backend
       sky check kubernetes
-    chdir: "{{ webportal_dir }}"
+    chdir: "{{ webservice_dir }}"
   register: sky_check
   changed_when: false
   failed_when: "'Kubernetes: disabled' in sky_check.stdout"
   when:
-    - webportal_k8s_enabled | bool
-    - webportal_skypilot_endpoint | length == 0
+    - webservice_k8s_enabled | bool
+    - webservice_skypilot_endpoint | length == 0
 
 - name: Report access URL
   ansible.builtin.debug:
     msg: >-
-      web-portal พร้อมใช้งานที่ http://{{ webportal_bind_ip }}
-      (API: http://{{ webportal_bind_ip }}:{{ webportal_api_port }}{{ webportal_api_prefix }})
+      web-service พร้อมใช้งานที่ http://{{ webservice_bind_ip }}
+      (API: http://{{ webservice_bind_ip }}:{{ webservice_api_port }}{{ webservice_api_prefix }})
       — เข้าได้เฉพาะเครื่องที่อยู่ใน tailnet เดียวกัน
