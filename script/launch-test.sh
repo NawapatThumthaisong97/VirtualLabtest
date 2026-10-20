@@ -10,13 +10,15 @@
 #   ./script/launch-test.sh
 #   BACKEND_URL=http://100.93.121.17:8000 ./script/launch-test.sh      # ให้ backend เห็นเป็นเครื่อง thinkpad
 #
-# ค่าตั้งต้นแก้ด้วย env: BACKEND_URL USER_ID USER_NAME LAB_K8S LAB_AWS LAB_AUTO SKY_URL REGISTRY (ปิดลูกเล่น: VLAB_NO_FX=1)
+# ค่าตั้งต้นแก้ด้วย env: BACKEND_URL LOGIN_EMAIL LOGIN_PASSWORD USER_NAME LAB_K8S LAB_AWS LAB_AUTO SKY_URL REGISTRY (ปิดลูกเล่น: VLAB_NO_FX=1)
 
 set -u
 
 BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:8000}"
 API="$BACKEND_URL/api"
-USER_ID="${USER_ID:-b4f5c004-5dac-4e38-99cb-8382d5982484}"     # Sophia Davis (persona seed)
+# login เป็น Sophia (persona seed) — backend ใช้ user ที่ login ตอนเปิด / ดู / ปิด session ไม่รับ user_id ใน body แล้ว
+LOGIN_EMAIL="${LOGIN_EMAIL:-sophia.dav@dome.tu.ac.th}"
+LOGIN_PASSWORD="${LOGIN_PASSWORD:-sophia6764}"
 USER_NAME="${USER_NAME:-Sophia Davis}"
 LAB_K8S="${LAB_K8S:-03a18386-1558-4bcf-9399-4b79cc1ae22b}"     # OOP with Spring Boot (run_target KUBERNETES)
 LAB_AWS="${LAB_AWS:-536989c2-52d1-4169-b23a-ed06247cdb57}"     # OOP with Spring Boot (AWS)
@@ -36,8 +38,17 @@ fi
 die() { echo "${R}!! $*${N}" >&2; exit 1; }
 for c in curl jq; do command -v "$c" >/dev/null || die "missing command: $c"; done
 
-get()  { curl -s --max-time "${2:-10}" "$1"; }
-code() { curl -s -o /dev/null -w '%{http_code}' --max-time "${2:-5}" "$1"; }
+JAR="$TMP/cookies"   # cookie access_token / refresh_token จาก POST /api/auth/login
+get()  { curl -s -b "$JAR" --max-time "${2:-10}" "$1"; }
+code() { curl -s -b "$JAR" -o /dev/null -w '%{http_code}' --max-time "${2:-5}" "$1"; }
+
+login() {
+  local http
+  http=$(curl -s -c "$JAR" -o "$TMP/login.json" -w '%{http_code}' --max-time 15 -X POST "$API/auth/login" \
+    -H 'Content-Type: application/json' -d "{\"username\":\"$LOGIN_EMAIL\",\"password\":\"$LOGIN_PASSWORD\"}")
+  [ "$http" = 200 ] || die "login $LOGIN_EMAIL ไม่ผ่าน (HTTP $http) $(jq -r '.message // .detail // .' "$TMP/login.json" 2>/dev/null | cut -c1-200)"
+}
+login
 line() { printf '%*s' "${1:-78}" '' | tr ' ' "${2:--}"; }
 short() { echo "${1:0:8}"; }
 
@@ -92,8 +103,8 @@ start_lab() {
   local lab="$1" kind="$2" pid t0 el http frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
   echo "${W}POST${N} /api/sessions  ${D}lab :${N} ${G}$(lab_title "$lab")${N} ${D}(${kind})${N}"
   t0=$SECONDS
-  curl -s --max-time 1500 -o "$TMP/resp.json" -w '%{http_code}' -X POST "$API/sessions" \
-    -H 'Content-Type: application/json' -d "{\"lab_id\":\"$lab\",\"user_id\":\"$USER_ID\"}" > "$TMP/code" &
+  curl -s -b "$JAR" --max-time 1500 -o "$TMP/resp.json" -w '%{http_code}' -X POST "$API/sessions" \
+    -H 'Content-Type: application/json' -d "{\"labId\":\"$lab\"}" > "$TMP/code" &
   pid=$!
   # Ctrl+C = เลิกรอ (backend ยัง launch ต่อ ดูด้วยเมนู 4)
   trap 'kill $pid 2>/dev/null; echo; echo "${Y}stopped waiting — backend keeps launching, check with 5${N}"' INT
@@ -137,8 +148,8 @@ warm_pods() {
 
 # ---------- 5 Sessions (เฉพาะของ user ที่ยังเปิดอยู่)
 active_sessions() {
-  get "$API/sessions" 10 | jq -c --arg u "$USER_ID" --arg k8s "$LAB_K8S" --arg aws "$LAB_AWS" --arg auto "$LAB_AUTO" '
-    [.data // [] | .[] | select(.user_id == $u and (.status == "running" or .status == "pending"))
+  get "$API/sessions" 10 | jq -c --arg k8s "$LAB_K8S" --arg aws "$LAB_AWS" --arg auto "$LAB_AUTO" '
+    [.data // [] | .[] | select(.status == "running" or .status == "pending")
      | {id, status, lab: (if .lab_id == $aws then "AWS" elif .lab_id == $k8s then "K8s" elif .lab_id == $auto then "AUTO" else "other" end),
         where: (if .is_cloud then "EC2 \(.sky_cluster_name // "")"
                 elif .sky_cluster_name then "skypilot \(.sky_cluster_name)"
@@ -165,7 +176,7 @@ sessions() {
 delete_session() {
   local id="$1" t0=$SECONDS http
   printf '%sDELETE%s /api/sessions/%s… ' "$W" "$N" "$(short "$id")"
-  http=$(curl -s --max-time 300 -o "$TMP/del.json" -w '%{http_code}' -X DELETE "$API/sessions/$id")
+  http=$(curl -s -b "$JAR" --max-time 300 -o "$TMP/del.json" -w '%{http_code}' -X DELETE "$API/sessions/$id")
   if [ "$http" = 200 ]; then
     echo "${B}✅ $(jq -r '.data.message // .message' "$TMP/del.json")${N} ${D}($((SECONDS - t0))s)${N}"
   else
