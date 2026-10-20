@@ -107,8 +107,8 @@ def create_session(
     - Return: session information with endpoints
     - กดจากเครื่องแลปที่มี warm pod ว่าง (WARM_POD_ENABLED) ได้ pod นั้นทันที (launch_mode = warm_pod)
     """
-    # ถ้าไม่มี userId ใช้ default UUID
-    user_id = request.user_id or UUID("00000000-0000-0000-0000-000000000000")
+    # user = คนที่ login (schema ไม่รับ user_id แล้ว — เดิมเรียก request.user_id ได้ AttributeError → 500 ทุกครั้ง)
+    user_id = current_user.id
     # IP ของ connection จริง ไม่อ่าน X-Forwarded-For เพราะ client ใส่เองได้ (ปลอมเป็นเครื่องอื่นได้)
     client_ip = http_request.client.host if http_request.client else None
 

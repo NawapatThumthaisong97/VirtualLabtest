@@ -59,9 +59,12 @@ def default_settings(monkeypatch):
     .env ของ dev เปิดฟีเจอร์ไว้ทดลอง (LAB_ISOLATION_ENABLED / WARM_POD_ENABLED / PREWARM_LEAD_MINUTES ฯลฯ)
     ถ้าเทสอ่านค่าพวกนี้ ผลจะขึ้นกับว่าเครื่องไหนรัน — เทสที่ต้องการค่าอื่นให้ monkeypatch เองในเทส
     """
-    defaults = type(settings)(_env_file=None)
-    for name in type(settings).model_fields:
-        if name not in SETTINGS_FROM_DOTENV:
+    # ค่าบังคับที่ไม่มี default (SECRET_KEY / ADMIN_SESSION_SECRET_KEY) ใช้ของเดิม ไม่งั้นสร้าง Settings ไม่ผ่าน
+    fields = type(settings).model_fields
+    required = {name: getattr(settings, name) for name, f in fields.items() if f.is_required()}
+    defaults = type(settings)(_env_file=None, **required)
+    for name in fields:
+        if name not in SETTINGS_FROM_DOTENV and name not in required:
             monkeypatch.setattr(settings, name, getattr(defaults, name))
 
 

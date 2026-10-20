@@ -4,7 +4,7 @@
 import pytest
 
 from app.configs.settings import settings
-from app.models.lab import Lab, RunTarget
+from app.models.lab import Lab, LabStatus, RunTarget
 from app.schemas.lab_schema import LabUpdateRequest
 from app.services import session_service
 from app.repositories.lab_repository import LabRepository
@@ -19,7 +19,7 @@ from tests.session.test_warm_pod import OUTSIDE_IP, PETE_IP, k8s  # noqa: F401 (
 def auto_lab(db, world):
     """lab AUTO ใช้ image เดียวกับ lab K3s (music-lab มีทั้ง registry ในบ้านและ ECR)"""
     lab = Lab(course_id=world.course.id, title="AUTO lab", order_no=10,
-              image_id=world.k8s_image.id, run_target=RunTarget.AUTO)
+              image_id=world.k8s_image.id, run_target=RunTarget.AUTO, status=LabStatus.PUBLISHED)
     db.add(lab)
     db.commit()
     return lab

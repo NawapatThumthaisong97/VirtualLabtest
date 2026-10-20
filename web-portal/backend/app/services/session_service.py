@@ -17,8 +17,9 @@ from app.services.warm_pod_service import LAB_LABEL, WARM_POD_PREFIX, WarmPodSer
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.user import User
-from app.models.lab import Lab, RunTarget
-from app.models.lab_image import LabImage
+from app.models.lab import Lab, LabStatus, RunTarget
+from app.models.lab_image import ImageStatus, LabImage
+from app.models.enrollment import Enrollment, RoleInCourse
 from app.repositories.session_repository import SessionRepository
 from app.repositories.lab_repository import LabRepository
 from app.repositories.lab_image_repository import LabImageRepository
@@ -672,15 +673,6 @@ class SessionService:
                     result["stopped"].append(session.k8s_pod_name)
             except Exception as e:
                 logger.warning(f"[warm pod] reconcile {session.k8s_pod_name} failed: {e}")
-
-    def _down_quietly(self, cluster_name: str) -> None:
-        """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
-        try:
-            sky.get(sky.down(cluster_name))
-        except ClusterDoesNotExist:
-            pass
-        except Exception as e:
-            print(f"[Warning] Failed to clean up cluster {cluster_name}: {e}")
 
     def delete_session(self, session_id: UUID) -> dict:
         """ลบ session - stop cluster (ถ้ายังรัน) และ soft delete"""
