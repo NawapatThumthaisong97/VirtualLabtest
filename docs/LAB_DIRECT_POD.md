@@ -1,6 +1,6 @@
 # เครื่องแลปสร้าง pod ตรง ไม่ผ่าน SkyPilot — กฎเดียว "AUTO" ทุก lab
 
-สถานะ: **ร่าง ให้ Pete รีวิว** (2026-10-21) — ยังไม่แก้โค้ด
+สถานะ: **ทำแล้ว** (2026-10-21) — pytest 263/263, รอเทสจริงบนหน้าเว็บ (หัวข้อ "เทส")
 ต่อจาก `docs/RUN_TARGET_AUTO.md` (AUTO แบบเดิม) และผลเทสหน้าเว็บจริงใน `docs/NextToU.md` หัวข้อ 9
 
 ## ทำไม
@@ -46,7 +46,7 @@ SkyPilot เหลือทำแค่สิ่งที่มันเก่�
 | | warm pod | pod ตรง (ใหม่) |
 |---|---|---|
 | สร้างเมื่อ | ก่อนคาบ (scheduler) | ตอนกด Start |
-| ชื่อ | `warm-<image>-xxxxx` | `lab-<session id 8 ตัว>` |
+| ชื่อ | `warm-<image>-xxxxx` | `lab-pod-<session id 8 ตัว>` (ไม่ใช่ `lab-` เฉย ๆ เพราะ seed มี `lab-se301-sophia`) |
 | ลงเครื่อง | DaemonSet ทุก worker | `nodeSelector: kubernetes.io/hostname=<เครื่องที่กด>` |
 | label | `vlab/lab=true`, `vlab/warm…` | `vlab/lab=true`, `vlab/session-id` (annotation) |
 | port | hostPort (+ `hostIP 127.0.0.1` เมื่อ `LAB_ISOLATION_ENABLED`) | เหมือนกัน |
@@ -71,7 +71,7 @@ else:
 ```
 
 `_launch_direct_pod`:
-1. สร้าง session `PENDING` + `k8s_pod_name = lab-…` + `node_name` ก่อน (ถ้า backend ตายกลางทาง reconciler ยังตามลบ pod ได้)
+1. สร้าง session `PENDING` + `k8s_pod_name = lab-pod-…` + `node_name` ก่อน (ถ้า backend ตายกลางทาง reconciler ยังตามลบ pod ได้)
 2. `create_namespaced_pod`
 3. poll ทุก 2 วิ จน Ready สูงสุด `DIRECT_POD_READY_TIMEOUT` (ค่าเริ่ม 180 วิ — เผื่อ pull image)
    - `PodScheduled=False` reason `Unschedulable` → ลบ pod, session `FAILED` → **error "เครื่องนี้ไม่มีที่ว่างสำหรับ lab"**
@@ -83,7 +83,7 @@ else:
 ## reconcile / delete / กดซ้ำ
 
 ตอนนี้ทั้งหมดดูแค่ `_is_warm_session` (มี `k8s_pod_name` ขึ้นต้น `warm-` และไม่มี `sky_cluster_name`)
-→ ขยายเป็น `_is_pod_session`: ขึ้นต้น `warm-` **หรือ** `lab-` แล้วทุกทางใช้ได้ทันที:
+→ ขยายเป็น `_is_pod_session`: ขึ้นต้น `warm-` **หรือ** `lab-pod-` แล้วทุกทางใช้ได้ทันที:
 - `delete_session` → `delete_pod`
 - `_reconcile_warm` → ถึง `expires_at` ลบ pod / pod หาย = `LOST`
 - `create_session` กดซ้ำ → pod ยังอยู่ = 409, pod หาย = ปิด session เดิมแล้วเปิดใหม่

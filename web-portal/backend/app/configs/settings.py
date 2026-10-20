@@ -7,7 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from typing import Optional
+from typing import Literal, Optional
 
 
 class PrewarmTarget(BaseModel):
@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     # ปิดไว้เป็นค่าเริ่มต้นแยกจาก PREWARM_ENABLED เพราะกิน CPU / RAM จริงทุกเครื่องตลอดคาบ
     # scheduler สร้าง / ลบ DaemonSet ให้เมื่อเปิดทั้ง PREWARM_ENABLED และตัวนี้ ส่วน launch ใช้ตัวนี้ตัวเดียว
     WARM_POD_ENABLED: bool = False
+    # กด Start ตอนที่ warm pod ตัวใหม่ยังไม่ Ready (DaemonSet เพิ่งสร้างแทนตัวที่คนก่อนปิด) รอตัวนั้นกี่วินาที
+    # ไม่รอ = ไปสร้าง pod อีกตัวชนกับ warm pod ที่จองที่ไว้ → เครื่องเต็ม (docs/LAB_DIRECT_POD.md)
+    WARM_POD_WAIT_SECONDS: int = 60
+
+    # กดจากเครื่องแลปแต่ไม่มี warm pod: "pod" = สร้าง pod ตรงด้วย k8s API บนเครื่องนั้น (ไม่ต้องลงของ ไม่กี่วินาที)
+    # "skypilot" = ทางเดิม SkyPilot in-cluster pin เครื่องนั้น (ลง apt / runtime / Ray ทุกครั้ง 3–5 นาที) เก็บไว้เป็นทางสำรอง
+    LAB_MACHINE_LAUNCH: Literal["pod", "skypilot"] = "pod"
+    # รอ pod ตรง Ready สูงสุดกี่วินาที (รวม pull image ตอนไม่มีคาบ ~700 MB จาก registry ในบ้าน)
+    DIRECT_POD_READY_TIMEOUT: int = 180
 
     # กันเครื่องอื่นเปิด lab ของเรา (นักศึกษาเครื่องข้าง ๆ เปิด IDE ผ่าน Tailscale IP ได้)
     # - warm pod: hostPort ผูกกับ 127.0.0.1 → เปิดได้แค่ http://localhost:<port> บนเครื่องนั้น

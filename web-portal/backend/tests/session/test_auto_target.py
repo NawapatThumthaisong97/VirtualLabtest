@@ -1,5 +1,5 @@
 """
-กลุ่ม 6: run_target = AUTO — เลือก K8s / AWS ตามเครื่องที่กด Start (docs/RUN_TARGET_AUTO.md)
+กลุ่ม 6: กฎเดียวทุก lab — เครื่องแลป → K8s, ที่อื่น → AWS (docs/RUN_TARGET_AUTO.md, docs/LAB_DIRECT_POD.md)
 """
 import pytest
 
@@ -34,17 +34,13 @@ def launched_cloud(fake_sky) -> str:
 class TestResolve:
     """resolve_run_target: which target is launched"""
 
-    @pytest.mark.parametrize("lab_target, node, expected", [
-        (RunTarget.AUTO, ("worker-pete", PETE_IP), RunTarget.KUBERNETES),
-        (RunTarget.AUTO, None, RunTarget.AWS),
-        (RunTarget.KUBERNETES, None, RunTarget.KUBERNETES),
-        (RunTarget.KUBERNETES, ("worker-pete", PETE_IP), RunTarget.KUBERNETES),
-        (RunTarget.AWS, ("worker-pete", PETE_IP), RunTarget.AWS),
-        (RunTarget.AWS, None, RunTarget.AWS),
-    ], ids=["auto lab machine", "auto outside", "k8s outside", "k8s lab machine", "aws lab machine", "aws outside"])
-    def test_table(self, lab_target, node, expected):
-        """AUTO picks by machine; KUBERNETES / AWS stay as set"""
-        assert resolve_run_target(lab_target, node) == expected
+    @pytest.mark.parametrize("node, expected", [
+        (("worker-pete", PETE_IP), RunTarget.KUBERNETES),
+        (None, RunTarget.AWS),
+    ], ids=["lab machine", "outside"])
+    def test_table(self, node, expected):
+        """Picks by machine only (labs.run_target is ignored)"""
+        assert resolve_run_target(node) == expected
 
 
 class TestAutoLaunch:
@@ -54,9 +50,19 @@ class TestAutoLaunch:
     def isolated(self, monkeypatch):
         monkeypatch.setattr(settings, "LAB_ISOLATION_ENABLED", True)
 
-    def test_lab_machine_goes_k8s_pinned(self, svc, db, world, fake_sky, k8s, auto_lab, monkeypatch):
-        """From worker-pete, no warm pod: SkyPilot on K8s pinned to worker-pete, no ECR token"""
+    def test_lab_machine_gets_direct_pod(self, svc, world, fake_sky, k8s, auto_lab, monkeypatch):
+        """From worker-pete, no warm pod: pod created directly on worker-pete, no SkyPilot"""
         monkeypatch.setattr(settings, "WARM_POD_ENABLED", False)
+
+        result = svc.create_session(world.user.id, auto_lab.id, client_ip=PETE_IP)
+
+        assert (result["launch_mode"], result["run_target"], result["node_name"]) == ("pod", "kubernetes", "worker-pete")
+        assert fake_sky.launched == []
+
+    def test_lab_machine_skypilot_switch(self, svc, db, world, fake_sky, k8s, auto_lab, monkeypatch):
+        """LAB_MACHINE_LAUNCH=skypilot (backup path): SkyPilot on K8s pinned to worker-pete, no ECR token"""
+        monkeypatch.setattr(settings, "WARM_POD_ENABLED", False)
+        monkeypatch.setattr(settings, "LAB_MACHINE_LAUNCH", "skypilot")
 
         result = svc.create_session(world.user.id, auto_lab.id, client_ip=PETE_IP)
 
@@ -102,9 +108,10 @@ class TestAutoLaunch:
         assert result["run_target"] == "aws"
 
     def test_looks_up_machine_even_when_features_off(self, svc, world, fake_sky, k8s, auto_lab, monkeypatch):
-        """WARM_POD / LAB_ISOLATION off: AUTO still knows it is a lab machine (K8s, just not pinned)"""
+        """WARM_POD / LAB_ISOLATION off: still knows it is a lab machine (SkyPilot switch: K8s, just not pinned)"""
         monkeypatch.setattr(settings, "WARM_POD_ENABLED", False)
         monkeypatch.setattr(settings, "LAB_ISOLATION_ENABLED", False)
+        monkeypatch.setattr(settings, "LAB_MACHINE_LAUNCH", "skypilot")
 
         result = svc.create_session(world.user.id, auto_lab.id, client_ip=PETE_IP)
 
@@ -113,12 +120,21 @@ class TestAutoLaunch:
         [res] = list(task.resources)
         assert not res._cluster_config_overrides
 
-    def test_k8s_lab_unchanged_from_outside(self, svc, world, fake_sky, k8s):
-        """KUBERNETES lab started from outside still goes to K8s (old behaviour)"""
+    def test_k8s_lab_from_outside_goes_aws(self, svc, world, fake_sky, k8s):
+        """Lab set to KUBERNETES, started from outside: AWS like every lab (labs.run_target ignored)"""
         result = svc.create_session(world.user.id, world.k8s_lab.id, client_ip=OUTSIDE_IP)
 
-        assert result["run_target"] == "kubernetes"
-        assert "kubernetes" in launched_cloud(fake_sky)
+        assert result["run_target"] == "aws"
+        assert "aws" in launched_cloud(fake_sky)
+
+    def test_aws_lab_from_lab_machine_gets_pod(self, svc, world, fake_sky, k8s, monkeypatch):
+        """Lab set to AWS, started from a lab machine: K8s pod (labs.run_target ignored, no EC2 cost)"""
+        monkeypatch.setattr(settings, "WARM_POD_ENABLED", False)
+
+        result = svc.create_session(world.user.id, world.aws_lab.id, client_ip=PETE_IP)
+
+        assert (result["launch_mode"], result["run_target"]) == ("pod", "kubernetes")
+        assert fake_sky.launched == []
 
 
 class TestLabApi:

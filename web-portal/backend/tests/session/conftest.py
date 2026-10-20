@@ -2,6 +2,7 @@
 Fixture sky ปลอม + ข้อมูลตั้งต้น สำหรับเทส create / delete / reconcile
 (fixture db / db_engine อยู่ใน tests/conftest.py ใช้ร่วมกับเทส prewarm)
 """
+import time as _real_time
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -22,12 +23,33 @@ from app.services.session_service import SessionService
 from tests.fakes import FakeSky
 
 
+class FakeClock:
+    """แทน module time ใน session_service: sleep = เวลาเดินทันที (ไม่รอจริง) + เรียก on_sleep ให้เทสเปลี่ยนโลกได้"""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.slept = 0.0
+        self.on_sleep = None   # callable(clock) — เช่น ทำให้ warm pod พร้อมระหว่างรอ
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return _real_time.time()
+
+    def sleep(self, seconds):
+        self.now += seconds
+        self.slept += seconds
+        if self.on_sleep is not None:
+            self.on_sleep(self)
+
+
 @pytest.fixture
 def fake_sky(monkeypatch):
     fake = FakeSky()
     monkeypatch.setattr(session_service, "sky", fake)
-    # _wait_job_running รอ 5 วินาทีต่อรอบ ในเทสไม่ต้องรอจริง
-    monkeypatch.setattr(session_service.time, "sleep", lambda seconds: None)
+    # _wait_job_running / รอ pod ใช้ time.sleep + time.monotonic — ในเทสใช้นาฬิกาปลอม ไม่รอจริง
+    monkeypatch.setattr(session_service, "time", FakeClock())
     monkeypatch.setattr(session_service, "get_ecr_token", lambda region: "fake-ecr-token")
     return fake
 
