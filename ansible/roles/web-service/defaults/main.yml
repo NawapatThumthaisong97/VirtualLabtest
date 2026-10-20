@@ -15,7 +15,10 @@ webservice_postgres_db: virtual_lab
 webservice_postgres_password: "{{ vault_postgres_password | default('changeme-in-vault') }}"
 
 # --- Backend ---
-webservice_secret_key: "{{ vault_backend_secret_key | default('changeme-in-vault') }}"
+# SECRET_KEY / ADMIN_SESSION_SECRET_KEY ต้องยาว >= 32 ตัว (settings บังคับ ไม่งั้น backend ไม่ start)
+# สร้างด้วย: python3 -c 'import secrets;print(secrets.token_urlsafe(48))' แล้วใส่ใน group_vars
+webservice_secret_key: "{{ vault_backend_secret_key }}"
+webservice_admin_session_secret_key: "{{ vault_admin_session_secret_key }}"
 webservice_debug: false
 webservice_api_prefix: /api
 

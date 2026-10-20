@@ -207,6 +207,17 @@
   when: webservice_seed | bool
   changed_when: true
 
+# role / permission ของ RBAC + ผูก user ตาม role เดิม (student / instructor / admin) — ไม่มี = ทุก API ตอบ 403
+# seed ซ้ำได้ ไม่ทับข้อมูลแอป จึงรันทุก deploy
+- name: Seed RBAC roles and permissions
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      python script/run_rbac_seed.py
+    chdir: "{{ webservice_dir }}"
+  register: rbac_seed
+  changed_when: false
+
 # ---------- Verify ----------
 # /health เช็คแค่ต่อ DB ติด ต้องยิง endpoint ที่ query ตารางจริงถึงจะจับเคสตารางหายได้
 - name: Verify the API can actually query the database

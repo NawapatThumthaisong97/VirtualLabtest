@@ -45,3 +45,6 @@ skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 #เวลารันให้เรียกคําสั่ง ansible-playbook -i inventory.yml site.yml -K
 #หากต้องการดูว่าสิ่งที่เราต้องทํามีอะไรบ้าง ansible-playbook -i inventory.yml site.yml --list-tasks
 #หากต้องการดูว่าเราพร้อมรันยังให้ดู ansible-playbook -i inventory.yml site.yml --check -K
+# --- web-service (backend) — ยาว >= 32 ตัว สร้างด้วย python3 -c 'import secrets;print(secrets.token_urlsafe(48))'
+vault_backend_secret_key: <BACKEND_SECRET_KEY>
+vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
