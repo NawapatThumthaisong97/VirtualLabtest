@@ -18,3 +18,22 @@
     value: "1"
     state: present
     reload: yes
+
+# นาฬิกาคลาดเกิน 5 นาที = EC2 API ตอบ AuthFailure ทั้งที่ key ถูก (STS ยังผ่าน หาสาเหตุยาก)
+# เจอบน VM webservice (Ubuntu 26.04 / chrony) ช้า 5 นาทีหลังบูต chrony ค่อย ๆ slew ไม่ทัน
+# → step เวลาทันทีครั้งเดียว ไม่แตะ config ของ chrony (เครื่องที่ใช้ timesyncd ไม่มี chronyc ข้ามไป)
+- name: Step the clock now if chrony is out of sync
+  ansible.builtin.shell: |
+    command -v chronyc >/dev/null || exit 0
+    [ "$(timedatectl show -p NTPSynchronized --value)" = yes ] && exit 0
+    chronyc makestep && echo stepped
+  register: clock_step
+  changed_when: "'stepped' in clock_step.stdout"
+
+- name: Check system clock is synchronized (EC2 / ECR ต้องการเวลาที่ตรง)
+  ansible.builtin.command: timedatectl show -p NTPSynchronized --value
+  register: clock_synced
+  changed_when: false
+  until: clock_synced.stdout == "yes"
+  retries: 6
+  delay: 10

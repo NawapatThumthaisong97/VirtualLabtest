@@ -218,3 +218,30 @@ launch ที่พังหลังสร้างเครื่องแล�
 ## 8. เอกสารที่เกี่ยวข้อง
 `docs/SKYPILOT_CENTRAL_SERVER.md` (ทั้งหมดเรื่อง server กลาง หัวข้อ 6–9), `docs/RUN_TARGET_AUTO.md`, `docs/LAUNCH_CONSOLE.md`,
 `docs/DaemonSetsExperiment.md` (prewarm / warm pod / isolation Exp1–4), `docs/AWS_LAB_FLOW.md`, `docs/EXPERIMENT_ECR_PULL_RESULT.md`
+
+## 9. ผลลง master ใหม่ + เทส (2026-10-20 ค่ำ)
+
+ลงจากศูนย์ด้วย playbook ครบ: master (ล้าง k3s แล้วลงใหม่), worker-pete (join ใหม่), webservice `vlab-web` (role `web-service` + DB ใหม่ seed)
+ThinkPad ไม่ใช่ worker แล้ว (เป็นแค่เครื่องสั่งงาน ยัง `tag:vlab-server`) token `vlab-backend` สร้างผ่าน API (`POST /users/service-account-tokens`)
+id ใหม่: Sophia `e9f0dd47-8b09-4056-b339-3df0772190e6` (ส่ง `USER_ID=` ให้ launch-test.sh) lab K8s / AWS / AUTO ใช้ id เดิม
+DB ใหม่: enum `runtarget` มี `AUTO` จาก create_all แล้ว ไม่ต้อง `ALTER TYPE` แต่ต้องสร้าง lab AWS / AUTO เอง (seed มีแค่ K8s) และลบ session ปลอม RUNNING ของ seed
+
+| เทส | ผล |
+|---|---|
+| 5.1 infra ทุกข้อ (node, AAAA, NetworkPolicy, auth ผ่าน NodePort 401/401/200, memory 4Gi, config, `sky check` AWS+K8s, route, `sky api info`) | ✅ |
+| dashboard ผ่าน Cloudflare | ❌ 530 — `cloudflare_tunnel_token` ใน group_vars เป็น tunnel ที่ไม่มีแล้ว (Pete ต้องเอา token ใหม่) |
+| 1 prewarm / 2 warm pod / 6 AUTO จากเครื่องแลป | ✅ warm pod 0s, localhost เปิดได้แค่บน worker-pete |
+| 3 K8s ผ่าน SkyPilot / 4 isolation | ✅ 374s (รอบแรก pull image ใหม่) |
+| 5 AWS / 7 AUTO จากข้างนอก | ✅ 127s / 94s (ครั้งแรกพังทั้งคู่ ดูข้างล่าง) |
+| 8 terminate ทุกแบบ / 9 ECR token ใน log | ✅ (⚠️ token อยู่ใน task YAML บน PVC ของ server `~/.sky/api_server/clients/*/tasks/`) |
+| 10 โหลดซ้ำ 3 รอบ | ✅ 354 / 213 / 191s, restart 0, memory สูงสุด 2337Mi |
+
+เจอระหว่างลงจากศูนย์ (แก้แล้วใน role):
+- cloudflared:latest ไม่ถอยจาก QUIC ไป http2 เอง → `--protocol http2`
+- webservice Ubuntu 26.04 ใช้ `sudo-rs` ansible รอ prompt ไม่เจอ → inventory `ansible_become_exe: sudo.ws`
+- นาฬิกา webservice ช้า 5 นาที → EC2 ตอบ `AuthFailure` (STS ผ่าน) → role `common` step เวลาด้วย chrony + เช็ก sync
+
+ยังเปิดอยู่:
+- **webservice เป็น VirtualBox VM บน ThinkPad** vCPU ถูกหยุดนานสุด 41s (`clocksource: Long readout interval` ใน dmesg) → นาฬิกาเพี้ยน
+  + request ไป master หลุดเป็นพัก ๆ (AUTO รอบแรกพังหลัง launch เสร็จ แล้ว `_down_quietly` ก็หลุด → **EC2 ค้าง** ลบมือแล้ว)
+  ทางแก้: ลดโหลด / RAM ของ ThinkPad หรือย้าย VM ไปเครื่องอื่น, และ backend ควร retry `_wait_job_running` / `_down_quietly` (ยังไม่ทำ — ต้อง doc ก่อน)
