@@ -1,4 +1,10 @@
 # ใช้ SkyPilot กลางแต่ไม่มี token = backend ได้ 401 ทุกครั้งที่ launch เช็กก่อนลงอะไรทั้งหมด
+# ค่าอื่น pydantic ปฏิเสธ → backend ไม่ start เช็กก่อนลงอะไรทั้งหมด
+- name: Validate LAB_MACHINE_LAUNCH
+  ansible.builtin.assert:
+    that: webservice_lab_machine_launch in ['pod', 'skypilot']
+    fail_msg: "webservice_lab_machine_launch ต้องเป็น pod หรือ skypilot (ได้ '{{ webservice_lab_machine_launch }}')"
+
 - name: Require backend token when using the central SkyPilot API server
   ansible.builtin.assert:
     that: webservice_skypilot_token | length > 0

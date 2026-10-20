@@ -116,7 +116,8 @@ frontend, DB / migration, Ansible, ทาง EC2 ทั้งหมด, prewarm 
 | `pod` (ค่าเริ่ม) | pod ตรง (ใหม่) |
 | `skypilot` | SkyPilot in-cluster pin เครื่องนั้น + label `vlab/lab` (ทางเดิม `_build_k8s_task`) |
 
-- ทาง pod ตรงมีปัญหาตอนใช้จริง → แก้ `.env` ของ backend แล้ว restart ก็กลับทางเดิม ไม่ต้อง deploy ใหม่
+- ทาง pod ตรงมีปัญหาตอนใช้จริง → `ansible-playbook ... --limit webservice --tags web-service -e webservice_lab_machine_launch=skypilot`
+  (หรือตั้ง `webservice_lab_machine_launch` ใน group_vars) — แก้ `.env` ตรง ๆ ได้แต่ playbook รอบหน้าจะเขียนทับ
 - warm pod / EC2 / กฎ "ข้างนอก → EC2" เหมือนกันทั้งสองค่า
 - SkyPilot server เปิด `kubernetes/in-cluster` ไว้ตามเดิม (`sky check` เห็นอยู่แล้ว)
 - เทสเดิมของทาง SkyPilot บน K8s **เก็บไว้** แค่ตั้ง `LAB_MACHINE_LAUNCH=skypilot` ในกลุ่มนั้น

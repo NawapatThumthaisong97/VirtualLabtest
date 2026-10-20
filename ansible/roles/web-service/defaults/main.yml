@@ -60,3 +60,6 @@ webservice_prewarm_enabled: true
 webservice_prewarm_lead_minutes: 30
 webservice_warm_pod_enabled: true
 webservice_lab_isolation_enabled: true
+# กดจากเครื่องแลปแต่ไม่มี warm pod: pod = สร้าง pod ตรง (ค่าเริ่ม) / skypilot = ทางเดิม SkyPilot in-cluster (สำรอง)
+# ดู docs/LAB_DIRECT_POD.md สลับตอนรัน: -e webservice_lab_machine_launch=skypilot
+webservice_lab_machine_launch: pod
