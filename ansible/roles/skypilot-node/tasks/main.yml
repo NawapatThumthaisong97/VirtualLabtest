@@ -361,9 +361,13 @@
             containers:
             - name: cloudflared
               image: cloudflare/cloudflared:latest
+              # --protocol http2: เน็ตบ้านบล็อก UDP 7844 (QUIC) cloudflared รุ่นใหม่ไม่ถอยไป http2 เอง
+              # วน retry QUIC ไม่จบ → dashboard ตอบ 530 (เจอตอนลง master ใหม่ 2026-10-20)
               args:
               - tunnel
               - --no-autoupdate
+              - --protocol
+              - http2
               - run
               - --token
               - $(TUNNEL_TOKEN)
