@@ -1,0 +1,13 @@
+---
+- name: Restart fluent-bit service
+  ansible.builtin.systemd:
+    name: fluent-bit
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart node-exporter service
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: restarted
+    daemon_reload: yes
+

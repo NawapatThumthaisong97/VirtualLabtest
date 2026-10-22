@@ -25,7 +25,6 @@ function App() {
       <AuthProvider>
         <RouterProvider router={router} />
       </AuthProvider>
-      <RouterProvider router={router} />
       <ToastContainer toasts={toasts} onClose={removeToast} />
     </QueryClientProvider>
   );

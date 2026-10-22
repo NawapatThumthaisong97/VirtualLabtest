@@ -17,9 +17,14 @@ on:
       - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
 
+env:
+  SECRET_KEY: "test-secret-key-at-least-32-characters-long-123456"
+  ADMIN_SESSION_SECRET_KEY: "test-admin-session-secret-key-at-least-32-characters"
+
 jobs:
   session:
     name: Sky launch & session tests
+    if: false  # ปิดชั่วคราว รอ cluster / sky mock พร้อม
     # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -62,9 +67,6 @@ jobs:
 
   course:
     name: Course & RBAC tests
-  prewarm:
-    name: Prewarm & class schedule tests
-    # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -103,11 +105,95 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
         run: pytest tests/course --color=yes
+
+  prewarm:
+    name: Prewarm & class schedule tests
+    # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: virtual_lab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d virtual_lab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web-portal/backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: web-portal/backend/requirement.txt
+
+      - name: Install dependencies
+        run: pip install -r requirement.txt
+
       # K3s ปลอม (FakeK8s) ส่วน class_slots ใช้ DB เทสเพราะ exclusion constraint ต้องเป็น Postgres
       - name: Run tests/prewarm
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
         run: pytest tests/prewarm --color=yes
+
+  monitor:
+    name: Monitor & SIEM telemetry tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: virtual_lab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d virtual_lab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: web-portal/backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: web-portal/backend/requirement.txt
+
+      - name: Install dependencies
+        run: pip install -r requirement.txt
+
+      - name: Run tests/monitor
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/monitor --color=yes
+
+      - name: Run tests/billing
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+        run: pytest tests/billing --color=yes
 
   auth:
     name: SSO & JWT auth tests

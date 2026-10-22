@@ -1,4 +1,7 @@
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+from jose import JWTError, jwt
 
 from sqlalchemy.orm import Session
 
@@ -188,7 +191,11 @@ class AuthService:
             token_type = payload.get("type", "access")
             if token_type != "access":
                 raise InvalidTokenError("token ไม่ใช่ access token")
-            UUID(payload["sub"])
+            sub_val = payload.get("sub") or payload.get("user_id")
+            if not sub_val:
+                raise InvalidTokenError("token ไม่ถูกต้องหรือหมดอายุแล้ว")
+            UUID(str(sub_val))
+            payload["sub"] = str(sub_val)
             return payload
         except (JWTError, KeyError, ValueError, TypeError) as e:
             raise InvalidTokenError("token ไม่ถูกต้องหรือหมดอายุแล้ว") from e

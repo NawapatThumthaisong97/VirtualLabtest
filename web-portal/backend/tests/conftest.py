@@ -19,6 +19,10 @@ import sys
 from collections import Counter
 from types import ModuleType
 
+# ตั้งค่า default secret keys สำหรับ testing environment ถ้าไม่มีใน env
+os.environ.setdefault("SECRET_KEY", "test-secret-key-at-least-32-characters-long-123456")
+os.environ.setdefault("ADMIN_SESSION_SECRET_KEY", "test-admin-session-secret-key-at-least-32-characters")
+
 if sys.platform == "win32":
     for _unix_mod in ("resource", "fcntl", "termios", "tty", "pty", "pwd", "grp", "syslog"):
         if _unix_mod not in sys.modules:

@@ -4,7 +4,7 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogOut, Menu, Search, User } from 'lucide-react';
+import { Activity, LogOut, Menu, Search, User } from 'lucide-react';
 import logo from '../assets/virtual-lab-logo-white.svg';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -58,6 +58,17 @@ export default function Navigation() {
 
       {/* Right: user account & logout */}
       <div className="relative flex items-center gap-3" ref={dropdownRef}>
+        {user?.role === 'admin' && (
+          <Link
+            to="/admin/monitor"
+            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors"
+            title="Open Admin Monitor & SIEM Dashboard [🔒 READ-ONLY MODE]"
+          >
+            <Activity size={14} className="text-amber-400" />
+            <span>Monitor [🔒 Read-Only]</span>
+          </Link>
+        )}
+
         {user ? (
           <>
             <button
@@ -86,6 +97,17 @@ export default function Navigation() {
                     <p className="mt-1 text-[11px] text-white/40">ID: {user.studentId}</p>
                   )}
                 </div>
+
+                {user.role === 'admin' && (
+                  <Link
+                    to="/admin/monitor"
+                    onClick={() => setDropdownOpen(false)}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-amber-300 hover:bg-white/[0.06] transition-colors cursor-pointer"
+                  >
+                    <Activity size={15} className="text-amber-400" />
+                    <span>Admin Monitor & SIEM</span>
+                  </Link>
+                )}
 
                 <button
                   type="button"

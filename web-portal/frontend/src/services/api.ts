@@ -54,11 +54,13 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && originalRequest) {
       const url = originalRequest.url || '';
 
-      // Do not attempt token refresh for auth endpoints to prevent loops
+      // Do not attempt token refresh for auth endpoints or /me to prevent loops
       const isAuthEndpoint =
         url.includes('/auth/login') ||
         url.includes('/auth/refresh') ||
-        url.includes('/auth/sso');
+        url.includes('/auth/sso') ||
+        url.includes('/auth/logout') ||
+        url.includes('/me');
 
       if (!isAuthEndpoint && !originalRequest._retry) {
         originalRequest._retry = true;
@@ -80,17 +82,16 @@ apiClient.interceptors.response.use(
           // Retry the original request with renewed cookies
           return apiClient(originalRequest);
         } catch {
-          // Refresh failed: session expired, force redirect to login
+          // Refresh failed: session expired, redirect to login if not already there
           if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
             window.location.href = '/login';
           }
         }
+      } else if (!isAuthEndpoint && ENABLE_AUTO_REDIRECT) {
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
-  (error) => {
-    if (error.response?.status === 401 && ENABLE_AUTO_REDIRECT) {
-      // Handle unauthorized
-      localStorage.removeItem('access_token');
-      window.location.href = '/login';
     }
 
     return Promise.reject(error);
