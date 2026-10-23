@@ -13,6 +13,7 @@ import LabDetailPage from '../pages/LabDetail.tsx';
 import LoginPage from '../pages/Login.tsx';
 import SSOCallbackPage from '../pages/SSOCallback.tsx';
 import InstructorPage from '../pages/Instructor.tsx';
+import AdminMonitorPage from '../pages/AdminMonitor.tsx';
 
 export const router = createBrowserRouter([
   // Public auth pages: no navbar, no footer
@@ -24,7 +25,7 @@ export const router = createBrowserRouter([
     path: '/auth/callback',
     element: <SSOCallbackPage />,
   },
-  // Protected Application Routes (Acceptance Criteria 2)
+  // Protected Application Routes
   {
     element: <ProtectedRoute />,
     children: [
@@ -48,9 +49,39 @@ export const router = createBrowserRouter([
             path: '/courses/:courseId',
             element: <CourseDetailPage />,
           },
+        ],
+      },
+      // Instructor pages: navbar + footer, restricted to instructor & admin
+      {
+        element: <ProtectedRoute allowedRoles={['instructor', 'admin']} />,
+        children: [
           {
-            path: '/instructor',
-            element: <InstructorPage />,
+            element: <RootLayout />,
+            children: [
+              {
+                path: '/instructor',
+                element: <InstructorPage />,
+              },
+            ],
+          },
+        ],
+      },
+      // Admin Monitor & SIEM Dashboard: restricted strictly to 'admin'
+      {
+        element: <ProtectedRoute allowedRoles={['admin']} />,
+        children: [
+          {
+            element: <RootLayout />,
+            children: [
+              {
+                path: '/admin/monitor',
+                element: <AdminMonitorPage />,
+              },
+              {
+                path: '/monitor',
+                element: <AdminMonitorPage />,
+              },
+            ],
           },
         ],
       },

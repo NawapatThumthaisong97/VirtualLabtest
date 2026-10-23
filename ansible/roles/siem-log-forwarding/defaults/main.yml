@@ -1,0 +1,33 @@
+---
+# Defaults for siem-log-forwarding role
+
+# Fluent Bit settings
+fluent_bit_version: "3.2.2"
+fluent_bit_http_port: 2020
+
+# Strict Zero Trust & Plane Separation targets
+# Ingestion endpoint on the web-portal backend (reachable via Tailscale / Internal Network only)
+siem_ingest_host: "{{ hostvars[groups['webportal'][0]]['ansible_host'] | default('100.64.0.1') }}"
+siem_ingest_port: 8000
+siem_ingest_path: "/api/v1/logs"
+siem_ingest_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjOGNlYWQ5YS1hNDc2LTQ5MzQtYTY3ZS03ODhiZjUzZThiYTgiLCJlbWFpbCI6ImFkbWluQGV4YW1wbGUuY29tIiwibmFtZSI6IkFkbWluIFVzZXIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzkyMzM1Mzk5LCJleHAiOjIxMDc2OTUzOTl9.Mpo-X7FyUMGeNTAR9zGR-ecUxAI5Aq1QX_x8at-J7uY"
+
+# Environment Identification
+cluster_id: "{{ 'aws-skypilot-prod' if ('skypilot' in group_names or is_cloud | default(false)) else 'k3s-lab-edge' }}"
+environment_provider: "{{ 'AWS SkyPilot' if ('skypilot' in group_names or is_cloud | default(false)) else 'Local K3s' }}"
+nat_zone: "{{ host_nat_zone | default('10.0.0.0/16') }}"
+
+# Metrics Scraping (Node Exporter / Kube-state-metrics)
+enable_node_exporter: true
+node_exporter_port: 9100
+
+# Boundary Log Paths
+squid_access_log_path: "/var/log/squid/access.log"
+kyverno_log_path: "/var/log/kyverno/audit.log"
+tailscale_log_path: "/var/log/tailscale/acl.log"
+system_journal_enable: true
+
+# Plane Separation Guarantees
+# STRICT RULE: NEVER mount or harvest user student pod standard output/error
+forbidden_pod_logs_path: "/var/log/pods/*/*/*.log"
+

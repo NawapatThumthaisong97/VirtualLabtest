@@ -13,6 +13,9 @@ import type { InternalAxiosRequestConfig } from 'axios';
 // to the browser as a plain URL (<img>, <iframe>, pdf.js) instead of axios
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+// 401 หลัง refresh แล้ว (retry ไปแล้วยังไม่ผ่าน) → เด้งไปหน้า login (ดู response interceptor ข้างล่าง)
+const ENABLE_AUTO_REDIRECT = true;
+
 // Create axios instance
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -51,11 +54,13 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && originalRequest) {
       const url = originalRequest.url || '';
 
-      // Do not attempt token refresh for auth endpoints to prevent loops
+      // Do not attempt token refresh for auth endpoints or /me to prevent loops
       const isAuthEndpoint =
         url.includes('/auth/login') ||
         url.includes('/auth/refresh') ||
-        url.includes('/auth/sso');
+        url.includes('/auth/sso') ||
+        url.includes('/auth/logout') ||
+        url.includes('/me');
 
       if (!isAuthEndpoint && !originalRequest._retry) {
         originalRequest._retry = true;
@@ -77,10 +82,14 @@ apiClient.interceptors.response.use(
           // Retry the original request with renewed cookies
           return apiClient(originalRequest);
         } catch {
-          // Refresh failed: session expired, force redirect to login
+          // Refresh failed: session expired, redirect to login if not already there
           if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
             window.location.href = '/login';
           }
+        }
+      } else if (!isAuthEndpoint && ENABLE_AUTO_REDIRECT) {
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login';
         }
       }
     }
