@@ -58,7 +58,7 @@ def get_warm_pod_service() -> WarmPodService:
 
 
 def resolve_run_target(client_node: Optional[tuple[str, str]]) -> RunTarget:
-    """กฎเดียวทุก lab (docs/LAB_DIRECT_POD.md): กดจากเครื่องแลป → KUBERNETES, ที่อื่น / เช็กไม่ได้ → AWS
+    """กฎเดียวทุก lab (docs/archive/LAB_DIRECT_POD.md): กดจากเครื่องแลป → KUBERNETES, ที่อื่น / เช็กไม่ได้ → AWS
 
     client_node = ผลของ _client_node (None = ไม่ใช่เครื่องแลป หรือเช็กไม่ได้) ไม่ดู labs.run_target แล้ว
     """
@@ -348,7 +348,7 @@ class SessionService:
         ):
             raise LabImageNotFoundError(f"LabImage with id {lab.image_id} not found")
         
-        # กฎเดียวทุก lab: เครื่องแลป → K8s (warm pod / pod ตรง), ที่อื่น → EC2 (docs/LAB_DIRECT_POD.md)
+        # กฎเดียวทุก lab: เครื่องแลป → K8s (warm pod / pod ตรง), ที่อื่น → EC2 (docs/archive/LAB_DIRECT_POD.md)
         # ต้องรู้เสมอว่ากดจากเครื่องแลปไหม ไม่ขึ้นกับ WARM_POD / LAB_ISOLATION
         node = self._client_node(client_ip, always=True)
         run_target = resolve_run_target(node)
@@ -562,7 +562,7 @@ class SessionService:
 
     def _launch_direct_pod(self, user_id: UUID, lab: Lab, lab_image: LabImage,
                            node: tuple[str, str]) -> dict:
-        """pod ตรงบนเครื่องที่กด Start (ไม่มี warm pod) — ไม่ผ่าน SkyPilot (docs/LAB_DIRECT_POD.md)
+        """pod ตรงบนเครื่องที่กด Start (ไม่มี warm pod) — ไม่ผ่าน SkyPilot (docs/archive/LAB_DIRECT_POD.md)
 
         บันทึก PENDING ก่อนสร้าง pod: backend ตายกลางทาง reconciler ยังตามลบ pod ได้ (STALE_PENDING)
         เครื่องไม่มีที่ว่าง → error บอกตรง ๆ ไม่ส่งไป EC2 (เครื่องแลปเป็นของ lab อย่างเดียว)

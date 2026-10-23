@@ -228,7 +228,7 @@ PYTHONIOENCODING=utf-8 python script/run_seed.py
 > `PYTHONIOENCODING=utf-8` จำเป็นบน Windows — สคริปต์ print emoji แล้ว console
 > codepage ไทย (cp874) encode ไม่ได้ จะตายตั้งแต่บรรทัดแรกก่อนสร้างตารางด้วยซ้ำ
 
-### 2026-10-20: `runtarget` เพิ่มค่า `AUTO` (docs/RUN_TARGET_AUTO.md)
+### 2026-10-20: `runtarget` เพิ่มค่า `AUTO` (docs/archive/RUN_TARGET_AUTO.md)
 ```bash
 docker exec virtual_lab_db psql -U postgres -d virtual_lab -c "ALTER TYPE runtarget ADD VALUE IF NOT EXISTS 'AUTO';"
 ```

@@ -1,6 +1,6 @@
 # run_target = AUTO — เลือก K8s / AWS ตามเครื่องที่กด Start
 
-สถานะ: **ทำแล้ว** (2026-10-20) — **2026-10-21 แทนด้วยกฎเดียวทุก lab** (เครื่องแลป → pod ตรง / warm, ที่อื่น → EC2 ไม่ดู labs.run_target) ดู `docs/LAB_DIRECT_POD.md` — ผลอยู่หัวข้อท้ายสุด
+สถานะ: **ทำแล้ว** (2026-10-20) — **2026-10-21 แทนด้วยกฎเดียวทุก lab** (เครื่องแลป → pod ตรง / warm, ที่อื่น → EC2 ไม่ดู labs.run_target) ดู `docs/archive/LAB_DIRECT_POD.md` — ผลอยู่หัวข้อท้ายสุด
 
 ## ทำไม
 ตอนนี้ lab ไป K8s หรือ AWS ตาม `labs.run_target` ที่อาจารย์ตั้งราย lab (PR #88) ไม่ดูว่าใครกดจากไหน
@@ -33,7 +33,7 @@ endpoint ของคนข้างนอก = private IP บน AWS (`10.10.2.
 4. response ของ `POST /api/sessions` เพิ่ม `run_target` ที่ใช้จริง (`kubernetes` / `aws`) ให้เห็นว่า AUTO เลือกอะไร
 5. `LabCreateRequest` / `LabUpdateRequest` รับ `run_target` (optional) → ตั้ง AUTO / AWS ผ่าน API ได้ ไม่ต้องแก้ DB เอง
    (lab AWS สำหรับเทสก็สร้างผ่าน API ได้)
-6. DB: `ALTER TYPE runtarget ADD VALUE 'AUTO';` (ไม่กระทบ row เดิม) จดใน `docs/DB_DIAGRAM.md` แบบที่ทำกับ PR #88
+6. DB: `ALTER TYPE runtarget ADD VALUE 'AUTO';` (ไม่กระทบ row เดิม) จดใน `docs/archive/DB_DIAGRAM.md` แบบที่ทำกับ PR #88
    ถอย: ตั้ง lab ที่เป็น AUTO กลับเป็นค่าเดิม (Postgres ลบค่าออกจาก enum ไม่ได้ ค่าค้างไว้เฉย ๆ ไม่มีผล)
 
 ## ที่ตัดสินแล้ว
@@ -64,7 +64,7 @@ unit (FakeSky ไม่ launch จริง)
 | ThinkPad ผ่าน `127.0.0.1` | `http://127.0.0.1:8000` | AWS (ไม่ใช่ IP ของ node) |
 
 ## ลำดับงาน
-1. Pete อนุมัติ doc นี้ + `docs/LAUNCH_CONSOLE.md` (launch-test.sh)
+1. Pete อนุมัติ doc นี้ + `docs/archive/LAUNCH_CONSOLE.md` (launch-test.sh)
 2. branch ใหม่จาก `feature/skypilot-central`: backend + เทส → `ALTER TYPE` บน DB dev → เทสของจริง
 3. `script/launch-test.sh` เมนู Start lab ให้เลือก lab K8s / AWS / AUTO
 
@@ -77,5 +77,5 @@ unit (FakeSky ไม่ launch จริง)
 | ของจริง ผ่าน `script/launch-test.sh` เมนู 3: กดจาก `127.0.0.1` | ✅ log `[auto] Start from outside (127.0.0.1) -> aws` → EC2 110s, ลบ 9s |
 | ของจริง: กดจาก ThinkPad ผ่าน Tailscale IP (`BACKEND_URL=http://100.93.121.17:8000`) | ✅ log `[auto] Start from lab machine thinkpad -> kubernetes` → pod บน thinkpad 201s, ลบ 9s |
 
-ก่อนหน้านี้ launch ทุกแบบพังเพราะ SkyPilot API server ชนลิมิตหน่วยความจำ 2Gi (ดู `docs/SKYPILOT_CENTRAL_SERVER.md` หัวข้อ 9)
+ก่อนหน้านี้ launch ทุกแบบพังเพราะ SkyPilot API server ชนลิมิตหน่วยความจำ 2Gi (ดู `docs/archive/SKYPILOT_CENTRAL_SERVER.md` หัวข้อ 9)
 ขยายเป็น requests 2Gi / limits 4Gi แล้วผ่าน — peak ระหว่างเทส 2048Mi (เท่าลิมิตเก่าพอดี)

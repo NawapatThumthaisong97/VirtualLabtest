@@ -3,9 +3,9 @@
 # dev (ThinkPad): ใส่ไว้ใน ~/.sky/config.yaml แล้ว ส่วน ~/.kube/config ชี้ cluster ที่บ้าน
 #                 → เปิด backend ได้เลย: venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 # deploy จริง (SkyPilot กลาง): ใส่ใน helm แล้ว — apiService.config ใน role skypilot-node
-#              (ConfigMap ถูก copy ลง PVC เฉพาะตอน PVC ยังไม่มี config ดู docs/SKYPILOT_CENTRAL_SERVER.md)
+#              (ConfigMap ถูก copy ลง PVC เฉพาะตอน PVC ยังไม่มี config ดู docs/archive/SKYPILOT_CENTRAL_SERVER.md)
 kubernetes:
   # เปิดพอร์ตของ lab ด้วย pod IP แทน LoadBalancer (ค่าเริ่มต้น)
   # LoadBalancer บน k3s ใช้ servicelb ที่รับ traffic บนทุกเครื่องแล้วส่งต่อให้ pod → เครื่องข้าง ๆ เปิด lab ของเราได้
-  # และ NetworkPolicy vlab-lab-isolation จะตัด servicelb ทิ้งด้วย ทดลองแล้วใน docs/DaemonSetsExperiment.md (Exp4 ข้อ B)
+  # และ NetworkPolicy vlab-lab-isolation จะตัด servicelb ทิ้งด้วย ทดลองแล้วใน docs/archive/DaemonSetsExperiment.md (Exp4 ข้อ B)
   ports: podip

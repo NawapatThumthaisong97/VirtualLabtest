@@ -1,5 +1,5 @@
 """
-กลุ่ม 6: กฎเดียวทุก lab — เครื่องแลป → K8s, ที่อื่น → AWS (docs/RUN_TARGET_AUTO.md, docs/LAB_DIRECT_POD.md)
+กลุ่ม 6: กฎเดียวทุก lab — เครื่องแลป → K8s, ที่อื่น → AWS (docs/archive/RUN_TARGET_AUTO.md, docs/archive/LAB_DIRECT_POD.md)
 """
 import pytest
 

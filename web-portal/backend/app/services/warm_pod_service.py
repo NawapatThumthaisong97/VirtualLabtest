@@ -150,7 +150,7 @@ def direct_pod_name(session_id) -> str:
 
 
 def build_lab_pod(lab_image, node: str, session_id) -> dict:
-    """pod ตรงของ lab บนเครื่องที่กด Start — container เดียวกับ warm pod แต่สร้างตอนกด (docs/LAB_DIRECT_POD.md)
+    """pod ตรงของ lab บนเครื่องที่กด Start — container เดียวกับ warm pod แต่สร้างตอนกด (docs/archive/LAB_DIRECT_POD.md)
 
     nodeSelector (ไม่ใช้ nodeName) ให้ scheduler เช็กที่ว่างก่อน เต็ม = Pending / Unschedulable แทนที่จะ
     ไปลงแล้วโดน kubelet ปฏิเสธ (OutOfcpu) label vlab/lab ให้ NetworkPolicy vlab-lab-isolation ปิดขาเข้า

@@ -105,7 +105,7 @@
     flat: yes
 # pod ใน cluster ไม่มี IPv6 (flannel IPv4 อย่างเดียว) แต่ DNS ตอบ AAAA ของปลายทางมาด้วย
 # uv ที่ SkyPilot ใช้ลง runtime ใน pod lab บางครั้งเลือก IPv6 แล้วได้ "Network is unreachable"
-# → runtime-setup failed → launch พัง (ดู docs/SKYPILOT_CENTRAL_SERVER.md) ให้ CoreDNS ตอบ AAAA ว่าง
+# → runtime-setup failed → launch พัง (ดู docs/archive/SKYPILOT_CENTRAL_SERVER.md) ให้ CoreDNS ตอบ AAAA ว่าง
 # k3s import ไฟล์ *.override จาก ConfigMap coredns-custom เข้า Corefile ให้เอง
 - name: Make CoreDNS return empty AAAA answers (cluster has no IPv6 egress)
   ansible.builtin.shell: |

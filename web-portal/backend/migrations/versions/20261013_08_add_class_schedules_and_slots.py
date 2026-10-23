@@ -4,7 +4,7 @@ Revision ID: 20261013_08
 Revises: 20261013_07
 Create Date: 2026-10-21
 
-ตารางเรียน + รอบเรียนที่ scheduler ใช้ pre-warm image / warm pod ก่อนคาบ (docs/add-class-schedule-tables.md)
+ตารางเรียน + รอบเรียนที่ scheduler ใช้ pre-warm image / warm pod ก่อนคาบ (docs/archive/add-class-schedule-tables.md)
 เดิมสร้างด้วย create_all อย่างเดียว — แต่ตอนนี้ sessions มาจาก migration ก่อน create_all จะรัน
 create_all ไม่เติมคอลัมน์ให้ตารางที่มีอยู่แล้ว เลยขาด sessions.class_slot_id (seed พัง UndefinedColumn)
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# launch-test.sh - เทสเปิด / ปิด lab ผ่าน API ของ backend ด้วย curl (แบบอยู่ใน docs/LAUNCH_CONSOLE.md)
+# launch-test.sh - เทสเปิด / ปิด lab ผ่าน API ของ backend ด้วย curl (แบบอยู่ใน docs/archive/LAUNCH_CONSOLE.md)
 #
 # ยิงแค่ API ของ backend เหมือนหน้าเว็บ ไม่สร้าง pod / ไม่แก้ DB / ไม่เรียก kubectl, AWS, SkyPilot ตรง
 # backend เห็น IP ของเครื่องที่รัน script นี้:

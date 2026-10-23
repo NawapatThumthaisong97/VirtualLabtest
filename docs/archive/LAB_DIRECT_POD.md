@@ -1,7 +1,7 @@
 # เครื่องแลปสร้าง pod ตรง ไม่ผ่าน SkyPilot — กฎเดียว "AUTO" ทุก lab
 
 สถานะ: **ทำแล้ว** (2026-10-21) — pytest 263/263, รอเทสจริงบนหน้าเว็บ (หัวข้อ "เทส")
-ต่อจาก `docs/RUN_TARGET_AUTO.md` (AUTO แบบเดิม) และผลเทสหน้าเว็บจริงใน `docs/NextToU.md` หัวข้อ 9
+ต่อจาก `docs/archive/RUN_TARGET_AUTO.md` (AUTO แบบเดิม) และผลเทสหน้าเว็บจริงใน `docs/archive/NextToU.md` หัวข้อ 9
 
 ## ทำไม
 
