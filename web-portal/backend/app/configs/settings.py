@@ -61,7 +61,11 @@ class Settings(BaseSettings):
     GOOGLE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
     GOOGLE_USERINFO_URI: str = "https://openidconnect.googleapis.com/v1/userinfo"
     GOOGLE_TOKENINFO_URI: str = "https://oauth2.googleapis.com/tokeninfo"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # Thammasat University REST API (Active Directory Verify)
+    TU_API_ENABLED: bool = True
+    TU_API_URL: str = "https://restapi.tu.ac.th/api/v1/auth/Ad/verify"
+    TU_API_APP_KEY: Optional[str] = None
     TAILSCALE_TRUSTED_PROXY_CIDRS_STR: str = ""
     
     # CORS - เก็บเป็น string คั่นด้วย comma แล้ว parse ใน code
@@ -146,8 +150,31 @@ class Settings(BaseSettings):
     SKYPILOT_API_SERVER_ENDPOINT: Optional[str] = None
     SKYPILOT_SERVICE_ACCOUNT_TOKEN: Optional[str] = None
 
+    @field_validator("AUTH_COOKIE_DOMAIN", mode="before")
+    @classmethod
+    def clean_cookie_domain(cls, v):
+        if not v or not isinstance(v, str):
+            return None
+        v = v.split("#")[0].strip()
+        return v if v else None
+
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def clean_environment(cls, v):
+        if isinstance(v, str):
+            return v.split("#")[0].strip()
+        return v
+
+    @field_validator("AUTH_COOKIE_SAMESITE", mode="before")
+    @classmethod
+    def clean_cookie_samesite(cls, v):
+        if isinstance(v, str):
+            v = v.split("#")[0].strip().lower()
+            return v or "lax"
+        return v
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

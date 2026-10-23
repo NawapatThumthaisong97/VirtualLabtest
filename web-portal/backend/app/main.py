@@ -176,6 +176,16 @@ async def lifespan(app: FastAPI):
         logger.error("Cannot connect to database. Server will not start.")
         sys.exit(1)  # ออกจากโปรแกรมถ้าเชื่อมต่อ DB ไม่สำเร็จ
 
+    # Ensure RBAC roles and permissions are seeded
+    try:
+        from app.configs.db import SessionLocal
+        from app.seeds.rbac_seed import RBACSeeder
+        with SessionLocal() as db_session:
+            RBACSeeder(db_session).seed()
+        logger.info("RBAC roles and permissions verified.")
+    except Exception as e:
+        logger.warning(f"Failed to verify/seed RBAC: {e}")
+
     reconciler_stop = asyncio.Event()
     reconciler_task = None
     if settings.SESSION_RECONCILE_INTERVAL_SECONDS > 0:
@@ -378,7 +388,7 @@ async def general_exception_handler(request, exc):
 
 
 # Health Check Endpoint
-@app.get("/", tags=["Health"])
+@app.api_route("/", methods=["GET", "POST", "HEAD"], tags=["Health"])
 def health_check():
     """
     Health check endpoint
