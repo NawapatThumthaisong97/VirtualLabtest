@@ -4,8 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AdminDashboardPage from '../pages/AdminDashboard';
 import * as AuthContextModule from '../contexts/AuthContext';
-import { adminDashboardService } from '../services/adminDashboard';
-import type { InfraMap, RoomUsage, SystemStatus } from '../services/adminDashboard';
+import { adminBillingService, adminDashboardService } from '../services/adminDashboard';
+import type { BillingMonthly, BillingSummary, InfraMap, RoomUsage, SystemStatus } from '../services/adminDashboard';
 import { homeFor } from '../utils/homePath';
 import apiClient from '../services/api';
 
@@ -41,6 +41,24 @@ const usage: RoomUsage = {
   ],
 };
 
+const summary: BillingSummary = {
+  month: '2026-10',
+  aws: { budgetUsd: 200, usedUsd: 172.4, forecastUsd: 210.5, usedPct: 86.2, alert: 'warn', source: 'estimate',
+         hourlyPriceUsd: 0.1236, instancesRunning: 1, sessionHours: 1394.8 },
+  onPrem: { sessionHours: 812 },
+  share: { onPremPct: 36.8, awsPct: 63.2 },
+  daysRemaining: 8,
+  daysTotal: 31,
+  burstEnabled: false,
+};
+
+const monthly: BillingMonthly = {
+  months: [
+    { month: '2026-09', onPremHours: 100, awsHours: 20, awsUsd: 2.47 },
+    { month: '2026-10', onPremHours: 812, awsHours: 1394.8, awsUsd: 172.4 },
+  ],
+};
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -68,6 +86,8 @@ describe('AdminDashboard (/admin)', () => {
     vi.spyOn(adminDashboardService, 'getSystemStatus').mockResolvedValue(status);
     vi.spyOn(adminDashboardService, 'getInfraMap').mockResolvedValue(map);
     vi.spyOn(adminDashboardService, 'getRoomUsage').mockResolvedValue(usage);
+    vi.spyOn(adminBillingService, 'getSummary').mockResolvedValue(summary);
+    vi.spyOn(adminBillingService, 'getMonthly').mockResolvedValue(monthly);
   });
 
   it('shows real services with status and detail', async () => {
@@ -94,8 +114,19 @@ describe('AdminDashboard (/admin)', () => {
   it('cards without an API say so instead of showing sample numbers', async () => {
     renderPage();
     expect(await screen.findByText('Log Explorer')).toBeDefined();
-    expect(screen.getAllByText('ยังไม่มีข้อมูล')).toHaveLength(3);
+    expect(screen.getAllByText('ยังไม่มีข้อมูล')).toHaveLength(1);
     expect(screen.queryByText('$175.75')).toBeNull();
+    expect(screen.queryByText('Microsoft Azure')).toBeNull();
+  });
+
+  it('billing shows AWS spend vs budget, burst off and this month share', async () => {
+    renderPage();
+    expect(await screen.findByText('$172.40')).toBeDefined();
+    expect(screen.getByText(/of \$200 budget \(86.2%\)/)).toBeDefined();
+    expect(screen.getByText('AWS burst ปิดอยู่')).toBeDefined();
+    expect(screen.getByText('remain 8/31 days')).toBeDefined();
+    expect(screen.getByText('2206.8 h')).toBeDefined();
+    expect(screen.getAllByText('Oct').length).toBeGreaterThan(0);
   });
 });
 

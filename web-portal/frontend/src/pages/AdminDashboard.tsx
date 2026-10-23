@@ -9,7 +9,9 @@ import DashboardHeader from '../components/admin/DashboardHeader';
 import SystemTable from '../components/admin/SystemTable';
 import InfraVisualizer from '../components/admin/InfraVisualizer';
 import PendingCard from '../components/admin/PendingCard';
-import { adminDashboardService } from '../services/adminDashboard';
+import BillingEstimate from '../components/admin/BillingEstimate';
+import BillingUsage from '../components/admin/BillingUsage';
+import { adminBillingService, adminDashboardService } from '../services/adminDashboard';
 
 const REFRESH_MS = 30_000;
 
@@ -29,7 +31,17 @@ export default function AdminDashboardPage() {
     queryFn: adminDashboardService.getRoomUsage,
     refetchInterval: REFRESH_MS,
   });
-  const failed = [status, map, usage].some((q) => q.isError);
+  const billing = useQuery({
+    queryKey: ['admin', 'billing-summary'],
+    queryFn: adminBillingService.getSummary,
+    refetchInterval: REFRESH_MS,
+  });
+  const monthly = useQuery({
+    queryKey: ['admin', 'billing-monthly'],
+    queryFn: adminBillingService.getMonthly,
+    refetchInterval: REFRESH_MS,
+  });
+  const failed = [status, map, usage, billing, monthly].some((q) => q.isError);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', fontFamily: "'Inter', sans-serif" }}>
@@ -57,8 +69,8 @@ export default function AdminDashboardPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
           <SystemTable data={status.data} />
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24 }}>
-            <PendingCard title="Billing | Overall estimate" note="ค่าใช้จ่าย AWS เทียบ budget — รอ API Billing" />
-            <PendingCard title="Billing | Usage" note="ชั่วโมง on-premise / AWS รายเดือน — รอ API Billing" />
+            <BillingEstimate data={billing.data} />
+            <BillingUsage monthly={monthly.data} summary={billing.data} />
           </div>
           <PendingCard title="Log Explorer" note="log การใช้งาน cluster / cloud — รอ API Logs" height={220} />
         </div>

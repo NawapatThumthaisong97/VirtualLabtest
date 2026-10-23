@@ -4,6 +4,7 @@ JSON ของการ์ดหน้า admin overview (docs/ADMIN_MONITOR.md)
 """
 from datetime import datetime
 from typing import Literal, Optional
+from uuid import UUID
 
 from pydantic import Field
 
@@ -85,3 +86,60 @@ class ServiceStatus(CamelModel):
 class SystemStatusResponse(CamelModel):
     checked_at: Optional[datetime] = Field(None, description="ตรวจล่าสุดเมื่อไหร่ (None = ยังไม่เคยตรวจ)")
     services: list[ServiceStatus]
+
+
+# ---------- Billing (PR 3) ----------
+
+class AwsBilling(CamelModel):
+    budget_usd: float
+    used_usd: float = Field(..., description="ใช้ไปเดือนนี้ (session ที่จบแล้ว + ที่ยังรันอยู่ นับถึงตอนนี้)")
+    forecast_usd: float = Field(..., description="คาดทั้งเดือน = used / วันที่ผ่านไป × วันทั้งเดือน")
+    used_pct: float
+    alert: Literal["none", "warn", "over"] = Field(..., description="warn = ถึง AWS_BUDGET_ALERT_PCT, over = เกิน budget")
+    source: Literal["estimate", "cost-explorer"] = Field(..., description="estimate = ชั่วโมง × hourlyPriceUsd")
+    hourly_price_usd: float
+    instances_running: int
+    session_hours: float
+
+
+class OnPremBilling(CamelModel):
+    session_hours: float = Field(..., description="ชั่วโมงอย่างเดียว ไม่คิดค่าไฟ")
+
+
+class BillingShare(CamelModel):
+    """สัดส่วนจากชั่วโมง (ไม่ใช่เงิน)"""
+    on_prem_pct: float
+    aws_pct: float
+
+
+class BillingSummaryResponse(CamelModel):
+    month: str
+    aws: AwsBilling
+    on_prem: OnPremBilling
+    share: BillingShare
+    days_remaining: int
+    days_total: int
+    burst_enabled: bool
+
+
+class BillingMonth(CamelModel):
+    month: str
+    on_prem_hours: float
+    aws_hours: float
+    aws_usd: float
+
+
+class BillingMonthlyResponse(CamelModel):
+    months: list[BillingMonth]
+
+
+class CloudControlResponse(CamelModel):
+    burst_enabled: bool
+    reason: Optional[str] = None
+    changed_by: Optional[UUID] = None
+    changed_at: Optional[datetime] = None
+
+
+class CloudControlUpdate(CamelModel):
+    burst_enabled: bool
+    reason: Optional[str] = Field(None, max_length=500)

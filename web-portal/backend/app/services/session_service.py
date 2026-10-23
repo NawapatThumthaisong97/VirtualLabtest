@@ -19,6 +19,7 @@ from app.services.warm_pod_service import (DIRECT_POD_PREFIX, LAB_LABEL, WARM_PO
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.class_slot import ClassSlot, ClassSlotStatus
+from app.services import admin_billing_service
 from app.models.user import User
 from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
@@ -35,6 +36,7 @@ from app.exceptions.domain import (
     SessionAlreadyExistsError,
     ClusterOperationError,
     ForbiddenError,
+    CloudBurstDisabledError,
 )
 from app.utils.logger import logger
 
@@ -365,6 +367,11 @@ class SessionService:
             if settings.LAB_MACHINE_LAUNCH == "pod":
                 return self._launch_direct_pod(user_id, lab, lab_image, node)
             # LAB_MACHINE_LAUNCH=skypilot: ทางเดิม SkyPilot in-cluster pin เครื่องนั้น (ข้างล่าง)
+
+        if run_target == RunTarget.AWS and not admin_billing_service.is_burst_enabled(self.db):
+            raise CloudBurstDisabledError(
+                "ปิดการเปิด lab บน AWS ชั่วคราว (admin ปิด burst เช่นใช้เกิน budget) — ใช้เครื่องในห้องแลปแทน"
+            )
 
         cluster_name = self._cluster_name(lab_image)
         is_cloud = run_target == RunTarget.AWS
@@ -705,6 +712,8 @@ class SessionService:
         session.status = status
         session.ended_at = datetime.utcnow()
         session.end_reason = reason
+        # ชั่วโมงที่ใช้ + ค่า AWS ประมาณ (หน้า admin billing) commit พร้อมสถานะ
+        admin_billing_service.record_usage(self.db, session)
         self.db.commit()
 
     def _gone_reason(self, session: SessionModel) -> SessionEndReason:

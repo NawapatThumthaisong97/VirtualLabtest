@@ -78,3 +78,32 @@ export const adminDashboardService = {
   getInfraMap: () => getData<InfraMap>('/v1/admin/infra/map'),
   getRoomUsage: () => getData<RoomUsage>('/v1/admin/rooms/usage'),
 };
+
+export interface BillingSummary {
+  month: string;
+  aws: {
+    budgetUsd: number;
+    usedUsd: number;
+    forecastUsd: number;
+    usedPct: number;
+    alert: 'none' | 'warn' | 'over';
+    source: 'estimate' | 'cost-explorer';
+    hourlyPriceUsd: number;
+    instancesRunning: number;
+    sessionHours: number;
+  };
+  onPrem: { sessionHours: number };
+  share: { onPremPct: number; awsPct: number };
+  daysRemaining: number;
+  daysTotal: number;
+  burstEnabled: boolean;
+}
+
+export interface BillingMonthly {
+  months: { month: string; onPremHours: number; awsHours: number; awsUsd: number }[];
+}
+
+export const adminBillingService = {
+  getSummary: () => getData<BillingSummary>('/v1/admin/billing/summary'),
+  getMonthly: () => getData<BillingMonthly>('/v1/admin/billing/monthly?months=6'),
+};

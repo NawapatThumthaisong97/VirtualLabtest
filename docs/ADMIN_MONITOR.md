@@ -137,7 +137,8 @@ GET /admin/billing/monthly?from=2026-05&to=2026-10
 GET   /admin/cloud/controls          { "burstEnabled": true, "changedBy": "...", "changedAt": "...", "reason": null }
 PATCH /admin/cloud/controls          { "burstEnabled": false, "reason": "เกิน budget ต.ค." }
 ```
-- ถึง `AWS_BUDGET_ALERT_PCT` (80%) และ 100% → เขียน log `BUDGET_ALERT` + เมล admin (ครั้งเดียวต่อเกณฑ์ต่อเดือน)
+- ถึง `AWS_BUDGET_ALERT_PCT` (80%) และ 100% → `aws.alert` ใน summary เป็น `warn` / `over` (PR 3)
+  log `BUDGET_ALERT` มาใน PR 5, เมล admin มาใน PR 6 (ต้องมี SMTP ก่อน)
 - **ไม่ปิดเอง** — admin ตัดสินใจผ่าน PATCH
 - `burstEnabled=false` → lab ที่ `run_target=AWS` ได้ 409 พร้อมข้อความ, lab `AUTO` ไม่ขึ้น cloud (รอคิว / แจ้งเต็ม)
 

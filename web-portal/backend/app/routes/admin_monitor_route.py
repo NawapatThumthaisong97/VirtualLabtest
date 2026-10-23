@@ -2,13 +2,27 @@
 Admin Monitor Routes — การ์ดหน้า admin overview (docs/ADMIN_MONITOR.md)
 ดูอย่างเดียว ต้องมี monitoring:read:all (admin)
 """
-from fastapi import APIRouter, Depends
+from datetime import date
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
+from app.middlewares.auth import get_current_user
 from app.middlewares.rbac import verify_permission
-from app.schemas.admin_monitor_schema import InfraMapResponse, RoomUsageResponse, SystemStatusResponse
+from app.models.user import User
+from app.schemas.admin_monitor_schema import (
+    BillingMonthlyResponse,
+    BillingSummaryResponse,
+    CloudControlResponse,
+    CloudControlUpdate,
+    InfraMapResponse,
+    RoomUsageResponse,
+    SystemStatusResponse,
+)
 from app.schemas.response import ApiResponse
+from app.services import admin_billing_service
 from app.services.admin_monitor_service import AdminMonitorService
 from app.services.health_service import get_system_status
 from app.services.kubernetes_service import get_kubernetes_service
@@ -54,4 +68,57 @@ def get_status(db: Session = Depends(get_db)):
         "success": True,
         "message": "System status retrieved successfully",
         "data": get_system_status(db),
+    }
+
+
+@router.get("/billing/summary", response_model=ApiResponse[BillingSummaryResponse], response_model_by_alias=True)
+def get_billing_summary(
+    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$", description="YYYY-MM (ไม่ใส่ = เดือนนี้ เวลาไทย)"),
+    db: Session = Depends(get_db),
+):
+    """AWS ใช้ไปกี่ $ เทียบ budget + คาดทั้งเดือน, ชั่วโมง on-prem / AWS และสัดส่วน"""
+    first = date(int(month[:4]), int(month[5:]), 1) if month else None
+    return {
+        "success": True,
+        "message": "Billing summary retrieved successfully",
+        "data": admin_billing_service.get_billing_summary(db, first),
+    }
+
+
+@router.get("/billing/monthly", response_model=ApiResponse[BillingMonthlyResponse], response_model_by_alias=True)
+def get_billing_monthly(months: int = Query(6, ge=1, le=24), db: Session = Depends(get_db)):
+    """ชั่วโมง on-prem / AWS + $ AWS รายเดือน ย้อนหลัง months เดือน (เก่า → ใหม่)"""
+    return {
+        "success": True,
+        "message": "Monthly billing retrieved successfully",
+        "data": admin_billing_service.get_billing_monthly(db, months),
+    }
+
+
+@router.get("/cloud/controls", response_model=ApiResponse[CloudControlResponse], response_model_by_alias=True)
+def get_cloud_controls(db: Session = Depends(get_db)):
+    """สวิตช์ burst ขึ้น AWS ตอนนี้เปิดหรือปิด"""
+    return {
+        "success": True,
+        "message": "Cloud controls retrieved successfully",
+        "data": admin_billing_service.get_cloud_control(db),
+    }
+
+
+@router.patch(
+    "/cloud/controls",
+    response_model=ApiResponse[CloudControlResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(verify_permission("monitoring:write:all"))],
+)
+def update_cloud_controls(
+    body: CloudControlUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """เปิด / ปิด burst ขึ้น AWS — ปิดแล้วกด Start จากนอกห้องแลปได้ 409 (เครื่องแลปใช้ K3s ได้ตามปกติ)"""
+    return {
+        "success": True,
+        "message": "Cloud controls updated successfully",
+        "data": admin_billing_service.set_burst(db, body.burst_enabled, body.reason, current_user.id),
     }

@@ -14,7 +14,10 @@ class UsageRecord(Base):
     gpu_seconds = Column(BigInteger, nullable=False)
     ram_mb_hours = Column(Numeric(precision=12, scale=2), nullable=False)
     is_cloud_burst = Column(Boolean, default=False, nullable=False)
-    est_cost_thb = Column(Numeric(precision=10, scale=2), nullable=False)
+    est_cost_thb = Column(Numeric(precision=10, scale=2), nullable=False)   # เดิม (#98) ไม่ใช้แล้ว ใช้ est_cost_usd
+    # หน้า admin billing (docs/ADMIN_MONITOR.md PR 3): เขียนตอน session จบ
+    duration_seconds = Column(BigInteger, nullable=False, default=0, server_default="0")
+    est_cost_usd = Column(Numeric(precision=10, scale=4), nullable=False, default=0, server_default="0")
     recorded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # Relationships
