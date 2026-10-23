@@ -14,6 +14,7 @@ import LoginPage from '../pages/Login.tsx';
 import SSOCallbackPage from '../pages/SSOCallback.tsx';
 import InstructorPage from '../pages/Instructor.tsx';
 import AdminMonitorPage from '../pages/AdminMonitor.tsx';
+import AdminDashboardPage from '../pages/AdminDashboard.tsx';
 
 export const router = createBrowserRouter([
   // Public auth pages: no navbar, no footer
@@ -70,6 +71,11 @@ export const router = createBrowserRouter([
       {
         element: <ProtectedRoute allowedRoles={['admin']} />,
         children: [
+          // Admin dashboard: layout ของตัวเอง (Design system) ไม่ใช้ navbar / footer ของหน้านักศึกษา
+          {
+            path: '/admin',
+            element: <AdminDashboardPage />,
+          },
           {
             element: <RootLayout />,
             children: [
