@@ -61,7 +61,11 @@ class Settings(BaseSettings):
     GOOGLE_TOKEN_URI: str = "https://oauth2.googleapis.com/token"
     GOOGLE_USERINFO_URI: str = "https://openidconnect.googleapis.com/v1/userinfo"
     GOOGLE_TOKENINFO_URI: str = "https://oauth2.googleapis.com/tokeninfo"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # Thammasat University REST API (Active Directory Verify)
+    TU_API_ENABLED: bool = True
+    TU_API_URL: str = "https://restapi.tu.ac.th/api/v1/auth/Ad/verify"
+    TU_API_APP_KEY: Optional[str] = None
     TAILSCALE_TRUSTED_PROXY_CIDRS_STR: str = ""
     
     # CORS - เก็บเป็น string คั่นด้วย comma แล้ว parse ใน code
@@ -140,7 +144,7 @@ class Settings(BaseSettings):
     # scheduler สร้าง / ลบ DaemonSet ให้เมื่อเปิดทั้ง PREWARM_ENABLED และตัวนี้ ส่วน launch ใช้ตัวนี้ตัวเดียว
     WARM_POD_ENABLED: bool = False
     # กด Start ตอนที่ warm pod ตัวใหม่ยังไม่ Ready (DaemonSet เพิ่งสร้างแทนตัวที่คนก่อนปิด) รอตัวนั้นกี่วินาที
-    # ไม่รอ = ไปสร้าง pod อีกตัวชนกับ warm pod ที่จองที่ไว้ → เครื่องเต็ม (docs/LAB_DIRECT_POD.md)
+    # ไม่รอ = ไปสร้าง pod อีกตัวชนกับ warm pod ที่จองที่ไว้ → เครื่องเต็ม (docs/archive/LAB_DIRECT_POD.md)
     WARM_POD_WAIT_SECONDS: int = 60
 
     # กดจากเครื่องแลปแต่ไม่มี warm pod: "pod" = สร้าง pod ตรงด้วย k8s API บนเครื่องนั้น (ไม่ต้องลงของ ไม่กี่วินาที)
@@ -154,7 +158,7 @@ class Settings(BaseSettings):
     # - launch ผ่าน SkyPilot จากเครื่องแลป: บังคับ pod ลงเครื่องที่กด Start (nodeSelector)
     # - pod ของ lab ทั้งสองแบบติด label vlab/lab=true ให้ NetworkPolicy vlab-lab-isolation ปิดขาเข้า
     #   (k8s/lab-isolation-networkpolicy.yaml) กันการเข้าทาง pod IP จากเครื่องอื่นผ่าน flannel
-    # ปิดไว้เป็นค่าเริ่มต้นจนกว่าจะทดลองครบ (docs/DaemonSetsExperiment.md หัวข้อ Exp4)
+    # ปิดไว้เป็นค่าเริ่มต้นจนกว่าจะทดลองครบ (docs/archive/DaemonSetsExperiment.md หัวข้อ Exp4)
     LAB_ISOLATION_ENABLED: bool = False
     # กำหนดเวลาเองเพิ่มจาก class_slots เป็น JSON ใน .env (ไว้ทดลอง) เวลาต้องมี timezone เช่น
     # PREWARM_TARGETS=[{"image":"100.127.74.48:5001/vlab/hello:v1","start_at":"2026-10-17T14:00:00+07:00","end_at":"2026-10-17T15:00:00+07:00"}]
@@ -166,8 +170,31 @@ class Settings(BaseSettings):
     SKYPILOT_API_SERVER_ENDPOINT: Optional[str] = None
     SKYPILOT_SERVICE_ACCOUNT_TOKEN: Optional[str] = None
 
+    @field_validator("AUTH_COOKIE_DOMAIN", mode="before")
+    @classmethod
+    def clean_cookie_domain(cls, v):
+        if not v or not isinstance(v, str):
+            return None
+        v = v.split("#")[0].strip()
+        return v if v else None
+
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def clean_environment(cls, v):
+        if isinstance(v, str):
+            return v.split("#")[0].strip()
+        return v
+
+    @field_validator("AUTH_COOKIE_SAMESITE", mode="before")
+    @classmethod
+    def clean_cookie_samesite(cls, v):
+        if isinstance(v, str):
+            v = v.split("#")[0].strip().lower()
+            return v or "lax"
+        return v
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

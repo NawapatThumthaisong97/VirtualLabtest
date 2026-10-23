@@ -5,7 +5,7 @@ Revises: 20241015_00 (archive fields — ต่อจาก 20261013_06 อี�
 Create Date: 2026-10-21
 
 AUTO = เลือกที่ launch ตามเครื่องที่กด Start (เครื่องแลป → KUBERNETES, ที่อื่น → AWS)
-ดู docs/RUN_TARGET_AUTO.md — DB dev เคยเติมมือด้วย ALTER TYPE ... ADD VALUE 'AUTO' (docs/DB_DIAGRAM.md)
+ดู docs/archive/RUN_TARGET_AUTO.md — DB dev เคยเติมมือด้วย ALTER TYPE ... ADD VALUE 'AUTO' (docs/archive/DB_DIAGRAM.md)
 """
 
 from alembic import op

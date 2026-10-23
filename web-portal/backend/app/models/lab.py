@@ -21,7 +21,7 @@ class RunTarget(enum.Enum):
       ไว้แล้ว แล้วค่อย docker run image จาก ECR เอง (container mode ช้ากว่ามาก
       เพราะ SkyPilot ต้องลง runtime ใน container ใหม่ทุกครั้ง ดู EXPERIMENT_ECR_PULL_RESULT.md)
     - AUTO: เลือกตามเครื่องที่กด Start — เครื่อง worker ในห้องแลป → KUBERNETES (warm pod / pin เครื่องนั้น)
-      ที่อื่น → AWS (ดู resolve_run_target ใน session_service และ docs/RUN_TARGET_AUTO.md)
+      ที่อื่น → AWS (ดู resolve_run_target ใน session_service และ docs/archive/RUN_TARGET_AUTO.md)
       image ต้องมีทั้งใน registry ในบ้านและ ECR
     """
     KUBERNETES = "kubernetes"

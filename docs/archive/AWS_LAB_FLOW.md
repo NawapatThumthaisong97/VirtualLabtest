@@ -181,7 +181,7 @@ skylet เช็กทุก 1 นาทีและต้องปิด Ray �
 
 ปัญหาเดิม: autostop (หรือ pod/EC2 ตายเอง) ลบเครื่องไปแล้ว แต่ `sessions.status` ยังเป็น `RUNNING`
 เพราะไม่มีใครบอก backend → แก้ด้วย reconciler ใน backend (`app/services/session_reconciler.py`)
-รายละเอียดและผลเทสอยู่ใน `docs/Flow.md` หัวข้อ 5.1
+รายละเอียดและผลเทสอยู่ใน `docs/archive/Flow.md` หัวข้อ 5.1
 
 ```mermaid
 flowchart TD
@@ -321,7 +321,7 @@ flowchart TD
 | อะไร | อยู่ที่ |
 |---|---|
 | โค้ด launch (backend) | `web-portal/backend/app/services/session_service.py` — branch `feature/sky-aws-launch` (PR #88) |
-| รายละเอียด flow ของ API | `docs/Flow.md` — PR #88 |
+| รายละเอียด flow ของ API | `docs/archive/Flow.md` — PR #88 |
 | Terraform (VPC, router, role, สิทธิ์ autostop) | `terraform/` — branch `infra/ecr-pull-experiment` |
 | script สร้าง AMI | `docker/bake/provision-ami.sh` — branch `infra/ecr-pull-experiment` |
-| ผลทดลองทั้งหมด | `docs/EXPERIMENT_ECR_PULL_RESULT.md` — branch `infra/ecr-pull-experiment` |
+| ผลทดลองทั้งหมด | `docs/archive/EXPERIMENT_ECR_PULL_RESULT.md` — branch `infra/ecr-pull-experiment` |

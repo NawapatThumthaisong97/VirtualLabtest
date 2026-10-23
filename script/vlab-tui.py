@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vlab-tui.py - หน้าจอ monitor + เทส Ansible / launch แบบ btop (ดู docs/TEST_ALL.md)
+"""vlab-tui.py - หน้าจอ monitor + เทส Ansible / launch แบบ btop (ดู docs/archive/TEST_ALL.md)
 
 กล่องบนจอ: cluster (node / นาฬิกา / ทาง backend→master), skypilot server (health / memory / auth),
 tests (รายการเทส ✅ ❌), ของที่เปิดอยู่ (lab pod / session / EC2) และ log สำคัญของ backend
@@ -962,7 +962,7 @@ def plain(name):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="monitor + เทส Ansible / launch (docs/TEST_ALL.md)")
+    ap = argparse.ArgumentParser(description="monitor + เทส Ansible / launch (docs/archive/TEST_ALL.md)")
     ap.add_argument("--plain", choices=["ansible", "infra", "launch", "all"], help="ไม่มีจอ: รันชุดนี้แล้วพิมพ์สรุป")
     args = ap.parse_args()
     if args.plain or not sys.stdin.isatty():

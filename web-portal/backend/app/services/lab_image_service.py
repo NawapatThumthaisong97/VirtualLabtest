@@ -229,6 +229,8 @@ class LabImageService:
         """webhook อนุมัติ image — ใช้ secret คนละชุดกับของ Cloudflare ไม่รับแทนกัน"""
         cls._verify_secret(provided, settings.LAB_IMAGE_APPROVE_WEBHOOK_SECRET)
 
+
+
     def handle_upload_event(
         self, payload: R2UploadWebhookPayload
     ) -> R2UploadWebhookResponse:
@@ -244,11 +246,15 @@ class LabImageService:
             image.archive_size_bytes = payload.size
             image.size_mb = math.ceil(payload.size / MIB)
         image.archive_uploaded_at = payload.event_time or datetime.now(timezone.utc)
-
         self.db.commit()
+
         return R2UploadWebhookResponse(
             updated=True, image_id=image.id, object_key=payload.object_key
         )
+
+
+
+
 
     # ------------------------------------------------------------ approve
 
