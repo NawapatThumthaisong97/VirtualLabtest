@@ -119,3 +119,15 @@ class LabImageApproveResponse(CamelModel):
     status: ImageStatus
     # False = อนุมัติไว้ก่อนแล้ว ไม่ได้เปลี่ยนอะไร
     updated: bool
+
+
+class LabImageRejectRequest(CamelModel):
+    """ปฏิเสธ lab image: ลบแถว (ต้องยังเป็น PENDING) และไฟล์บน R2 ทิ้ง"""
+
+    lab_image_id: UUID
+
+
+class LabImageRejectResponse(CamelModel):
+    image_id: UUID
+    archive_key: str | None = None
+    deleted: bool

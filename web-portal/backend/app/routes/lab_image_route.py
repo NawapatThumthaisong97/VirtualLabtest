@@ -11,6 +11,8 @@ from app.repositories.lab_image_repository import LabImageRepository
 from app.schemas.lab_image_schema import (
     LabImageApproveRequest,
     LabImageApproveResponse,
+    LabImageRejectRequest,
+    LabImageRejectResponse,
     LabImageUploadRequest,
     LabImageUploadResponse,
     R2UploadWebhookPayload,
@@ -88,4 +90,24 @@ def approve_lab_image_webhook(
         "success": True,
         "message": "Lab image approved" if data.updated else "Lab image already approved",
         "data": data,
+    }
+
+
+@router.post(
+    "/webhook/reject-lab-image",
+    response_model=ApiResponse[LabImageRejectResponse],
+)
+def reject_lab_image_webhook(
+    payload: LabImageRejectRequest,
+    webhook_secret: str | None = Header(default=None, alias="Webhook-Secret"),
+    controller: LabImageController = Depends(get_controller),
+):
+    """ปฏิเสธ lab image: ลบไฟล์บน R2 แล้วลบแถวใน DB (เฉพาะที่ยัง PENDING)
+
+    ยืนยันตัวตนด้วย Webhook-Secret ชุดเดียวกับ approve (LAB_IMAGE_APPROVE_WEBHOOK_SECRET)
+    """
+    return {
+        "success": True,
+        "message": "Lab image rejected and deleted",
+        "data": controller.reject_image(payload, webhook_secret),
     }

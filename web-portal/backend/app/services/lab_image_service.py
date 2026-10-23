@@ -34,6 +34,8 @@ from app.repositories.rbac_repository import RBACRepository
 from app.schemas.lab_image_schema import (
     LabImageApproveRequest,
     LabImageApproveResponse,
+    LabImageRejectRequest,
+    LabImageRejectResponse,
     LabImageUploadRequest,
     LabImageUploadResponse,
     R2UploadWebhookPayload,
@@ -263,7 +265,7 @@ class LabImageService:
 
         ไม่เติม image_digest — เป็นหน้าที่ของขั้น import เข้า registry
         """
-        image = self.lab_image_repository.find_by_id(payload.lab_image_id)
+        image = self.lab_image_repository.find_by_id(payload.lab_image_id, for_update=True)
         if image is None:
             raise LabImageNotFoundError(f"Lab image {payload.lab_image_id} not found")
 
@@ -278,3 +280,40 @@ class LabImageService:
         image.status = ImageStatus.APPROVED
         self.db.commit()
         return LabImageApproveResponse(image_id=image.id, status=image.status, updated=True)
+
+    # ------------------------------------------------------------ reject
+
+    def reject_image(self, payload: LabImageRejectRequest) -> LabImageRejectResponse:
+        """ปฏิเสธ = ลบ lab image ที่ยัง PENDING ทิ้งทั้งแถว DB และไฟล์บน R2
+
+        ลำดับ: ลบแถว (flush, ยังไม่ commit) -> ลบไฟล์ R2 -> commit
+        - แถวที่ถูกอ้างอิงอยู่ (lab / session / ตารางเรียน) ถูกปฏิเสธก่อนแตะ R2
+        - R2 ลบไม่สำเร็จ -> rollback แถวยังอยู่ ยิงซ้ำได้ (ลบ R2 ซ้ำได้ ไม่ error)
+        - ไม่มีกรณีที่แถวหายแต่ไฟล์ค้างบน R2 โดยไม่มีใครรู้
+        """
+        image = self.lab_image_repository.find_by_id(payload.lab_image_id, for_update=True)
+        if image is None:
+            raise LabImageNotFoundError(f"Lab image {payload.lab_image_id} not found")
+        if image.status is not ImageStatus.PENDING:
+            raise ConflictError(
+                f"Lab image {image.id} is {image.status.value}, only pending images can be rejected"
+            )
+
+        if self.lab_image_repository.is_referenced(image.id):
+            raise ConflictError(f"Lab image {image.id} is still referenced by a lab or session")
+
+        image_id, archive_key = image.id, image.archive_key
+        try:
+            self.lab_image_repository.delete(image)
+        except IntegrityError as error:
+            self.db.rollback()
+            raise ConflictError(f"Lab image {image_id} is still referenced and cannot be deleted") from error
+
+        try:
+            if archive_key:
+                self.r2.delete_object(archive_key)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return LabImageRejectResponse(image_id=image_id, archive_key=archive_key, deleted=True)

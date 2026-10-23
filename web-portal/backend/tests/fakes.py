@@ -341,6 +341,8 @@ class FakeR2:
 
     def __init__(self):
         self.presigned: list[dict] = []
+        self.deleted: list[str] = []
+        self.fail_delete = False  # True -> delete_object โยน R2DeleteError เหมือน R2 ล่ม
 
     def generate_presigned_put_url(
         self, key: str, content_type: str, expires_in: int | None = None
@@ -349,3 +351,10 @@ class FakeR2:
             {"key": key, "content_type": content_type, "expires_in": expires_in}
         )
         return f"https://fake-r2.test/{key}?X-Amz-Expires={expires_in}&X-Amz-Signature=fake"
+
+    def delete_object(self, key: str) -> None:
+        if self.fail_delete:
+            from app.adapters.r2_adapter import R2DeleteError
+
+            raise R2DeleteError(f"Failed to delete {key} from R2")
+        self.deleted.append(key)

@@ -11,6 +11,7 @@ from functools import cached_property
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.configs.settings import settings
 from app.exceptions.domain import InternalServerError
@@ -18,6 +19,10 @@ from app.exceptions.domain import InternalServerError
 
 class R2NotConfiguredError(InternalServerError):
     code = "r2_not_configured"
+
+
+class R2DeleteError(InternalServerError):
+    code = "r2_delete_failed"
 
 
 class R2Adapter:
@@ -78,6 +83,17 @@ class R2Adapter:
             ExpiresIn=expires_in or settings.R2_PRESIGN_EXPIRES_SECONDS,
             HttpMethod="PUT",
         )
+
+
+    def delete_object(self, key: str) -> None:
+        """ลบ object ออกจาก bucket — key ที่ไม่มีอยู่แล้วถือว่าสำเร็จ (S3/R2 ตอบ 204 เหมือนกัน)
+
+        ลบไม่สำเร็จ (network / credential / สิทธิ์) -> R2DeleteError เพื่อให้ผู้เรียกไม่ไปลบข้อมูลฝั่ง DB ต่อ
+        """
+        try:
+            self.client.delete_object(Bucket=self.bucket, Key=key)
+        except (ClientError, BotoCoreError) as error:
+            raise R2DeleteError(f"Failed to delete {key} from R2") from error
 
 
 r2_adapter = R2Adapter()

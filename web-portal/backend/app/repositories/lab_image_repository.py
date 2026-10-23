@@ -1,18 +1,44 @@
 from uuid import UUID
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
+from app.models.class_schedule import ClassSchedule
+from app.models.class_slot import ClassSlot
+from app.models.lab import Lab
 from app.models.lab_image import LabImage, ImageStatus
+from app.models.session import Session as LabSession
 from app.repositories.base import BaseRepository
 
 
 class LabImageRepository(BaseRepository[LabImage]):
     model = LabImage
 
-    def find_by_id(self, image_id: UUID) -> Optional[LabImage]:
-        """ดึง lab image ตาม ID"""
-        return self.db.query(LabImage).filter(LabImage.id == image_id).first()
+    def find_by_id(self, image_id: UUID, for_update: bool = False) -> Optional[LabImage]:
+        """ดึง lab image ตาม ID (for_update=True -> ล็อกแถวจนจบ transaction กัน approve/reject ชนกัน)"""
+        query = self.db.query(LabImage).filter(LabImage.id == image_id)
+        if for_update:
+            query = query.with_for_update()
+        return query.first()
+
+    def is_referenced(self, image_id: UUID) -> bool:
+        """มี lab / session / ตารางเรียน อ้างถึง image นี้อยู่ไหม
+
+        ต้องเช็คเองก่อนลบ: relationship ของ LabImage ไม่มี cascade ถ้าลบเลย SQLAlchemy จะ
+        เซ็ต FK ที่ nullable (เช่น labs.image_id) เป็น NULL เงียบๆ แทนที่จะ error
+        """
+        checks = (
+            exists().where(Lab.image_id == image_id),
+            exists().where(LabSession.lab_image_id == image_id),
+            exists().where(ClassSlot.lab_image_id == image_id),
+            exists().where(ClassSchedule.default_lab_image_id == image_id),
+        )
+        return any(self.db.query(check).scalar() for check in checks)
+
+    def delete(self, image: LabImage) -> None:
+        """ลบแถวจริง (hard delete) — flush เพื่อให้ FK violation เกิดตรงนี้ ยังไม่ commit"""
+        self.db.delete(image)
+        self.db.flush()
 
     def find_by_repository_and_tag(self, repository: str, tag: str) -> Optional[LabImage]:
         """ดึง lab image ตาม repository และ tag"""
