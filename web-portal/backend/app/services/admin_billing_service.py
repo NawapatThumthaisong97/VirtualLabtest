@@ -21,6 +21,7 @@ from app.models.cloud_control import CloudControl
 from app.models.lab_image import LabImage
 from app.models.session import Session as SessionModel, SessionStatus
 from app.models.usage_record import UsageRecord
+from app.services.admin_log_service import log_burst_toggled
 from app.schemas.admin_monitor_schema import (
     AwsBilling,
     BillingMonth,
@@ -99,6 +100,7 @@ def set_burst(db: DbSession, enabled: bool, reason: Optional[str], user_id: Opti
     row.reason = reason
     row.changed_by = user_id
     row.changed_at = datetime.now(timezone.utc)
+    log_burst_toggled(db, enabled, reason, user_id)
     db.commit()
     return get_cloud_control(db)
 

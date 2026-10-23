@@ -2,7 +2,7 @@
 Admin Monitor Routes — การ์ดหน้า admin overview (docs/ADMIN_MONITOR.md)
 ดูอย่างเดียว ต้องมี monitoring:read:all (admin)
 """
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -18,11 +18,13 @@ from app.schemas.admin_monitor_schema import (
     CloudControlResponse,
     CloudControlUpdate,
     InfraMapResponse,
+    LogHistogramResponse,
+    LogListResponse,
     RoomUsageResponse,
     SystemStatusResponse,
 )
 from app.schemas.response import ApiResponse
-from app.services import admin_billing_service
+from app.services import admin_billing_service, admin_log_service
 from app.services.admin_monitor_service import AdminMonitorService
 from app.services.health_service import get_system_status
 from app.services.kubernetes_service import get_kubernetes_service
@@ -121,4 +123,38 @@ def update_cloud_controls(
         "success": True,
         "message": "Cloud controls updated successfully",
         "data": admin_billing_service.set_burst(db, body.burst_enabled, body.reason, current_user.id),
+    }
+
+
+@router.get("/logs", response_model=ApiResponse[LogListResponse], response_model_by_alias=True)
+def get_logs(
+    category: Optional[str] = Query(None, pattern="^(CLUSTER|CLOUD|cluster|cloud)$", description="CLUSTER / CLOUD"),
+    type: Optional[str] = Query(None, description="event type เช่น POD_EVENT"),
+    severity: Optional[str] = Query(None, description="INFO / WARNING / ERROR / CRITICAL"),
+    start: Optional[datetime] = Query(None, alias="from"),
+    end: Optional[datetime] = Query(None, alias="to"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """log การใช้งาน / ปัญหาของ cluster และ cloud ใหม่สุดก่อน (user เป็น anonId)"""
+    return {
+        "success": True,
+        "message": "Logs retrieved successfully",
+        "data": admin_log_service.list_logs(db, category, type, severity, start, end, limit, offset),
+    }
+
+
+@router.get("/logs/histogram", response_model=ApiResponse[LogHistogramResponse], response_model_by_alias=True)
+def get_logs_histogram(
+    category: Optional[str] = Query(None, pattern="^(CLUSTER|CLOUD|cluster|cloud)$"),
+    hours: int = Query(72, ge=2, le=24 * 30),
+    bucket_hours: int = Query(2, ge=1, le=24, alias="bucketHours"),
+    db: Session = Depends(get_db),
+):
+    """จำนวน log ต่อช่วงเวลา (กราฟแท่ง Log Explorer) + แยกตามประเภท"""
+    return {
+        "success": True,
+        "message": "Log histogram retrieved successfully",
+        "data": admin_log_service.histogram(db, category, hours, bucket_hours),
     }

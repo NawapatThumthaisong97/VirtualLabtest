@@ -20,6 +20,7 @@ from app.configs.db import SessionLocal
 from app.configs.settings import settings
 from app.models.health_check import HealthCheck
 from app.schemas.admin_monitor_schema import ServiceStatus, SystemStatusResponse
+from app.services.admin_log_service import collect, log_health_changes
 from app.services.prewarm_service import CONTROL_PLANE_LABEL
 from app.utils.logger import logger
 
@@ -149,16 +150,27 @@ def default_checks(db: DbSession) -> list[tuple[str, Checker]]:
     return checks
 
 
+def _latest(db: DbSession) -> dict[str, HealthCheck]:
+    """ผลล่าสุดของแต่ละ service (ไว้เทียบว่าสถานะเปลี่ยนไหม → เขียน log)"""
+    latest: dict[str, HealthCheck] = {}
+    since = datetime.now(timezone.utc) - timedelta(days=settings.HEALTH_CHECK_RETENTION_DAYS)
+    for row in db.query(HealthCheck).filter(HealthCheck.checked_at > since).order_by(HealthCheck.checked_at):
+        latest[row.service] = row
+    return latest
+
+
 def check_once(db: DbSession, checks: Optional[list[tuple[str, Checker]]] = None,
                now: Optional[datetime] = None) -> list[HealthCheck]:
     """ตรวจทุก service 1 รอบ บันทึกผล + ลบผลที่เก่ากว่า retention"""
     now = now or datetime.now(timezone.utc)
+    previous = _latest(db)
     rows = []
     for service, checker in (checks if checks is not None else default_checks(db)):
         r = run_check(service, checker)
         rows.append(HealthCheck(service=r.service, status=r.status, latency_ms=r.latency_ms,
                                 version=r.version, detail=r.detail, checked_at=now))
     db.add_all(rows)
+    log_health_changes(db, previous, rows)
     cutoff = now - timedelta(days=settings.HEALTH_CHECK_RETENTION_DAYS)
     db.query(HealthCheck).filter(HealthCheck.checked_at < cutoff).delete(synchronize_session=False)
     db.commit()
@@ -169,6 +181,14 @@ def _check_once_own_session() -> list[HealthCheck]:
     db = SessionLocal()
     try:
         rows = check_once(db)
+        k8s = None
+        if settings.K8S_ENABLED:
+            try:
+                from app.services.kubernetes_service import get_kubernetes_service
+                k8s = get_kubernetes_service()
+            except Exception:
+                pass
+        collect(db, k8s)   # k8s events + เกณฑ์ budget → log
         bad = [f"{r.service}={r.status}" for r in rows if r.status != "ok"]
         if bad:
             logger.warning(f"Health check: {', '.join(bad)}")
