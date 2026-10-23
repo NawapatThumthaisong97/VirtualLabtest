@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     AWS_LAB_AMI: Optional[str] = None          # AMI bake เช่น vlab-bake-0.12.3.post1-r2
     AWS_INSTANCE_TYPE: str = "m7i-flex.large"  # บัญชี free plan สร้างได้แค่บางชนิด
     AWS_DISK_SIZE: int = 30                    # ไม่ใส่ SkyPilot จะใช้ 256 GB
+    # หน้า admin billing: ค่า EC2 ต่อชั่วโมงของ AWS_INSTANCE_TYPE (on-demand) + ดิสก์ — ใช้ประมาณค่าใช้จ่าย
+    # m7i-flex.large ap-southeast-1 = $0.1197 (catalog ของ SkyPilot ~/.sky/catalogs/v8/aws/vms.csv 2026-10-23)
+    # + gp3 30 GB × $0.096/GB-เดือน ÷ 730 ชม. ≈ $0.0039 → เปลี่ยน instance type ต้องแก้ค่านี้ด้วย
+    AWS_HOURLY_PRICE_USD: float = 0.1236
+    # budget AWS ต่อเดือน (USD) และเกณฑ์เตือน (%)
+    AWS_MONTHLY_BUDGET_USD: float = 200.0
+    AWS_BUDGET_ALERT_PCT: int = 80
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
 
