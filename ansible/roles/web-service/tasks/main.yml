@@ -165,6 +165,18 @@
 
 # ---------- Deploy ----------
 
+# ทุก port ผูกกับ BIND_IP (IP ของ tailscale0) แต่ตอนบูต docker เริ่มก่อน Tailscale ได้ IP
+# → bind ไม่ได้ (cannot assign requested address) frontend Exited (128) และ docker ไม่ลองใหม่ให้ — เว็บล่มหลังรีบูต
+# (backend รอดเพราะ uvicorn ล้มแล้ว restart วน) ให้ kernel ยอม bind IP ที่ยังไม่มีบน interface
+- name: Allow binding to the Tailscale IP before it is up (boot order)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    sysctl_file: /etc/sysctl.d/60-vlab-nonlocal-bind.conf
+    state: present
+    reload: yes
+
+
 - name: Build and start web-portal stack
   ansible.builtin.command:
     cmd: docker compose -f docker-compose.prod.yml up -d --build
