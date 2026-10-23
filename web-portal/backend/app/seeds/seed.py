@@ -237,9 +237,49 @@ def seed_database(db: Session):
         description="DevOps toolbox (ยังไม่ได้ build image จริง)",
     )
 
-    db.add_all([se_image, devops_image])
+    # --- image ที่อยู่ระหว่าง flow อัปโหลด .tar ขึ้น R2 (status=PENDING) ---
+    # ใช้ทดสอบ presign / webhook / หน้า approve โดยไม่ต้องอัปโหลดจริง
+    # ทั้งคู่ยังไม่มี image_digest (เติมตอน approve) และไม่ถูกใช้โดย lab ใด
+
+    # 1) draft: ขอ presign แล้วแต่ยังไม่มีไฟล์ขึ้น R2 -> archive_* ว่างทั้งหมด
+    #    size_mb เป็นค่าประมาณจากขนาดที่ client แจ้งตอนขอ presign
+    draft_image_id = uuid.uuid4()
+    draft_image = LabImage(
+        id=draft_image_id,
+        uploaded_by=se_instructor.id,
+        course_id=se_course.id,
+        repository="vlab/spring-boot-lab",
+        tag="draft-01",
+        image_digest=None,
+        size_mb=512,
+        status=ImageStatus.PENDING,
+        archive_key=f"lab-images/{se_course.id}/{draft_image_id}/image.tar",
+        description="Draft: ขอ presign แล้ว รอ client อัปโหลดไฟล์ .tar",
+    )
+
+    # 2) uploaded: webhook เติม archive_* แล้ว รออนุมัติ (ยังไม่มี digest)
+    uploaded_image_id = uuid.uuid4()
+    uploaded_size_bytes = 734_003_200  # 700 MiB พอดี
+    uploaded_image = LabImage(
+        id=uploaded_image_id,
+        uploaded_by=se_instructor.id,
+        course_id=se_course.id,
+        repository="vlab/python-lab",
+        tag="lab-02",
+        image_digest=None,
+        size_mb=uploaded_size_bytes // (1024 * 1024),
+        status=ImageStatus.PENDING,
+        exposed_ports=[8080],
+        archive_key=f"lab-images/{se_course.id}/{uploaded_image_id}/image.tar",
+        archive_etag="d41d8cd98f00b204e9800998ecf8427e",  # ค่าตัวอย่าง
+        archive_size_bytes=uploaded_size_bytes,
+        archive_uploaded_at=datetime.utcnow() - timedelta(hours=1),
+        description="Uploaded: ไฟล์อยู่บน R2 แล้ว รอ admin approve",
+    )
+
+    db.add_all([se_image, devops_image, draft_image, uploaded_image])
     db.commit()
-    print("[ok] Created 2 lab images")
+    print("[ok] Created 4 lab images (2 approved + 2 pending: draft / uploaded)")
 
     # 6. สร้าง Labs
     # SE301 คือวิชาที่ persona เดินเข้า — ต้องสมบูรณ์ที่สุด และเป็นวิชาเดียว

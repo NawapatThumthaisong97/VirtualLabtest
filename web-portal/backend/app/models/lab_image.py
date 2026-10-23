@@ -23,7 +23,10 @@ class LabImage(Base):
     # Image Identification
     repository = Column(String(255), nullable=False)  # "skypilot/music-lab"
     tag = Column(String(100), nullable=False)         # "lab-01"
-    image_digest = Column(String(255), nullable=False, unique=True)
+    # NULL ได้: ตอนขอ presign ยังไม่มีไฟล์ จึงยังไม่รู้ digest — เติมตอน approve (ดึงจาก registry)
+    # unique ยังใช้ได้ เพราะ Postgres ถือว่า NULL แต่ละตัวไม่ซ้ำกัน (draft หลายแถวพร้อมกันได้)
+    image_digest = Column(String(255), nullable=True, unique=True)
+    # ตอน presign ใช้ค่าประมาณจากขนาดที่ client แจ้ง แล้ว webhook / approve ทับด้วยค่าจริง
     size_mb = Column(Integer, nullable=False)
     
     # Resource Requirements (for SkyPilot)
@@ -48,7 +51,11 @@ class LabImage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Metadata After Upload to R2
-    archive_key = Column(String(500), nullable=True)
+    # archive_key: server สร้างตอนขอ presign (ห้ามใช้ชื่อไฟล์จาก client) และใช้เป็นตัวจับคู่กับ
+    #   object_key ที่ Webhook ส่งมา จึงต้อง unique + index (NULL ซ้ำได้ = ยังไม่เคยขอ presign)
+    # archive_etag / archive_size_bytes / archive_uploaded_at: Webhook เป็นคนเติม
+    #   archive_uploaded_at เป็น NULL = ยังไม่มีไฟล์ขึ้น R2 (draft), มีค่า = อัปโหลดแล้วรออนุมัติ
+    archive_key = Column(String(500), nullable=True, unique=True, index=True)
     archive_etag = Column(String(255), nullable=True)
     archive_size_bytes = Column(BigInteger, nullable=True)
     archive_uploaded_at = Column(DateTime(timezone=True), nullable=True)
