@@ -19,7 +19,7 @@ from app.services.warm_pod_service import (DIRECT_POD_PREFIX, LAB_LABEL, WARM_PO
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.class_slot import ClassSlot, ClassSlotStatus
-from app.services import admin_billing_service
+from app.services import admin_billing_service, admin_log_service
 from app.models.user import User
 from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
@@ -714,6 +714,7 @@ class SessionService:
         session.end_reason = reason
         # ชั่วโมงที่ใช้ + ค่า AWS ประมาณ (หน้า admin billing) commit พร้อมสถานะ
         admin_billing_service.record_usage(self.db, session)
+        admin_log_service.log_session_end(self.db, session, reason)
         self.db.commit()
 
     def _gone_reason(self, session: SessionModel) -> SessionEndReason:

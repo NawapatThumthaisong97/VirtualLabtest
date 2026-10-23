@@ -4,8 +4,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AdminDashboardPage from '../pages/AdminDashboard';
 import * as AuthContextModule from '../contexts/AuthContext';
-import { adminBillingService, adminDashboardService } from '../services/adminDashboard';
-import type { BillingMonthly, BillingSummary, InfraMap, RoomUsage, SystemStatus } from '../services/adminDashboard';
+import { adminBillingService, adminDashboardService, adminLogService } from '../services/adminDashboard';
+import type { BillingMonthly, BillingSummary, InfraMap, LogHistogram, LogList, RoomUsage, SystemStatus } from '../services/adminDashboard';
 import { homeFor } from '../utils/homePath';
 import apiClient from '../services/api';
 
@@ -59,6 +59,20 @@ const monthly: BillingMonthly = {
   ],
 };
 
+const histogram: LogHistogram = {
+  start: '2026-10-20T12:00:00Z',
+  end: '2026-10-23T12:00:00Z',
+  bucketHours: 2,
+  buckets: Array.from({ length: 36 }, (_, i) => ({ t: new Date(Date.UTC(2026, 9, 20, 12 + i * 2)).toISOString(), count: i === 35 ? 4 : 0 })),
+  byType: { NODE_NOT_READY: 3, POD_EVENT: 1 },
+};
+
+const logList: LogList = {
+  total: 1,
+  items: [{ id: 'l1', timestamp: '2026-10-23T11:00:00Z', severity: 'WARNING', category: 'CLUSTER', eventType: 'NODE_NOT_READY',
+            source: 'worker-pete', message: 'Node worker-pete NotReady', anonId: null, room: null, metadata: {} }],
+};
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -88,6 +102,8 @@ describe('AdminDashboard (/admin)', () => {
     vi.spyOn(adminDashboardService, 'getRoomUsage').mockResolvedValue(usage);
     vi.spyOn(adminBillingService, 'getSummary').mockResolvedValue(summary);
     vi.spyOn(adminBillingService, 'getMonthly').mockResolvedValue(monthly);
+    vi.spyOn(adminLogService, 'getHistogram').mockResolvedValue(histogram);
+    vi.spyOn(adminLogService, 'getLogs').mockResolvedValue(logList);
   });
 
   it('shows real services with status and detail', async () => {
@@ -111,12 +127,21 @@ describe('AdminDashboard (/admin)', () => {
     expect(screen.getByText('Idle')).toBeDefined();
   });
 
-  it('cards without an API say so instead of showing sample numbers', async () => {
+  it('no sample numbers from the design are left', async () => {
     renderPage();
     expect(await screen.findByText('Log Explorer')).toBeDefined();
-    expect(screen.getAllByText('ยังไม่มีข้อมูล')).toHaveLength(1);
+    expect(screen.queryByText('ยังไม่มีข้อมูล')).toBeNull();
     expect(screen.queryByText('$175.75')).toBeNull();
     expect(screen.queryByText('Microsoft Azure')).toBeNull();
+  });
+
+  it('log explorer shows counts by type, detail lists latest logs, switches to cloud', async () => {
+    renderPage();
+    expect(await screen.findByText('NODE_NOT_READY · 3')).toBeDefined();
+    fireEvent.click(screen.getByText('Log detail'));
+    expect(await screen.findByTitle('Node worker-pete NotReady')).toBeDefined();
+    fireEvent.click(screen.getByText('Cloud Usage'));
+    expect(adminLogService.getHistogram).toHaveBeenCalledWith('CLOUD');
   });
 
   it('billing shows AWS spend vs budget, burst off and this month share', async () => {

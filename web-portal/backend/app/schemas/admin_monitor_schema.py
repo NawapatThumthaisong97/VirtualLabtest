@@ -143,3 +143,37 @@ class CloudControlResponse(CamelModel):
 class CloudControlUpdate(CamelModel):
     burst_enabled: bool
     reason: Optional[str] = Field(None, max_length=500)
+
+
+# ---------- Logs (PR 5) ----------
+
+class LogItem(CamelModel):
+    id: UUID
+    timestamp: datetime
+    severity: str
+    category: str = Field(..., description="CLUSTER / CLOUD")
+    event_type: str = Field(..., description="SESSION_FAILED, CLOUD_LAUNCH_FAILED, NODE_NOT_READY, NODE_READY, "
+                                             "HEALTH_DOWN, HEALTH_RECOVERED, POD_EVENT, BUDGET_ALERT, BURST_TOGGLED")
+    source: str
+    message: str
+    anon_id: Optional[str] = None
+    room: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class LogListResponse(CamelModel):
+    total: int
+    items: list[LogItem]
+
+
+class LogHistogramBucket(CamelModel):
+    t: datetime
+    count: int
+
+
+class LogHistogramResponse(CamelModel):
+    start: datetime
+    end: datetime
+    bucket_hours: int
+    buckets: list[LogHistogramBucket]
+    by_type: dict[str, int]
