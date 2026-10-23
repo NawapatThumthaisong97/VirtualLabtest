@@ -1,0 +1,82 @@
+// Tailscale policy สำหรับ cluster ห้องแลป (Exp4: กันเครื่องอื่นเปิด lab ของเรา)
+//
+// apply ด้วย script/tailscale-acl.sh (plan → apply) ไม่ต้องกดใน admin console
+// script backup ของเดิม validate + รัน tests และแสดง diff ก่อนเขียนจริงทุกครั้ง
+// !! policy มีผลทั้ง tailnet (รวมเครื่องของ Film / AWS router / Windows) ไฟล์นี้คือ policy ทั้งก้อน
+//    ถ้าจะเพิ่มกฎอื่นของ tailnet ให้เพิ่มที่ไฟล์นี้ ไม่งั้นรอบหน้าที่ apply จะถูกทับ
+//
+// tag ของแต่ละเครื่องอยู่ใน tailscale/vlab-tags.tsv (script ติดให้)
+//   tag:vlab-server   = master (100.125.244.48), thinkpad (100.93.121.17, backend + SkyPilot)
+//   tag:vlab-worker   = เครื่องในห้องแลป: worker-pete (100.83.96.97), workerfilm (100.97.13.122)
+//   tag:vlab-registry = register (100.127.74.48)
+// เครื่องที่ติด tag จะไม่ใช่ของ user อีกต่อไป → ได้สิทธิ์เฉพาะที่เขียนไว้ข้างล่าง
+//
+// สิ่งที่ Tailscale ACL กันไม่ได้: traffic ระหว่าง pod (10.42.x.x) ข้ามเครื่อง เพราะห่ออยู่ใน VXLAN
+// 8472/udp ซึ่งต้องเปิด ส่วนนั้นกันด้วย NetworkPolicy (k8s/lab-isolation-networkpolicy.yaml)
+{
+	"tagOwners": {
+		"tag:vlab-server":   ["autogroup:admin"],
+		"tag:vlab-worker":   ["autogroup:admin"],
+		"tag:vlab-registry": ["autogroup:admin"],
+	},
+
+	"acls": [
+		// เครื่องของคนในทีม (ไม่ได้ติด tag) ใช้งานได้เหมือนเดิมทุกอย่าง
+		// (policy ค่าเริ่มต้นคือ src "*" ซึ่งรวมเครื่องที่ติด tag ด้วย = worker คุยกันได้หมด ตัวนี้แทนที่)
+		{"action": "accept", "src": ["autogroup:member"], "dst": ["*:*"]},
+
+		// 1. server เข้าได้ทุกเครื่องทุกพอร์ต: master เรียก kubelet (10250), metrics, ssh / Ansible
+		//    thinkpad ต้องถึง AWS subnet ผ่าน router (SkyPilot ssh ไป EC2) จึงให้ "*" ไม่ใช่แค่ worker
+		{"action": "accept", "src": ["tag:vlab-server"], "dst": ["*:*"]},
+
+		// 2. worker → server: K3s API / supervisor (6443) และหน้าเว็บ + backend ที่นักศึกษาใช้
+		{"action": "accept", "src": ["tag:vlab-worker"], "proto": "tcp",
+		 "dst": ["tag:vlab-server:6443,8000,5173,80,443"]},
+
+		// 3. flannel VXLAN ระหว่างทุก node ใน cluster (pod ↔ pod ข้ามเครื่อง)
+		//    ต้องรวม server ด้วย เพราะ coredns / traefik / metrics-server รันบน master
+		//    ไม่เปิด 10250 ระหว่าง worker: มีแต่ master ที่เรียก kubelet (ครอบด้วยข้อ 1 แล้ว)
+		{"action": "accept", "src": ["tag:vlab-worker"], "proto": "udp",
+		 "dst": ["tag:vlab-worker:8472", "tag:vlab-server:8472"]},
+
+		// 4. worker pull image จาก registry (ไม่มีข้อนี้ pod ขึ้น ErrImagePull)
+		{"action": "accept", "src": ["tag:vlab-worker"], "proto": "tcp",
+		 "dst": ["tag:vlab-registry:5001"]},
+
+		// พอร์ต lab (8080 / 5173 / 8443 / NodePort ฯลฯ) ระหว่าง worker ไม่มีข้อไหนเปิด = ปิด
+	],
+
+	// Tailscale SSH: เก็บตามค่าเริ่มต้นของ tailnet เดิม (คนในทีมเข้าเครื่องของตัวเองแบบ check mode)
+	// ไม่เกี่ยวกับการกันเครื่องแลป เพราะเครื่องที่ติด tag ไม่นับเป็น autogroup:self
+	"ssh": [
+		{
+			"action": "check",
+			"src":    ["autogroup:member"],
+			"dst":    ["autogroup:self"],
+			"users":  ["autogroup:nonroot", "root"],
+		},
+	],
+
+	// Tailscale รัน tests ทุกครั้งที่ validate / save ถ้าไม่ผ่านจะไม่ยอม save
+	"tests": [
+		{
+			"src": "tag:vlab-worker",
+			"proto": "tcp",
+			"accept": ["tag:vlab-server:6443", "tag:vlab-server:8000", "tag:vlab-registry:5001"],
+			// เปิด IDE / ssh / kubelet ของเครื่องข้าง ๆ ไม่ได้ และเข้าพอร์ตอื่นของ server ไม่ได้
+			"deny": ["tag:vlab-worker:8080", "tag:vlab-worker:8443", "tag:vlab-worker:22",
+			         "tag:vlab-worker:10250", "tag:vlab-worker:30080", "tag:vlab-server:22",
+			         "tag:vlab-server:8080", "tag:vlab-registry:22"],
+		},
+		{
+			"src": "tag:vlab-worker",
+			"proto": "udp",
+			"accept": ["tag:vlab-worker:8472", "tag:vlab-server:8472"],
+		},
+		{
+			"src": "tag:vlab-server",
+			"proto": "tcp",
+			"accept": ["tag:vlab-worker:10250", "tag:vlab-worker:22", "tag:vlab-worker:8080"],
+		},
+	],
+}

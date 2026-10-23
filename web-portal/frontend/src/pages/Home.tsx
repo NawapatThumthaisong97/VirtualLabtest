@@ -5,7 +5,7 @@
  * then two list cards whose top third overlaps the hero.
  * The navbar comes from RootLayout, so it is not repeated here.
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
@@ -75,15 +75,8 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
   const [tab, setTab] = useState('service');
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
-  const { user: currentUser, isAuthenticated, isLoading } = useAuth();
-  // 🔧 DEV MODE: Disable auth check during development
-  const ENABLE_AUTH_CHECK = false;
-
-  useEffect(() => {
-    if (ENABLE_AUTH_CHECK && !isLoading && !isAuthenticated) {
-      navigate('/login', { replace: true });
-    }
-  }, [isLoading, isAuthenticated, navigate]);
+  // คนที่ login (cookie) — ไม่ login ProtectedRoute เด้งไปหน้า /login ให้แล้ว
+  const { user: currentUser } = useAuth();
 
   const { data: announcements } = useQuery({
     queryKey: ['home-announcements'],

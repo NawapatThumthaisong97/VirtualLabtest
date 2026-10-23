@@ -6,6 +6,9 @@
       - skypilot_domain is defined
       - cloudflare_tunnel_token is defined
       - skypilot_chart_version is defined
+      - skypilot_admin_password is defined
+      - skypilot_aws_access_key_id is defined
+      - skypilot_aws_secret_access_key is defined
     fail_msg: "Missing required variables. Please check group_vars/all.yml"
     success_msg: "All required variables are defined"
 
@@ -26,11 +29,14 @@
   ansible.builtin.shell: |
     k3s kubectl create namespace skypilot-ingress --dry-run=client -o yaml | k3s kubectl apply -f -
 
+# ล็อกเวอร์ชันตามที่ลงอยู่จริง (2026-08-09) ไม่ล็อก = รัน playbook เมื่อไหร่ได้ chart ล่าสุด
+# ทางเข้า dashboard (Cloudflare → nginx) อาจเปลี่ยนโดยไม่ตั้งใจ
 - name: Install Nginx Ingress Controller via Helm
   ansible.builtin.shell: |
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
     helm repo update
     helm upgrade --install skypilot-ingress ingress-nginx/ingress-nginx \
+      --version {{ skypilot_ingress_nginx_chart_version | default('4.15.1') }} \
       --namespace skypilot-ingress \
       --set controller.service.type=ClusterIP \
       --set controller.service.name=nginx-controller \
@@ -46,6 +52,8 @@
 # Idempotent by default: ของเดิมลบ namespace ทิ้งแบบไม่มีเงื่อนไขทุกครั้งที่รัน playbook ทำให้
 # state ของ API server (cluster records/job history) หายทุกรอบ แม้รันซ้ำกับ deployment ที่ใช้งาน
 # จริงอยู่ก็ตาม - ตอนนี้ลบเฉพาะตอนสั่ง `-e skypilot_reset=true` เท่านั้น ปกติจะข้ามไปเลย
+# ⚠️ reset ลบ PVC ด้วย = user / service account token (ของ backend) / config หายหมด
+#    ต้องสร้าง token ใหม่จาก dashboard แล้วใส่ skypilot_backend_token ใน group_vars ใหม่
 - name: Delete existing SkyPilot namespace (only when skypilot_reset=true)
   ansible.builtin.shell: |
     k3s kubectl delete namespace skypilot --ignore-not-found=true --wait=true --timeout=120s
@@ -73,6 +81,56 @@
   ansible.builtin.shell: |
     k3s kubectl create namespace skypilot --dry-run=client -o yaml | k3s kubectl apply -f -
 
+# SkyPilot กลางสร้าง pod lab ใน ns ของตัวเอง (skypilot) ไม่ใช่ default
+# NetworkPolicy ใน default (role k3s-server) จึงไม่คลุม ต้อง apply ที่นี่อีกชุด
+# เลือก label vlab/lab=true เท่านั้น pod API server ไม่โดน
+- name: Apply lab isolation NetworkPolicy (skypilot namespace)
+  ansible.builtin.shell: |
+    cat <<'YAML' | k3s kubectl apply -f -
+    {{ lookup('file', playbook_dir + '/../k8s/lab-isolation-networkpolicy.yaml') | from_yaml | combine({'metadata': {'namespace': 'skypilot'}}, recursive=true) | to_nice_yaml(indent=2) }}
+    YAML
+  register: lab_np_skypilot
+  changed_when: "'unchanged' not in lab_np_skypilot.stdout"
+
+# รหัส admin ของ dashboard (basic auth ใน API server) ใช้ตอนสร้าง user ครั้งแรกเท่านั้น
+# เปลี่ยนรหัสทีหลังทำใน dashboard (เก็บใน PVC) ไม่ต้องแก้ secret นี้
+- name: Check SkyPilot admin secret
+  ansible.builtin.command: k3s kubectl get secret skypilot-initial-basic-auth -n skypilot
+  register: skypilot_admin_secret
+  failed_when: false
+  changed_when: false
+
+- name: Create SkyPilot admin secret (htpasswd apr1)
+  ansible.builtin.shell: |
+    set -o pipefail
+    printf 'admin:%s' "$(openssl passwd -apr1 "$SKYPILOT_ADMIN_PASSWORD")" | \
+      k3s kubectl create secret generic skypilot-initial-basic-auth -n skypilot --from-file=auth=/dev/stdin
+  args:
+    executable: /bin/bash
+  environment:
+    SKYPILOT_ADMIN_PASSWORD: "{{ skypilot_admin_password }}"
+  no_log: true
+  when: skypilot_admin_secret.rc != 0
+
+# AWS credential ของ IAM user Skypilot-IAM (ไม่ใช่ root) ให้ server กลาง launch lab บน EC2
+# helm อ่านจาก secret นี้ (awsCredentials.enabled ข้างล่าง) ถ้าไม่มี pod ของ server ขึ้นไม่ได้
+# apply ทับทุกรอบ เปลี่ยน key ใน group_vars แล้วรันใหม่ได้เลย (ต้อง restart pod ให้อ่านค่าใหม่)
+- name: Create AWS credentials secret (Skypilot-IAM)
+  ansible.builtin.shell: |
+    set -o pipefail
+    k3s kubectl create secret generic aws-credentials -n skypilot \
+      --from-literal=aws_access_key_id="$AWS_ACCESS_KEY_ID" \
+      --from-literal=aws_secret_access_key="$AWS_SECRET_ACCESS_KEY" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ skypilot_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ skypilot_aws_secret_access_key }}"
+  register: aws_secret
+  changed_when: "'unchanged' not in aws_secret.stdout"
+  no_log: true
+
 # ติดตั้ง SkyPilot API Server ผ่าน Helm
 - name: Add SkyPilot Helm repo
   ansible.builtin.shell: |
@@ -86,34 +144,72 @@
     content: |
       # API Service configuration
       apiService:
-        # Resources for SkyPilot API Server (1.5 CPU, 1.5Gi RAM เพื่อให้พอดีกับ node)
+        # Resources for SkyPilot API Server
+        # memory: เดิม limit 2Gi → container ชนเพดานตลอด (memory.events max หลายร้อยครั้ง) ช้าจน backend
+        # ได้ "Could not connect" และโดน OOMKilled 3 ครั้งใน 1 วัน (2026-10-19) เพราะ server แยก process
+        # ต่อ request ตัวละ 150–290MB ระหว่าง launch — ขยายเป็น 2Gi / 4Gi (master มี RAM 7G)
+        # requests ใช้เป็น SKYPILOT_POD_MEMORY_BYTES_LIMIT ให้ SkyPilot คำนวณจำนวน worker ด้วย
         resources:
           requests:
             cpu: "1500m"
-            memory: "1536Mi"
+            memory: "2Gi"
           limits:
             cpu: "2000m"
-            memory: "2Gi"
+            memory: "4Gi"
         
-        # Upgrade strategy
+        # Upgrade strategy (Recreate จำเป็นเมื่อ storage เป็น ReadWriteOnce)
         upgradeStrategy: Recreate
-        
+
         # Replicas
         replicas: 1
-      
+
+        # ปักไว้ที่ master — PVC ของ local-path ผูกกับดิสก์ของ node ที่ pod ลงครั้งแรก
+        # ถ้าไม่ปักจะไปลง worker (เช่น thinkpad) แล้ว state ไปอยู่บนเครื่องนั้น
+        nodeSelector:
+          kubernetes.io/hostname: {{ ansible_hostname | lower }}
+
+        # basic auth ใน API server (มี user / RBAC / service account token)
+        # admin สร้างจาก secret skypilot-initial-basic-auth (task ข้างบน)
+        enableUserManagement: true
+        initialBasicAuthSecret: skypilot-initial-basic-auth
+
+        # config ของ SkyPilot ฝั่ง server — ใช้ตอน PVC ยังไม่มี config เท่านั้น
+        # (ถ้ามีแล้วจะเอาของ PVC แก้ทีหลังต้องเขียน ~/.sky/config.yaml ใน pod แล้ว restart)
+        # ports: podip = เปิดพอร์ต lab ด้วย pod IP แทน LoadBalancer (servicelb รับบนทุกเครื่อง
+        # → เครื่องข้าง ๆ เปิด lab ได้ และ NetworkPolicy ตัด servicelb ทิ้ง) ดู skypilot/sky-config.yaml
+        # aws: launch lab บน EC2 ใน private subnet ของ VPC vlab-ecr-pull (SSH ผ่าน Tailscale router
+        # → master ต้อง accept-routes ดู role tailscale) use_ssm: false ไม่งั้น use_internal_ips
+        # ที่ไม่มี ssh_proxy_command ทำให้ SkyPilot 0.12.3 หันไปใช้ SSM ซึ่งใช้ใน VPC นี้ไม่ได้
+        config: |
+          kubernetes:
+            ports: podip
+          aws:
+            vpc_names: vlab-ecr-pull
+            use_internal_ips: true
+            use_ssm: false
+            security_group_name: vlab-lab-instances
+            remote_identity: vlab-lab-ecr-pull
+
+      # AWS credential (IAM user Skypilot-IAM) จาก secret aws-credentials ใน ns skypilot
+      # secret สร้างใน task "Create AWS credentials secret" ถ้าไม่ตั้งค่านี้ helm upgrade จะถอด credential ออก
+      # แล้ว lab ที่ run_target = AWS launch ไม่ได้
+      awsCredentials:
+        enabled: true
+
       # Service configuration
       service:
         type: ClusterIP
         port: 80
-      
+
       # ปิด built-in ingress (เราจะสร้างเอง)
       ingress:
         enabled: false
-      
-      # ปิด storage (เพื่อลด resource usage)
+
+      # เปิด storage: เก็บ user, service account token (ของ backend), config, cluster records
+      # ถ้าปิด restart pod เมื่อไหร่ token ของ backend หาย → backend launch ไม่ได้
       storage:
-        enabled: false
-      
+        enabled: true
+
       # ปิด ingress-nginx subchart สนิท (เราติดตั้งแยกแล้ว)
       ingress-nginx:
         enabled: false
@@ -126,7 +222,6 @@
       --namespace skypilot \
       --values /tmp/skypilot-values.yaml \
       --set ingress-nginx.enabled=false \
-      --set storage.enabled=false \
       --set apiService.skipResourceCheck=true \
       --wait \
       --timeout 10m
@@ -188,6 +283,16 @@
 
 - name: Apply SkyPilot Ingress
   ansible.builtin.command: k3s kubectl apply -f /tmp/skypilot-ingress.yaml
+
+# ทางเข้าของ backend ผ่าน Tailscale (NodePort 30880) แทน Cloudflare ที่ช้า / สะดุดจน sky SDK
+# (health check timeout 2.5s) launch พัง เหตุผลเต็มอยู่ในไฟล์ manifest
+- name: Apply SkyPilot API NodePort for the backend (Tailscale)
+  ansible.builtin.shell: |
+    cat <<'YAML' | k3s kubectl apply -f -
+    {{ lookup('file', playbook_dir + '/../k8s/skypilot-api-tailnet-service.yaml') }}
+    YAML
+  register: skypilot_tailnet_svc
+  changed_when: "'unchanged' not in skypilot_tailnet_svc.stdout"
 
 - name: Wait for Ingress to be created
   ansible.builtin.command: |
@@ -256,9 +361,13 @@
             containers:
             - name: cloudflared
               image: cloudflare/cloudflared:latest
+              # --protocol http2: เน็ตบ้านบล็อก UDP 7844 (QUIC) cloudflared รุ่นใหม่ไม่ถอยไป http2 เอง
+              # วน retry QUIC ไม่จบ → dashboard ตอบ 530 (เจอตอนลง master ใหม่ 2026-10-20)
               args:
               - tunnel
               - --no-autoupdate
+              - --protocol
+              - http2
               - run
               - --token
               - $(TUNNEL_TOKEN)

@@ -13,7 +13,7 @@ import type { InternalAxiosRequestConfig } from 'axios';
 // to the browser as a plain URL (<img>, <iframe>, pdf.js) instead of axios
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
-// Auto-redirect to login on 401
+// 401 หลัง refresh แล้ว (retry ไปแล้วยังไม่ผ่าน) → เด้งไปหน้า login (ดู response interceptor ข้างล่าง)
 const ENABLE_AUTO_REDIRECT = true;
 
 // Create axios instance

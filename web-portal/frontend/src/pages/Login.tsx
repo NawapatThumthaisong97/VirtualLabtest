@@ -203,6 +203,9 @@ export default function LoginPage() {
   useEffect(() => {
     const page = pageRef.current;
     layoutQuoteLines();
+    // เริ่ม animation (art node / เส้น / quote อยู่ใต้ .play ใน Login.module.css) หลังเฟรมแรก
+    // ไม่ใส่ = ทุกอย่างโผล่ทันที (หายตอน merge main — effect นี้ถูกเขียนใหม่ให้มี ResizeObserver)
+    const playRaf = requestAnimationFrame(() => page?.classList.add(styles.play));
 
     let raf = 0;
     const observer =
@@ -218,6 +221,7 @@ export default function LoginPage() {
     // the quote uses a webfont — its box changes once the serif loads
     document.fonts?.ready.then(layoutQuoteLines);
     return () => {
+      cancelAnimationFrame(playRaf);
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', layoutQuoteLines);
       if (observer) observer.disconnect();

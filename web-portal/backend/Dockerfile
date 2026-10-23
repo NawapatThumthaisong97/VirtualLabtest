@@ -47,6 +47,11 @@ COPY app/ ./app/
 # เก็บ PDF ต้นฉบับไว้ ทั้งหมดจำเป็นตอนตั้งเครื่องใหม่
 COPY script/ ./script/
 
+# init_db.py รัน Alembic (alembic upgrade head) ก่อน create_all — ขาดสองตัวนี้ init_db พัง
+# "No config file '/app/alembic.ini' found"
+COPY alembic.ini ./
+COPY migrations/ ./migrations/
+
 # storage เป็นที่เก็บไฟล์เอกสารแลป (STORAGE_ROOT ใน settings)
 # สร้างไว้เผื่อกรณีที่ยังไม่มี volume mount ทับ
 RUN mkdir -p /app/storage

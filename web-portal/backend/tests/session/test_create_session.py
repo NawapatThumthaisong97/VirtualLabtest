@@ -45,21 +45,22 @@ class TestInputValidation:
 class TestLaunchSuccess:
     """Launch success"""
 
-    def test_k3s(self, svc, db, world, fake_sky):
-        """K3s lab: PENDING -> RUNNING with job id, endpoints, expires_at"""
+    def test_k3s_lab_from_outside(self, svc, db, world, fake_sky):
+        """Lab set to KUBERNETES, Start from outside: goes to EC2 now (one rule for every lab), PENDING -> RUNNING"""
         result = svc.create_session(world.user.id, world.k8s_lab.id)
 
         [s] = sessions_of(db, world.user)
         assert s.status == SessionStatus.RUNNING
         assert s.sky_job_id == 1
         assert s.endpoints == {"8080": "http://10.0.0.5:8080"}
-        assert s.is_cloud is False
+        assert s.is_cloud is True
         assert s.end_reason is None
         assert s.expires_at is not None
         assert result["expires_at"] == s.expires_at
+        assert result["run_target"] == "aws"
         assert result["cluster_name"].startswith("music-lab-")
         [(cluster, task)] = fake_sky.launched
-        assert "ECR_TOKEN" not in (task.secrets or {})  # K3s ไม่ต้องขอ ECR token
+        assert task.secrets["ECR_TOKEN"].get_secret_value() == "fake-ecr-token"
 
     def test_expires_at_uses_lifespan(self, svc, db, world, fake_sky):
         """expires_at is about now + lifespan_minutes"""
@@ -144,6 +145,19 @@ class TestDuplicateStart:
         db.refresh(old)
         assert (old.status, old.end_reason) == (SessionStatus.STOPPED, reason)
         assert len(fake_sky.launched) == 1
+
+    def test_regression_status_check_fails_keeps_old_session(self, svc, db, world, fake_sky, add_session):
+        """Regression: SkyPilot unreachable during the check: error, old session untouched, no new launch"""
+        # เดิมตั้ง session เก่าเป็น STOPPED แล้ว launch ต่อ → cluster เก่าไม่ถูก down ค้างจน autostop
+        old = add_session(SessionStatus.RUNNING, cluster="music-lab-unknown")
+        fake_sky.status_error = ConnectionError("Could not connect to SkyPilot API server")
+
+        with pytest.raises(ClusterOperationError, match="try again"):
+            svc.create_session(world.user.id, world.k8s_lab.id)
+
+        db.refresh(old)
+        assert (old.status, old.ended_at) == (SessionStatus.RUNNING, None)
+        assert fake_sky.launched == []
 
 
 class TestLaunchFailure:

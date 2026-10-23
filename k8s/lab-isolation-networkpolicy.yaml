@@ -1,0 +1,28 @@
+# ปิดขาเข้าของ pod lab ทุกตัว (label vlab/lab=true) — ใช้คู่กับ LAB_ISOLATION_ENABLED ใน backend
+#
+# ปัญหาที่กัน: ทุกเครื่องใน cluster ไปถึง pod IP (10.42.x.x) ของเครื่องอื่นได้ผ่าน flannel
+# ซึ่ง Tailscale ACL กันไม่ได้ เพราะห่ออยู่ใน VXLAN 8472/udp ที่ cluster ต้องใช้
+# เครื่องข้าง ๆ จึงเปิด IDE ของเราทาง pod IP ได้ แม้ hostPort จะผูกกับ 127.0.0.1 แล้ว
+#
+# ingress: [] = ไม่อนุญาตใครเลย แต่ network policy ของ k3s (kube-router) ยังปล่อย traffic ที่มาจาก
+# เครื่องตัวเอง (source เป็น address ของ node นั้น) เข้า pod บนเครื่องนั้นได้ จึงเหลือเฉพาะ
+# - localhost:<hostPort> บนเครื่องนั้น (portmap SNAT เป็น IP ของ cni0 ซึ่งเป็น address ของเครื่อง)
+# - เครื่องนั้นเรียก pod IP ของตัวเองตรง ๆ
+# ข้อนี้ต้องยืนยันด้วยการทดลอง (docs/DaemonSetsExperiment.md หัวข้อ Exp4)
+#
+# egress เปิดตามเดิม (lab อาจต้อง pip / npm / git) ถ้าจะปิดค่อยเพิ่มทีหลัง
+#
+# ใช้: kubectl apply -f k8s/lab-isolation-networkpolicy.yaml
+# ถอด: kubectl delete -f k8s/lab-isolation-networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vlab-lab-isolation
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      vlab/lab: "true"
+  policyTypes:
+    - Ingress
+  ingress: []

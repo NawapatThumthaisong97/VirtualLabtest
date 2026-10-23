@@ -22,6 +22,20 @@ skypilot_domain: <SKYPILOT_DOMAIN>   # e.g. skypilot.yourdomain.com
 
 skypilot_chart_version: "<SKYPILOT_CHART_VERSION>"   # ณ ตอนนี้แนะนําให้ลง 0.12.3+post.1 เราใช้ตัวนี้อยู่
 
+# รหัส user admin ของ dashboard (https://<skypilot_domain>/dashboard) ใช้สร้าง admin ครั้งแรกเท่านั้น
+# เปลี่ยนรหัสทีหลังทำใน dashboard ได้เลย สร้างรหัสด้วย: openssl rand -base64 18
+skypilot_admin_password: <SKYPILOT_ADMIN_PASSWORD>
+
+# token ของ backend (service account) — รัน skypilot-node เสร็จแล้วเข้า dashboard ด้วย admin
+# → Users → Service Accounts → สร้าง token ชื่อ vlab-backend (แสดงครั้งเดียว) แล้วใส่ที่นี่ ก่อนรัน role web-service
+# ถ้า reset namespace skypilot (skypilot_reset=true) token เดิมหาย ต้องสร้างใหม่
+skypilot_backend_token: <SKYPILOT_BACKEND_TOKEN>
+
+# key ของ IAM user Skypilot-IAM (ห้ามใช้ root) — role skypilot-node สร้าง secret aws-credentials ให้ server กลาง
+# launch EC2, role web-service ใส่ให้ backend ขอ ECR token (lab AWS / AUTO จากข้างนอก)
+skypilot_aws_access_key_id: <SKYPILOT_IAM_ACCESS_KEY_ID>
+skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
+
 # --- Optional: skypilot-node role ---
 # ปกติ role ไม่ลบ namespace skypilot เดิมทิ้ง (idempotent) จะรีเซ็ตแบบลบทิ้งแล้วลงใหม่ได้ก็ต่อเมื่อ
 # รันด้วย: ansible-playbook site.yml --tags skypilot-node -e skypilot_reset=true
@@ -31,3 +45,6 @@ skypilot_chart_version: "<SKYPILOT_CHART_VERSION>"   # ณ ตอนนี้แ
 #เวลารันให้เรียกคําสั่ง ansible-playbook -i inventory.yml site.yml -K
 #หากต้องการดูว่าสิ่งที่เราต้องทํามีอะไรบ้าง ansible-playbook -i inventory.yml site.yml --list-tasks
 #หากต้องการดูว่าเราพร้อมรันยังให้ดู ansible-playbook -i inventory.yml site.yml --check -K
+# --- web-service (backend) — ยาว >= 32 ตัว สร้างด้วย python3 -c 'import secrets;print(secrets.token_urlsafe(48))'
+vault_backend_secret_key: <BACKEND_SECRET_KEY>
+vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>

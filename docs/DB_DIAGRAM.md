@@ -227,3 +227,10 @@ PYTHONIOENCODING=utf-8 python script/run_seed.py
 
 > `PYTHONIOENCODING=utf-8` จำเป็นบน Windows — สคริปต์ print emoji แล้ว console
 > codepage ไทย (cp874) encode ไม่ได้ จะตายตั้งแต่บรรทัดแรกก่อนสร้างตารางด้วยซ้ำ
+
+### 2026-10-20: `runtarget` เพิ่มค่า `AUTO` (docs/RUN_TARGET_AUTO.md)
+```bash
+docker exec virtual_lab_db psql -U postgres -d virtual_lab -c "ALTER TYPE runtarget ADD VALUE IF NOT EXISTS 'AUTO';"
+```
+ไม่กระทบ row เดิม ใช้ได้ทั้ง `labs.run_target` และ `class_slots.run_target`
+ถอย: Postgres ลบค่าออกจาก enum ไม่ได้ ให้ตั้ง lab ที่เป็น AUTO กลับเป็นค่าเดิม (`UPDATE labs SET run_target = 'KUBERNETES' WHERE run_target = 'AUTO'`)

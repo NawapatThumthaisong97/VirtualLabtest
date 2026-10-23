@@ -2,11 +2,12 @@
 Application Settings
 Load environment variables and configuration
 """
+import os
 from datetime import datetime
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from typing import Optional
+from typing import Literal, Optional
 
 
 class PrewarmTarget(BaseModel):
@@ -118,9 +119,32 @@ class Settings(BaseSettings):
     # ปิดไว้เป็นค่าเริ่มต้นแยกจาก PREWARM_ENABLED เพราะกิน CPU / RAM จริงทุกเครื่องตลอดคาบ
     # scheduler สร้าง / ลบ DaemonSet ให้เมื่อเปิดทั้ง PREWARM_ENABLED และตัวนี้ ส่วน launch ใช้ตัวนี้ตัวเดียว
     WARM_POD_ENABLED: bool = False
+    # กด Start ตอนที่ warm pod ตัวใหม่ยังไม่ Ready (DaemonSet เพิ่งสร้างแทนตัวที่คนก่อนปิด) รอตัวนั้นกี่วินาที
+    # ไม่รอ = ไปสร้าง pod อีกตัวชนกับ warm pod ที่จองที่ไว้ → เครื่องเต็ม (docs/LAB_DIRECT_POD.md)
+    WARM_POD_WAIT_SECONDS: int = 60
+
+    # กดจากเครื่องแลปแต่ไม่มี warm pod: "pod" = สร้าง pod ตรงด้วย k8s API บนเครื่องนั้น (ไม่ต้องลงของ ไม่กี่วินาที)
+    # "skypilot" = ทางเดิม SkyPilot in-cluster pin เครื่องนั้น (ลง apt / runtime / Ray ทุกครั้ง 3–5 นาที) เก็บไว้เป็นทางสำรอง
+    LAB_MACHINE_LAUNCH: Literal["pod", "skypilot"] = "pod"
+    # รอ pod ตรง Ready สูงสุดกี่วินาที (รวม pull image ตอนไม่มีคาบ ~700 MB จาก registry ในบ้าน)
+    DIRECT_POD_READY_TIMEOUT: int = 180
+
+    # กันเครื่องอื่นเปิด lab ของเรา (นักศึกษาเครื่องข้าง ๆ เปิด IDE ผ่าน Tailscale IP ได้)
+    # - warm pod: hostPort ผูกกับ 127.0.0.1 → เปิดได้แค่ http://localhost:<port> บนเครื่องนั้น
+    # - launch ผ่าน SkyPilot จากเครื่องแลป: บังคับ pod ลงเครื่องที่กด Start (nodeSelector)
+    # - pod ของ lab ทั้งสองแบบติด label vlab/lab=true ให้ NetworkPolicy vlab-lab-isolation ปิดขาเข้า
+    #   (k8s/lab-isolation-networkpolicy.yaml) กันการเข้าทาง pod IP จากเครื่องอื่นผ่าน flannel
+    # ปิดไว้เป็นค่าเริ่มต้นจนกว่าจะทดลองครบ (docs/DaemonSetsExperiment.md หัวข้อ Exp4)
+    LAB_ISOLATION_ENABLED: bool = False
     # กำหนดเวลาเองเพิ่มจาก class_slots เป็น JSON ใน .env (ไว้ทดลอง) เวลาต้องมี timezone เช่น
     # PREWARM_TARGETS=[{"image":"100.127.74.48:5001/vlab/hello:v1","start_at":"2026-10-17T14:00:00+07:00","end_at":"2026-10-17T15:00:00+07:00"}]
     PREWARM_TARGETS: list[PrewarmTarget] = []
+
+    # SkyPilot API server กลาง (helm บน master เช่น https://skypilot.bell-lab.space) + token ของ service account
+    # ไม่ตั้ง = ใช้ API server ในเครื่อง (127.0.0.1:46580) เหมือนเดิม
+    # sky SDK อ่านค่าจาก os.environ เท่านั้น ดู export_skypilot_env ข้างล่าง
+    SKYPILOT_API_SERVER_ENDPOINT: Optional[str] = None
+    SKYPILOT_SERVICE_ACCOUNT_TOKEN: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -160,5 +184,22 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT.lower() == "development"
 
 
+SKYPILOT_ENV_KEYS = ("SKYPILOT_API_SERVER_ENDPOINT", "SKYPILOT_SERVICE_ACCOUNT_TOKEN")
+
+
+def export_skypilot_env(s: Settings) -> None:
+    """ส่งค่า SkyPilot จาก .env ไปที่ os.environ ให้ sky SDK เห็น
+
+    pydantic อ่าน .env เข้า settings แต่ไม่ export ออก process env และ sky SDK cache endpoint
+    ไว้ตั้งแต่เรียกครั้งแรก จึงต้องทำตอนโหลด settings (ก่อนโค้ดไหนเรียก sky)
+    ค่าที่อยู่ใน environ แล้วชนะ (เช่น docker compose env_file หรือ export เองใน shell)
+    """
+    for key in SKYPILOT_ENV_KEYS:
+        value = getattr(s, key)
+        if value:
+            os.environ.setdefault(key, value)
+
+
 # Global settings instance
 settings = Settings()
+export_skypilot_env(settings)

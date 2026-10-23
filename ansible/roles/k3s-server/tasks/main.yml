@@ -24,11 +24,48 @@
     dest: /etc/rancher/k3s/registries.yaml
   register: registries_yaml
 
+# CoreDNS (และ pod ที่ใช้ dnsPolicy Default) ถาม DNS ต่อตาม resolv.conf ของ node ซึ่ง systemd-resolved
+# ใส่ DNS ของ router ทั้ง IPv4 และ IPv6 (fd17:…) — CoreDNS สุ่มเลือก ได้ตัว IPv6 ทีไร pod ไม่มี IPv6
+# → "network is unreachable" → apt / curl ใน pod ได้ "Temporary failure resolving" เป็นพัก ๆ
+# (lab K8s ผ่าน SkyPilot พัง 3 ครั้งใน 1 คืน 2026-10-20) ต่างจาก coredns-custom ที่กันแค่คำตอบ AAAA
+# → ให้ k3s ใช้ resolv.conf ที่มีแค่ nameserver IPv4 (ดึงจากของ systemd ไม่ฮาร์ดโค้ด IP ของแต่ละที่)
+- name: Collect IPv4 upstream DNS servers of this node
+  ansible.builtin.shell: |
+    set -o pipefail
+    f=/run/systemd/resolve/resolv.conf
+    [ -f "$f" ] || f=/etc/resolv.conf
+    awk '$1 == "nameserver" && $2 ~ /^[0-9.]+$/ && $2 !~ /^127\./ {print $2}' "$f"
+  args:
+    executable: /bin/bash
+  register: ipv4_dns
+  changed_when: false
+  check_mode: false   # อ่านอย่างเดียว ให้ --check เห็นค่าจริง
+
+- name: Write IPv4-only resolv.conf for k3s
+  ansible.builtin.copy:
+    content: |
+      # Ansible (role k3s-server / k3s-agent) — nameserver IPv4 เท่านั้น (pod ใน cluster ไม่มี IPv6) ดู role k3s
+      {% for ns in (ipv4_dns.stdout_lines or ['1.1.1.1', '8.8.8.8']) %}
+      nameserver {{ ns }}
+      {% endfor %}
+    dest: /etc/rancher/k3s/resolv.conf
+    mode: "0644"
+  register: k3s_resolv
+
+- name: Point k3s at the IPv4-only resolv.conf
+  ansible.builtin.copy:
+    content: |
+      # Ansible (role k3s-server / k3s-agent) — ดู task "Write IPv4-only resolv.conf for k3s"
+      resolv-conf: /etc/rancher/k3s/resolv.conf
+    dest: /etc/rancher/k3s/config.yaml
+    mode: "0644"
+  register: k3s_config
+
 - name: Restart k3s to apply registries.yaml (ถ้า config เปลี่ยนและ k3s ติดตั้งไปแล้ว)
   ansible.builtin.systemd:
     name: k3s
     state: restarted
-  when: registries_yaml.changed
+  when: registries_yaml.changed or k3s_resolv.changed or k3s_config.changed
   ignore_errors: true # ครั้งแรกสุด service ยังไม่มี ก็ข้ามไป (server จะอ่านไฟล์นี้ตอนติดตั้งเองอยู่แล้ว)
 
 - name: Install K3s server
@@ -66,3 +103,38 @@
     src: /var/lib/rancher/k3s/server/node-token
     dest: ./artifacts/node-token
     flat: yes
+# pod ใน cluster ไม่มี IPv6 (flannel IPv4 อย่างเดียว) แต่ DNS ตอบ AAAA ของปลายทางมาด้วย
+# uv ที่ SkyPilot ใช้ลง runtime ใน pod lab บางครั้งเลือก IPv6 แล้วได้ "Network is unreachable"
+# → runtime-setup failed → launch พัง (ดู docs/SKYPILOT_CENTRAL_SERVER.md) ให้ CoreDNS ตอบ AAAA ว่าง
+# k3s import ไฟล์ *.override จาก ConfigMap coredns-custom เข้า Corefile ให้เอง
+- name: Make CoreDNS return empty AAAA answers (cluster has no IPv6 egress)
+  ansible.builtin.shell: |
+    cat <<'YAML' | k3s kubectl apply -f -
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: coredns-custom
+      namespace: kube-system
+    data:
+      no-aaaa.override: |
+        template IN AAAA . {
+          rcode NOERROR
+        }
+    YAML
+  register: coredns_custom
+  changed_when: "'unchanged' not in coredns_custom.stdout"
+
+# CoreDNS อ่าน resolv.conf (upstream) ตอนสร้าง pod เท่านั้น เปลี่ยน resolv-conf ของ k3s แล้วต้อง restart ด้วย
+- name: Restart CoreDNS to load coredns-custom / new upstream resolv.conf
+  ansible.builtin.command: k3s kubectl rollout restart deploy/coredns -n kube-system
+  when: coredns_custom.changed or k3s_resolv.changed or k3s_config.changed
+
+# ปิดขาเข้าของ pod lab (label vlab/lab=true) ใน ns default — warm pod + SkyPilot ในเครื่อง
+# ns skypilot (lab ที่ launch ผ่าน SkyPilot กลาง) apply ใน role skypilot-node หลังสร้าง namespace
+- name: Apply lab isolation NetworkPolicy (default namespace)
+  ansible.builtin.shell: |
+    cat <<'YAML' | k3s kubectl apply -f -
+    {{ lookup('file', playbook_dir + '/../k8s/lab-isolation-networkpolicy.yaml') | from_yaml | combine({'metadata': {'namespace': 'default'}}, recursive=true) | to_nice_yaml(indent=2) }}
+    YAML
+  register: lab_np_default
+  changed_when: "'unchanged' not in lab_np_default.stdout"
