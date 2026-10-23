@@ -197,10 +197,10 @@ GET  /admin/rooms/calendar?month=2026-11    ทุก slot ของเดือ
 | # | PR | ต้องมีของจริงอะไร |
 |---|---|---|
 | 1 | label ห้อง (ansible) + `class_slot_id` + `/admin/infra/map`, `/admin/rooms/usage` | master + worker อย่างน้อย 1 ตัว ติด label |
-| 2 | `health_checks` job + `/admin/system/status` + log `HEALTH_DOWN`, `NODE_NOT_READY` | master, worker, registry, SkyPilot API |
+| 2 | `health_checks` job + `/admin/system/status` (log `HEALTH_DOWN`, `NODE_NOT_READY` ย้ายไป PR 5) | master, worker, registry, SkyPilot API |
 | 3 | `usage_records` + `/admin/billing/*` + budget alert + `/admin/cloud/controls` | AWS credential, launch AWS 1 ครั้ง |
 | 4 | Cost Explorer reconcile | IAM `ce:GetCostAndUsage` |
-| 5 | log จาก k8s Events / session / SkyPilot + `/admin/logs*` | cluster จริง (ทำให้ pod OOM / pull fail ดู) |
+| 5 | log จาก k8s Events / session / SkyPilot / `health_checks` (`HEALTH_DOWN`, `NODE_NOT_READY`) + `/admin/logs*` | cluster จริง (ทำให้ pod OOM / pull fail ดู) |
 | 6 | booking + rooms + SMTP | Gmail App Password |
 | 7 | ลบ API เก่าของ PR #98 + พัก role Fluent Bit | — |
 

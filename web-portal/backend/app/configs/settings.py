@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
 
+    # หน้า admin การ์ด System status: ตรวจ backend / k8s / registry / SkyPilot / AWS ทุกกี่วินาที (0 = ปิด)
+    HEALTH_CHECK_INTERVAL_SECONDS: int = 300
+    # เก็บผลตรวจย้อนหลังกี่วัน (job ลบของเก่าทุกรอบ ตารางไม่บวม)
+    HEALTH_CHECK_RETENTION_DAYS: int = 7
+    # ตอบช้ากว่านี้ (ms) = degraded
+    HEALTH_CHECK_SLOW_MS: int = 2000
+
     # Pre-pull image ลงทุก worker ก่อนคาบ (DaemonSet) ปิดไว้เป็นค่าเริ่มต้น ต้องสั่งเปิดเองเท่านั้น
     # เพราะเครื่องในห้องแลปจริงยังไม่รู้ว่าจะเปิดเครื่องตอนไหน (boot อัตโนมัติ / Deep Freeze ล้างดิสก์)
     # ถ้า scheduler รันเองตลอดจะ pull ใส่เครื่องที่ไม่พร้อม หรือ pull ทิ้งเปล่า ๆ

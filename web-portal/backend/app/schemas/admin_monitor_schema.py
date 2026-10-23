@@ -63,3 +63,25 @@ class RoomUsageItem(CamelModel):
 
 class RoomUsageResponse(CamelModel):
     rooms: list[RoomUsageItem]
+
+
+ServiceHealth = Literal["ok", "degraded", "down"]
+
+
+class ServiceStatus(CamelModel):
+    """service 1 ตัวในการ์ด System status: ผลล่าสุด + แถบ 24 ชั่วโมง"""
+    key: str
+    name: str
+    version: Optional[str] = None
+    status: ServiceHealth
+    latency_ms: Optional[int] = None
+    detail: Optional[str] = Field(None, description="สาเหตุตอน degraded / down เช่น NotReady: worker-pete (worker)")
+    checked_at: datetime
+    hourly: list[Literal["ok", "degraded", "down", "nodata"]] = Field(
+        ..., description="24 ช่อง เก่า → ใหม่ ช่องละ 1 ชม. = status แย่สุดในชั่วโมงนั้น, nodata = ไม่ได้ตรวจ"
+    )
+
+
+class SystemStatusResponse(CamelModel):
+    checked_at: Optional[datetime] = Field(None, description="ตรวจล่าสุดเมื่อไหร่ (None = ยังไม่เคยตรวจ)")
+    services: list[ServiceStatus]

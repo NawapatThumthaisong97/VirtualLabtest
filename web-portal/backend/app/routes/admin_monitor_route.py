@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
 from app.middlewares.rbac import verify_permission
-from app.schemas.admin_monitor_schema import InfraMapResponse, RoomUsageResponse
+from app.schemas.admin_monitor_schema import InfraMapResponse, RoomUsageResponse, SystemStatusResponse
 from app.schemas.response import ApiResponse
 from app.services.admin_monitor_service import AdminMonitorService
+from app.services.health_service import get_system_status
 from app.services.kubernetes_service import get_kubernetes_service
 from app.utils.logger import logger
 
@@ -43,4 +44,14 @@ def get_rooms_usage(service: AdminMonitorService = Depends(get_admin_monitor_ser
         "success": True,
         "message": "Room usage retrieved successfully",
         "data": service.get_rooms_usage(),
+    }
+
+
+@router.get("/system/status", response_model=ApiResponse[SystemStatusResponse], response_model_by_alias=True)
+def get_status(db: Session = Depends(get_db)):
+    """สถานะ backend / k8s / registry / SkyPilot / AWS: ผลล่าสุด + แถบ 24 ชั่วโมง (จาก job ตรวจทุก 5 นาที)"""
+    return {
+        "success": True,
+        "message": "System status retrieved successfully",
+        "data": get_system_status(db),
     }
