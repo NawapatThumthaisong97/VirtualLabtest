@@ -2,8 +2,9 @@
 #
 # ต่างจาก docker-compose.yml (dev) ตรงที่:
 #   - รันครบทั้ง 3 service ไม่ใช่แค่ db
-#   - db ไม่ publish port ออกนอก container network
+#   - db publish แค่ 127.0.0.1 (ให้ backend ที่ใช้ host network ต่อได้) ไม่ออกนอกเครื่อง
 #   - ทุก port ผูกกับ BIND_IP (tailscale0) ไม่ใช่ 0.0.0.0
+#   - backend ใช้ host network — ต้องเห็น IP จริงของเครื่องที่กด Start (ตัดสินว่าเป็นเครื่องแลปไหม)
 #   - ค่า secret มาจาก .env ที่ Ansible render ไม่ใช่ hardcode
 #
 # ค่าใน .env ระดับนี้: BIND_IP, POSTGRES_*, VITE_API_URL (ดู .env.prod.example)
@@ -21,8 +22,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
 
-    # ไม่มี ports: — db เข้าถึงได้เฉพาะจาก container อื่นใน network เดียวกัน
+    # loopback เท่านั้น — backend (host network) ต่อผ่าน 127.0.0.1 ข้างนอกเครื่องเข้าไม่ได้
     # ถ้าต้อง debug จากข้างนอกใช้ `docker compose exec db psql` แทนการเปิด port
+    ports:
+      - "127.0.0.1:5432:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -58,11 +61,15 @@ services:
       # key ของ IAM user Skypilot-IAM (profile skypilot, AWS_PROFILE ใน .env) ใช้ขอ ECR token — Ansible render ให้
       - ./backend/aws-credentials:/root/.aws/credentials:ro
 
-    ports:
-      - "${BIND_IP}:8000:8000"
+    # host network: request จาก tailnet เข้า backend ตรง ไม่ผ่าน NAT ของ docker / Tailscale
+    # (ผ่าน bridge แล้ว Tailscale MASQUERADE packet ที่ forward จาก tailscale0 → backend เห็นทุกคนเป็น
+    # 172.18.0.1 ทุกการกด Start ไป AWS หมด — เจอ 2026-10-23 ดู docs/LAB_DIRECT_POD.md)
+    # ผูก uvicorn กับ BIND_IP เอง ไม่ใช่ 0.0.0.0 จะได้ไม่เปิดออก interface อื่นของเครื่อง
+    network_mode: host
+    command: ["uvicorn", "app.main:app", "--host", "${BIND_IP}", "--port", "8000"]
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://${BIND_IP}:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3

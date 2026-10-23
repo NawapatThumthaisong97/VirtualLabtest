@@ -235,6 +235,21 @@
   delay: 5
   until: db_probe.status in [200, 401, 403]
 
+# กฎ Start: เครื่องแลป → K8s, ที่อื่น → AWS ตัดสินจาก IP ของ connection ถ้ามี NAT คั่น (เช่น Tailscale
+# MASQUERADE ตอน backend อยู่หลัง docker bridge) backend เห็นทุกคนเป็น IP เดียว → ทุกการกด Start ไป AWS
+# ให้ worker ตัวแรกเรียก /v1/whoami แล้วต้องได้ IP ของตัวเองและนับเป็นเครื่องแลป ไม่งั้น deploy fail
+- name: Verify backend sees the real IP of a lab machine (no NAT in between)
+  ansible.builtin.uri:
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_api_port }}{{ webservice_api_prefix }}/v1/whoami"
+    return_content: true
+  delegate_to: "{{ groups['workers'][0] }}"
+  become: false
+  register: whoami
+  failed_when: >-
+    whoami.json.data.clientIp != hostvars[groups['workers'][0]]['ansible_host']
+    or whoami.json.data.labMachine is none
+  when: groups['workers'] | default([]) | length > 0
+
 # SkyPilot กลาง: backend ต้องคุยกับ server กลางได้ด้วย token (ผิด = 401, ไม่มี token = ไปไม่ถึง)
 # ต้องเห็น endpoint ของ server กลาง ไม่ใช่ "default local API server"
 - name: Verify backend reaches the central SkyPilot API server

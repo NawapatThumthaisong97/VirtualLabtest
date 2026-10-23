@@ -21,6 +21,7 @@ from app.schemas.session_schema import (
     SessionResponse,
 )
 from app.schemas.response import ApiResponse
+from app.services import session_service
 from app.services.session_service import SessionService
 from app.services.rbac_service import ResourceContextPolicy
 
@@ -146,3 +147,24 @@ def delete_session(
         "data": controller.delete_session(session_id),
     }
 
+
+
+@router.get("/v1/whoami", response_model=ApiResponse[dict])
+def whoami(http_request: Request):
+    """
+    backend เห็น IP ของเครื่องนี้เป็นอะไร และนับเป็นเครื่องแลปไหน (กฎ Start: เครื่องแลป → K8s, ที่อื่น → AWS)
+    - ไม่ต้อง login: ansible เรียกจาก worker หลัง deploy ถ้า clientIp ไม่ใช่ IP ของ worker = มี NAT คั่น
+      (ทุกการกด Start จะไป AWS หมด) deploy ต้อง fail
+    - ตอบแค่ข้อมูลของเครื่องที่ถามเอง
+    """
+    client_ip = http_request.client.host if http_request.client else None
+    try:
+        node = session_service.get_warm_pod_service().node_for_ip(client_ip)
+        lab_machine, error = (node[0] if node else None), None
+    except Exception as e:
+        lab_machine, error = None, f"cannot reach Kubernetes: {e}"
+    return {
+        "success": True,
+        "message": "Client identified",
+        "data": {"clientIp": client_ip, "labMachine": lab_machine, "error": error},
+    }
