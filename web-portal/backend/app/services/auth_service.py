@@ -98,11 +98,49 @@ class AuthService:
 
         return sso_info
 
+    def _ensure_user_role_assignment(self, user: User) -> None:
+        from app.models.rbac import Role, UserRoleAssignment
+        legacy_name = getattr(user.role, "value", str(user.role)).lower()
+        role_name_map = {"student": "Student", "instructor": "Instructor", "admin": "Admin"}
+        role_name = role_name_map.get(legacy_name, "Student")
+
+        role = (
+            self.db.query(Role)
+            .filter(Role.role_name == role_name, Role.is_active.is_(True), Role.deleted_at.is_(None))
+            .first()
+        )
+        if role:
+            assignment = (
+                self.db.query(UserRoleAssignment)
+                .filter(
+                    UserRoleAssignment.user_id == user.id,
+                    UserRoleAssignment.role_id == role.id,
+                    UserRoleAssignment.deleted_at.is_(None),
+                )
+                .first()
+            )
+            if not assignment:
+                self.db.add(UserRoleAssignment(user_id=user.id, role_id=role.id))
+                self.db.commit()
+
     def authenticate_sso(self, sso_info: SSOUserInfo) -> User:
         """ตรวจสอบโดเมนมหาวิทยาลัย ค้นหาผู้ใช้ในระบบ (หรือสร้างใหม่อัตโนมัติเมื่อล็อกอินครั้งแรก)"""
         email = self.validate_university_email(sso_info.email)
         user = self.user_repo.find_by_email(email)
         if user is not None:
+            updated = False
+            clean_name = (sso_info.name or "").strip()
+            if clean_name and clean_name != user.name:
+                user.name = clean_name
+                updated = True
+            if sso_info.student_id and not user.student_id:
+                user.student_id = sso_info.student_id.strip()
+                updated = True
+            if updated:
+                self.user_repo.save(user)
+                self.db.commit()
+                self.db.refresh(user)
+            self._ensure_user_role_assignment(user)
             return user
 
         local_part = email.split("@", 1)[0]
@@ -124,6 +162,7 @@ class AuthService:
         self.user_repo.save(new_user)
         self.db.commit()
         self.db.refresh(new_user)
+        self._ensure_user_role_assignment(new_user)
         return new_user
 
     def authenticate(self, username: str, password: str) -> User:
@@ -230,6 +269,20 @@ class AuthService:
         return user
 
     @staticmethod
+    def _resolve_cookie_domain() -> str | None:
+        domain = settings.AUTH_COOKIE_DOMAIN
+        if not domain or not isinstance(domain, str):
+            return None
+        domain = domain.split("#")[0].strip()
+        if not domain or domain.startswith("#"):
+            return None
+        try:
+            domain.encode("ascii")
+        except UnicodeEncodeError:
+            return None
+        return domain
+
+    @staticmethod
     def set_auth_cookies(
         response,
         access_token: str,
@@ -245,7 +298,7 @@ class AuthService:
             httponly=True,
             secure=settings.AUTH_COOKIE_SECURE,
             samesite=settings.AUTH_COOKIE_SAMESITE,
-            domain=settings.AUTH_COOKIE_DOMAIN,
+            domain=AuthService._resolve_cookie_domain(),
             path="/",
         )
         if refresh_token:
@@ -258,7 +311,7 @@ class AuthService:
                 httponly=True,
                 secure=settings.AUTH_COOKIE_SECURE,
                 samesite=settings.AUTH_COOKIE_SAMESITE,
-                domain=settings.AUTH_COOKIE_DOMAIN,
+                domain=AuthService._resolve_cookie_domain(),
                 path="/",
             )
 
@@ -268,7 +321,7 @@ class AuthService:
         response.delete_cookie(
             key=settings.ACCESS_TOKEN_COOKIE_NAME,
             path="/",
-            domain=settings.AUTH_COOKIE_DOMAIN,
+            domain=AuthService._resolve_cookie_domain(),
             httponly=True,
             secure=settings.AUTH_COOKIE_SECURE,
             samesite=settings.AUTH_COOKIE_SAMESITE,
@@ -276,7 +329,7 @@ class AuthService:
         response.delete_cookie(
             key=settings.REFRESH_TOKEN_COOKIE_NAME,
             path="/",
-            domain=settings.AUTH_COOKIE_DOMAIN,
+            domain=AuthService._resolve_cookie_domain(),
             httponly=True,
             secure=settings.AUTH_COOKIE_SECURE,
             samesite=settings.AUTH_COOKIE_SAMESITE,
