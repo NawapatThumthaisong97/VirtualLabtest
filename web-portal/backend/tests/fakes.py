@@ -140,9 +140,13 @@ class FakeK8s:
             raise self.error
 
     # ---- ตั้งโลก
-    def add_node(self, name, control_plane=False, ready=True, not_ready_for=timedelta(days=1), ip=None):
-        """not_ready_for = หลุดมานานแค่ไหน (ใช้เมื่อ ready=False) ค่าเริ่มต้น 1 วัน = ปิดเครื่องไปแล้ว"""
+    def add_node(self, name, control_plane=False, ready=True, not_ready_for=timedelta(days=1), ip=None,
+                 room=None):
+        """not_ready_for = หลุดมานานแค่ไหน (ใช้เมื่อ ready=False) ค่าเริ่มต้น 1 วัน = ปิดเครื่องไปแล้ว
+        room = label vlab/room (ห้องแลป)"""
         labels = {"node-role.kubernetes.io/control-plane": "true"} if control_plane else {}
+        if room is not None:
+            labels["vlab/room"] = room
         since = datetime.now(timezone.utc) - (not_ready_for if not ready else timedelta(days=30))
         condition = _ns(type="Ready", status="True" if ready else "Unknown", last_transition_time=since)
         addresses = [_ns(type="InternalIP", address=ip), _ns(type="Hostname", address=name)] if ip else []

@@ -18,6 +18,7 @@ from app.services.warm_pod_service import (DIRECT_POD_PREFIX, LAB_LABEL, WARM_PO
                                            warm_endpoints)
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
+from app.models.class_slot import ClassSlot, ClassSlotStatus
 from app.models.user import User
 from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
@@ -397,6 +398,8 @@ class SessionService:
             started_at=datetime.utcnow(),
             is_remote=False,
             is_cloud=is_cloud,
+
+            class_slot_id=self._current_slot_id(lab),
         )
         self.db.add(new_session)
         self.db.commit()
@@ -447,6 +450,25 @@ class SessionService:
             "started_at": new_session.started_at,
             "expires_at": new_session.expires_at,
         }
+
+    def _current_slot_id(self, lab: Lab) -> Optional[UUID]:
+        """คาบของวิชานี้ที่กำลังเรียนอยู่ตอนนี้ (หน้า admin ใช้บอกว่าห้องไหนใช้โดยคาบอะไร) ไม่มี = None
+
+        วิชาเดียวกันเวลาทับกันไม่ได้ (ex_class_slots_no_overlap) จึงมีอย่างมากคาบเดียว
+        """
+        now = datetime.now(timezone.utc)
+        slot = (
+            self.db.query(ClassSlot.id)
+            .filter(
+                ClassSlot.course_id == lab.course_id,
+                ClassSlot.starts_at <= now,
+                ClassSlot.ends_at > now,
+                ClassSlot.status != ClassSlotStatus.CANCELLED,
+                ClassSlot.deleted_at.is_(None),
+            )
+            .first()
+        )
+        return slot.id if slot else None
 
     def _client_node(self, client_ip: Optional[str], always: bool = False) -> Optional[tuple[str, str]]:
         """(ชื่อ node, IP) ถ้า IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (= นั่งเครื่องนั้นจริง)
@@ -508,6 +530,7 @@ class SessionService:
             expires_at=now + timedelta(minutes=lab_image.lifespan_minutes or 60),
             is_remote=False,
             is_cloud=False,
+            class_slot_id=self._current_slot_id(lab),
         )
         try:
             self.db.add(session)
@@ -582,6 +605,7 @@ class SessionService:
             started_at=datetime.utcnow(),
             is_remote=False,
             is_cloud=False,
+            class_slot_id=self._current_slot_id(lab),
         )
         self.db.add(session)
         self.db.commit()
