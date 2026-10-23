@@ -35,7 +35,8 @@ export default function BillingUsage({ monthly, summary }: { monthly: BillingMon
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, padding: '16px 14px 4px', alignItems: 'center' }}>
         <div>
           <div style={{ display: 'flex', height: 150 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 9, color: '#aaa', paddingRight: 6, textAlign: 'right', paddingBottom: 16 }}>
+            {/* lineHeight 0: ป้ายบนสุดอยู่ขอบบน ป้าย 0 อยู่ที่เส้นฐานพอดี */}
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 9, lineHeight: 0, color: '#aaa', paddingRight: 6, textAlign: 'right' }}>
               {ticks.map((t, i) => (
                 <span key={i}>{fmt(t)}</span>
               ))}
@@ -58,7 +59,7 @@ export default function BillingUsage({ monthly, summary }: { monthly: BillingMon
               })}
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-around', fontSize: 9, color: colors.muted, paddingLeft: 24, marginTop: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-around', fontSize: 9, color: colors.muted, paddingLeft: 24, marginTop: 6 }}>
             {months.map((m) => (
               <span key={m.month}>{monthName(m.month)}</span>
             ))}

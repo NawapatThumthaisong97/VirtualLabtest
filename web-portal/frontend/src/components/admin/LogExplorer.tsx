@@ -77,12 +77,13 @@ export default function LogExplorer() {
 
       <div style={{ padding: '0 16px 12px' }}>
         <div style={{ display: 'flex', height: 150 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 9, color: '#aaa', paddingRight: 8, textAlign: 'right', paddingBottom: 16, minWidth: 26 }}>
+          {/* lineHeight 0: ป้ายบนสุดอยู่ขอบบน ป้าย 0 อยู่ที่เส้นฐานพอดี */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 9, lineHeight: 0, color: '#aaa', paddingRight: 8, textAlign: 'right', minWidth: 26 }}>
             {[max, (max * 2) / 3, max / 3, 0].map((t, i) => (
               <span key={i}>{Number.isInteger(t) ? t : t.toFixed(1)}</span>
             ))}
           </div>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 3, borderBottom: '1px solid #e2e2e2', paddingBottom: 16 }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 3, borderBottom: '1px solid #e2e2e2' }}>
             {buckets.map((b) => (
               <div
                 key={b.t}
@@ -92,7 +93,7 @@ export default function LogExplorer() {
             ))}
           </div>
         </div>
-        <div style={{ display: 'flex', fontSize: 9, color: colors.muted, paddingLeft: 34, marginTop: 4 }}>
+        <div style={{ display: 'flex', fontSize: 9, color: colors.muted, paddingLeft: 34, marginTop: 6 }}>
           {buckets.map((b, i) => (
             <span key={b.t} style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'visible' }}>
               {i % labelEvery === 0 ? thTime(b.t, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
