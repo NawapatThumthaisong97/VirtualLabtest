@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # scheduler สร้าง / ลบ DaemonSet ให้เมื่อเปิดทั้ง PREWARM_ENABLED และตัวนี้ ส่วน launch ใช้ตัวนี้ตัวเดียว
     WARM_POD_ENABLED: bool = False
     # กด Start ตอนที่ warm pod ตัวใหม่ยังไม่ Ready (DaemonSet เพิ่งสร้างแทนตัวที่คนก่อนปิด) รอตัวนั้นกี่วินาที
-    # ไม่รอ = ไปสร้าง pod อีกตัวชนกับ warm pod ที่จองที่ไว้ → เครื่องเต็ม (docs/LAB_DIRECT_POD.md)
+    # ไม่รอ = ไปสร้าง pod อีกตัวชนกับ warm pod ที่จองที่ไว้ → เครื่องเต็ม (docs/archive/LAB_DIRECT_POD.md)
     WARM_POD_WAIT_SECONDS: int = 60
 
     # กดจากเครื่องแลปแต่ไม่มี warm pod: "pod" = สร้าง pod ตรงด้วย k8s API บนเครื่องนั้น (ไม่ต้องลงของ ไม่กี่วินาที)
@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     # - launch ผ่าน SkyPilot จากเครื่องแลป: บังคับ pod ลงเครื่องที่กด Start (nodeSelector)
     # - pod ของ lab ทั้งสองแบบติด label vlab/lab=true ให้ NetworkPolicy vlab-lab-isolation ปิดขาเข้า
     #   (k8s/lab-isolation-networkpolicy.yaml) กันการเข้าทาง pod IP จากเครื่องอื่นผ่าน flannel
-    # ปิดไว้เป็นค่าเริ่มต้นจนกว่าจะทดลองครบ (docs/DaemonSetsExperiment.md หัวข้อ Exp4)
+    # ปิดไว้เป็นค่าเริ่มต้นจนกว่าจะทดลองครบ (docs/archive/DaemonSetsExperiment.md หัวข้อ Exp4)
     LAB_ISOLATION_ENABLED: bool = False
     # กำหนดเวลาเองเพิ่มจาก class_slots เป็น JSON ใน .env (ไว้ทดลอง) เวลาต้องมี timezone เช่น
     # PREWARM_TARGETS=[{"image":"100.127.74.48:5001/vlab/hello:v1","start_at":"2026-10-17T14:00:00+07:00","end_at":"2026-10-17T15:00:00+07:00"}]

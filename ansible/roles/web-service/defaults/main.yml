@@ -43,7 +43,7 @@ webservice_skypilot_endpoint: "http://{{ webservice_k8s_master_ip }}:30880"
 webservice_skypilot_token: "{{ skypilot_backend_token | default('') }}"
 
 # --- AWS (lab ที่ run_target = AWS / AUTO จากข้างนอก) ---
-# ค่าเดิมของ VPC vlab-ecr-pull ดู docs/NextToU.md หัวข้อ 2.1 — server กลางเป็นคน launch EC2
+# ค่าเดิมของ VPC vlab-ecr-pull ดู docs/archive/NextToU.md หัวข้อ 2.1 — server กลางเป็นคน launch EC2
 # backend ใช้ AWS เองแค่ขอ ECR token (ใส่ใน setup ของ lab ให้ EC2 docker pull ได้)
 webservice_aws_region: ap-southeast-1
 webservice_aws_lab_ami: ami-0da9046ec7f57f3af
@@ -61,5 +61,5 @@ webservice_prewarm_lead_minutes: 30
 webservice_warm_pod_enabled: true
 webservice_lab_isolation_enabled: true
 # กดจากเครื่องแลปแต่ไม่มี warm pod: pod = สร้าง pod ตรง (ค่าเริ่ม) / skypilot = ทางเดิม SkyPilot in-cluster (สำรอง)
-# ดู docs/LAB_DIRECT_POD.md สลับตอนรัน: -e webservice_lab_machine_launch=skypilot
+# ดู docs/archive/LAB_DIRECT_POD.md สลับตอนรัน: -e webservice_lab_machine_launch=skypilot
 webservice_lab_machine_launch: pod

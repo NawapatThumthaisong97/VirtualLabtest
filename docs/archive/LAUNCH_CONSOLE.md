@@ -34,7 +34,7 @@ DELETE /api/sessions/a0b5b34d…  ✅ Session stopped and deleted successfully (
 | แถบสถานะ / r | `GET /health`, `GET /api/kubernetes/nodes` (worker ready), `GET <sky>/api/health`, `GET <registry>/v2/` |
 | 1 Start K8s | `POST /api/sessions {lab_id: lab K8s, user_id}` |
 | 2 Start AWS | `POST /api/sessions {lab_id: lab AWS, user_id}` |
-| 3 Start AUTO | `POST /api/sessions {lab_id: lab AUTO, user_id}` — ไปไหนขึ้นกับเครื่องที่รัน script (ดู docs/RUN_TARGET_AUTO.md) |
+| 3 Start AUTO | `POST /api/sessions {lab_id: lab AUTO, user_id}` — ไปไหนขึ้นกับเครื่องที่รัน script (ดู docs/archive/RUN_TARGET_AUTO.md) |
 | 4 Warm pods | `GET /api/warm-pods` → ตาราง เครื่อง / ว่าง-ใช้อยู่ / ready |
 | 5 Sessions | `GET /api/sessions` → เฉพาะของ user ที่ RUNNING / PENDING |
 | 6 Terminate | `GET /api/sessions` ให้เลือก → `DELETE /api/sessions/{id}` |

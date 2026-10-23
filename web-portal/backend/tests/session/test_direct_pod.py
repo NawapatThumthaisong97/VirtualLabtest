@@ -1,6 +1,6 @@
 """
 กลุ่ม 7: pod ตรง — กดจากเครื่องแลปที่ไม่มี warm pod สร้าง pod ด้วย k8s API บนเครื่องนั้น ไม่ผ่าน SkyPilot
-(docs/LAB_DIRECT_POD.md)
+(docs/archive/LAB_DIRECT_POD.md)
 """
 from datetime import timedelta
 

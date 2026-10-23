@@ -110,7 +110,7 @@ curl http://<registry-ip>:5001/v2/_catalog          # ต้องเห็น s
 |---|---|
 | เปิด lab บน**เครื่องแลป** (K3s) | เปิดเว็บแบบ "นั่งที่ worker" — ดูหัวข้อถัดไป |
 | เปิด lab บน **AWS** | กดจากเครื่องที่ไม่ใช่ worker  เสียเงินจริง (~$0.12/ชม.) **ปิด lab ทุกครั้ง** แล้วเช็ก `sky status` ว่าไม่มีค้าง |
-| ทุกอย่างในคำสั่งเดียว | `./script/vlab-tui.py` (ดู `docs/TEST_ALL.md`) — `SKIP_AWS=1` ข้ามส่วนที่เสียเงิน |
+| ทุกอย่างในคำสั่งเดียว | `./script/vlab-tui.py` (ดู `docs/archive/TEST_ALL.md`) — `SKIP_AWS=1` ข้ามส่วนที่เสียเงิน |
 | หน้า admin | `/admin`, API ทั้งหมดที่ `http://<webservice-ip>:8000/docs` |
 
 ### เปิดเว็บแบบ "นั่งที่ worker" (Chrome ผ่าน SOCKS)

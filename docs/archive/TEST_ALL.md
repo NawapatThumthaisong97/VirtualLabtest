@@ -1,6 +1,6 @@
 # vlab-tui.py — เทส Ansible + launch ทั้งชุดในคำสั่งเดียว (ร่าง ให้ Pete รีวิวก่อนเขียน script)
 
-เขียน 2026-10-20 หลังลง master ใหม่ (ผลอยู่ใน `docs/NextToU.md` หัวข้อ 9)
+เขียน 2026-10-20 หลังลง master ใหม่ (ผลอยู่ใน `docs/archive/NextToU.md` หัวข้อ 9)
 
 ## ทำไม
 
@@ -116,7 +116,7 @@ log เต็มเก็บไฟล์ ไม่โชว์บนจอ บ�
 
 - `script/vlab-tui.py` (ใหม่) — Python 3 + rich ไฟล์เดียว เรียก kubectl / curl / ssh / aws ผ่าน subprocess
 - `script/launch-test.sh` เดิมไม่แก้ (ยังใช้ได้เหมือนเดิม)
-- `docs/NextToU.md` หัวข้อ 5 — ชี้มาที่ script นี้
+- `docs/archive/NextToU.md` หัวข้อ 5 — ชี้มาที่ script นี้
 
 ## คำถามให้ Pete
 

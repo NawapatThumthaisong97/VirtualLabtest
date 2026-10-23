@@ -63,7 +63,7 @@ services:
 
     # host network: request จาก tailnet เข้า backend ตรง ไม่ผ่าน NAT ของ docker / Tailscale
     # (ผ่าน bridge แล้ว Tailscale MASQUERADE packet ที่ forward จาก tailscale0 → backend เห็นทุกคนเป็น
-    # 172.18.0.1 ทุกการกด Start ไป AWS หมด — เจอ 2026-10-23 ดู docs/LAB_DIRECT_POD.md)
+    # 172.18.0.1 ทุกการกด Start ไป AWS หมด — เจอ 2026-10-23 ดู docs/archive/LAB_DIRECT_POD.md)
     # ผูก uvicorn กับ BIND_IP เอง ไม่ใช่ 0.0.0.0 จะได้ไม่เปิดออก interface อื่นของเครื่อง
     network_mode: host
     command: ["uvicorn", "app.main:app", "--host", "${BIND_IP}", "--port", "8000"]

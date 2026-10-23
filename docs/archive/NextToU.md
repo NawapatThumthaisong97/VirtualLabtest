@@ -105,7 +105,7 @@ Terraform state หาไม่เจอ = ไม่กระทบการใ�
 ของเก่าที่เก็บกวาดได้ภายหลัง (stopped แต่ยังเสียค่า disk): `Tailscale-subnet-router` (อีก VPC), `vlab-test-a`, `vlab-test-b` — ถาม Pete ก่อน
 
 ### DB dev (Postgres บน ThinkPad, `virtual_lab`)
-- enum `runtarget` มี `AUTO` แล้ว (`ALTER TYPE ... ADD VALUE 'AUTO'` จดใน `docs/DB_DIAGRAM.md`) — **DB ใหม่ต้องรันคำสั่งนี้ด้วย**
+- enum `runtarget` มี `AUTO` แล้ว (`ALTER TYPE ... ADD VALUE 'AUTO'` จดใน `docs/archive/DB_DIAGRAM.md`) — **DB ใหม่ต้องรันคำสั่งนี้ด้วย**
 - user เทส: Sophia Davis `sophia.dav@dome.tu.ac.th` id `b4f5c004-5dac-4e38-99cb-8382d5982484`
 - lab เทส (course SE301, image `skypilot/music-lab:lab-01`, พอร์ต 8080 / 5173 / 8443):
   | lab | id | run_target |
@@ -160,7 +160,7 @@ Terraform state หาไม่เจอ = ไม่กระทบการใ�
 | master route ไป AWS | บน master `ip route get 10.10.2.10` | `dev tailscale0` |
 | web-portal | role จบด้วย `sky api info` ใน container | endpoint 30880 + user `vlab-backend` HEALTHY |
 
-### 5.2 เส้นทาง launch — ใช้ `script/vlab-tui.py` (TUI รันทั้งชุด ดู docs/TEST_ALL.md) หรือ `script/launch-test.sh` (curl + jq ทีละข้อ)
+### 5.2 เส้นทาง launch — ใช้ `script/vlab-tui.py` (TUI รันทั้งชุด ดู docs/archive/TEST_ALL.md) หรือ `script/launch-test.sh` (curl + jq ทีละข้อ)
 IP ที่ backend เห็น = เครื่องที่รัน script → **เทสเครื่องแลป ต้องรัน script บน worker-pete** (copy ไฟล์ไป
 ตั้ง `BACKEND_URL=http://<Tailscale IP ของเครื่อง web-portal>:8000`) หรือใช้ pod `hostNetwork` บน worker-pete ยิง curl
 เทสข้างนอก = รันบนเครื่องที่ไม่ใช่ node (เครื่อง web-portal เอง / laptop ใน tailnet)
@@ -216,8 +216,8 @@ launch ที่พังหลังสร้างเครื่องแล�
 - อัป SkyPilot จาก 0.12.3.post1 (ล็อกไว้ 5 จุด: requirement.txt, helm chart, AMI, image bake, script/docker-init.sh — ต้องอัปพร้อมกัน)
 
 ## 8. เอกสารที่เกี่ยวข้อง
-`docs/SKYPILOT_CENTRAL_SERVER.md` (ทั้งหมดเรื่อง server กลาง หัวข้อ 6–9), `docs/RUN_TARGET_AUTO.md`, `docs/LAUNCH_CONSOLE.md`,
-`docs/DaemonSetsExperiment.md` (prewarm / warm pod / isolation Exp1–4), `docs/AWS_LAB_FLOW.md`, `docs/EXPERIMENT_ECR_PULL_RESULT.md`
+`docs/archive/SKYPILOT_CENTRAL_SERVER.md` (ทั้งหมดเรื่อง server กลาง หัวข้อ 6–9), `docs/archive/RUN_TARGET_AUTO.md`, `docs/archive/LAUNCH_CONSOLE.md`,
+`docs/archive/DaemonSetsExperiment.md` (prewarm / warm pod / isolation Exp1–4), `docs/archive/AWS_LAB_FLOW.md`, `docs/archive/EXPERIMENT_ECR_PULL_RESULT.md`
 
 ## 9. ผลลง master ใหม่ + เทส (2026-10-20 ค่ำ)
 
