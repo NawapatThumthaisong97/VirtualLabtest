@@ -17,7 +17,6 @@ import LabsTab from '../components/instructor/LabsTab'
 import StudentsTab from '../components/instructor/StudentsTab'
 import { useToast } from '../hooks/useToast'
 
-const cover = 'https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Instructor%20course%20management-EDmVCANJIrpdDLi4ll0ac5XLjdxQ1K.png'
 
 export default function InstructorPage() {
   const [activeTab, setActiveTab] = useState<Tab>('overview')

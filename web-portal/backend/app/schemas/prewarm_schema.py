@@ -32,6 +32,38 @@ class PrewarmResponse(BaseModel):
     nodes: list[PrewarmNodeStatus]
 
 
+class ScheduleSlot(BaseModel):
+    """คาบที่ scheduler ยังต้องดูแล 1 คาบ"""
+    id: str
+    course_code: Optional[str]
+    image: str
+    starts_at: datetime
+    ends_at: datetime
+    prewarm_at: datetime = Field(..., description="starts_at - PREWARM_LEAD_MINUTES = เวลาที่จะเริ่ม pre-pull (+ warm pod)")
+    status: str = Field(..., description="SCHEDULED / PREWARMING / READY")
+    active: bool = Field(..., description="อยู่ในช่วง prewarm_at ถึง ends_at แล้ว (scheduler ดูแลอยู่ตอนนี้)")
+    note: Optional[str]
+
+
+class ScheduleTarget(BaseModel):
+    """PREWARM_TARGETS จาก .env (pre-pull อย่างเดียว ไม่มี warm pod)"""
+    image: str
+    start_at: datetime
+    end_at: datetime
+    active: bool
+
+
+class PrewarmScheduleResponse(BaseModel):
+    """scheduler จะทำงานเมื่อไหร่ กับอะไร"""
+    enabled: bool = Field(..., description="PREWARM_ENABLED และ interval > 0 (loop ใน backend รันอยู่)")
+    interval_seconds: int
+    lead_minutes: int
+    warm_pod_enabled: bool
+    now: datetime
+    slots: list[ScheduleSlot]
+    targets: list[ScheduleTarget]
+
+
 class WarmPodResponse(BaseModel):
     """warm pod 1 ตัว (1 เครื่อง)"""
     pod: str

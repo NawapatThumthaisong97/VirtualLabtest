@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Bell, Check, Edit3, Eye, Plus, Trash2, X } from 'lucide-react'
+import { Bell, Check, Edit3, Plus, Trash2, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import Card from './Card'
 import SectionHeader from './SectionHeader'

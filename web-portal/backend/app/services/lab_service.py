@@ -78,6 +78,9 @@ class LabService:
             raise LabNotFoundError(f"Lab {lab_id} not found")
 
         data = payload.model_dump(exclude_unset=True)
+        # run_target เป็น NOT NULL ส่ง null มา = ไม่แก้ (ไม่งั้น commit พังเป็น 500)
+        if data.get("run_target", ...) is None:
+            data.pop("run_target", None)
         for key, value in data.items():
             setattr(lab, key, value)
 

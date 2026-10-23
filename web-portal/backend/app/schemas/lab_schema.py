@@ -3,7 +3,7 @@ from uuid import UUID
 from pydantic import Field
 from app.schemas.base import CamelModel
 
-from app.models.lab import LabStatus
+from app.models.lab import LabStatus, RunTarget
 from app.models.lab_progress import ProgressStatus
 
 
@@ -16,6 +16,8 @@ class LabResponse(CamelModel):
     order_no: int
     due_at: datetime | None
     status: LabStatus
+    # kubernetes / aws / auto (auto = เลือกตามเครื่องที่กด Start ดู RunTarget)
+    run_target: RunTarget | None = None
     # ความคืบหน้าของ "คนที่เรียก API" ไม่ใช่ของ lab — คนละคนเรียกได้คนละค่า
     # None = ยังไม่มีแถวใน lab_progress (ยังไม่เคยเปิดทำ)
     progress_status: ProgressStatus | None = None
@@ -56,6 +58,8 @@ class LabCreateRequest(CamelModel):
     image_id: UUID | None = None
     due_at: datetime | None = None
     status: LabStatus = LabStatus.DRAFT
+    # ค่าเริ่มต้นเท่ากับของเดิม (column server_default) ส่ง None ไม่ได้ เพราะ column เป็น NOT NULL
+    run_target: RunTarget = RunTarget.KUBERNETES
 
 
 # Alter information PATCH
@@ -68,6 +72,7 @@ class LabUpdateRequest(CamelModel):
     order_no: int | None = Field(None, gt=0)
     due_at: datetime | None = None
     status: LabStatus | None = None
+    run_target: RunTarget | None = None
 
 
 # Delete don't require schemas implementation

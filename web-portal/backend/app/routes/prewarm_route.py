@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
 
-from app.schemas.prewarm_schema import PrewarmResponse, WarmPodResponse
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.configs.db import get_db
+from app.schemas.prewarm_schema import PrewarmResponse, PrewarmScheduleResponse, WarmPodResponse
 from app.schemas.response import ApiResponse
 from app.services.kubernetes_service import get_kubernetes_service
+from app.services.prewarm_scheduler import build_schedule
 from app.services.prewarm_service import PrewarmService
 from app.services.warm_pod_service import WarmPodService
 
@@ -33,6 +38,20 @@ def list_warm_pods():
         "success": True,
         "message": "Warm pods retrieved successfully",
         "data": WarmPodService(get_kubernetes_service()).list_pods(),
+    }
+
+
+# ต้องประกาศก่อน /prewarm/{name} ไม่งั้น "schedule" ถูกจับเป็นชื่อ DaemonSet
+@router.get("/prewarm/schedule", response_model=ApiResponse[PrewarmScheduleResponse])
+def get_prewarm_schedule(limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
+    """
+    scheduler จะทำงานเมื่อไหร่: ค่าตั้ง (เปิดไหม / ทุกกี่วินาที / เริ่มก่อนคาบกี่นาที) + คาบที่ยังไม่จบ
+    พร้อมเวลาเริ่ม pre-pull (prewarm_at) และ PREWARM_TARGETS จาก .env — ดูอย่างเดียว
+    """
+    return {
+        "success": True,
+        "message": "Prewarm schedule retrieved successfully",
+        "data": build_schedule(db, datetime.now(timezone.utc), limit),
     }
 
 

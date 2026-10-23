@@ -4,6 +4,7 @@ Entry point for the FastAPI backend
 """
 
 import asyncio
+import os
 import sys
 from types import ModuleType
 
@@ -161,6 +162,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting FastAPI application...")
     logger.info(f"App: {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Debug Mode: {settings.DEBUG}")
+    # บอกว่า launch ไปที่ SkyPilot ตัวไหน (ไม่ log token)
+    sky_endpoint = os.environ.get("SKYPILOT_API_SERVER_ENDPOINT")
+    if sky_endpoint:
+        has_token = bool(os.environ.get("SKYPILOT_SERVICE_ACCOUNT_TOKEN"))
+        logger.info(f"SkyPilot API server: {sky_endpoint} (token: {'yes' if has_token else 'NO'})")
+    else:
+        logger.info("SkyPilot API server: local (127.0.0.1:46580)")
 
     # เช็คการเชื่อมต่อ database
     logger.info("Checking database connection...")

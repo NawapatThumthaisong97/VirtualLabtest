@@ -2,6 +2,7 @@
 Fixture sky ปลอม + ข้อมูลตั้งต้น สำหรับเทส create / delete / reconcile
 (fixture db / db_engine อยู่ใน tests/conftest.py ใช้ร่วมกับเทส prewarm)
 """
+import time as _real_time
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -9,8 +10,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.courses import Course
-from app.models.lab import Lab, RunTarget
-from app.models.lab_image import LabImage
+from app.models.enrollment import Enrollment, RoleInCourse
+from app.models.lab import Lab, LabStatus, RunTarget
+from app.models.lab_image import ImageStatus, LabImage
 from app.models.session import Session as SessionModel, SessionStatus, ServiceType
 from app.models.user import User
 from app.repositories.lab_image_repository import LabImageRepository
@@ -21,12 +23,33 @@ from app.services.session_service import SessionService
 from tests.fakes import FakeSky
 
 
+class FakeClock:
+    """แทน module time ใน session_service: sleep = เวลาเดินทันที (ไม่รอจริง) + เรียก on_sleep ให้เทสเปลี่ยนโลกได้"""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.slept = 0.0
+        self.on_sleep = None   # callable(clock) — เช่น ทำให้ warm pod พร้อมระหว่างรอ
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return _real_time.time()
+
+    def sleep(self, seconds):
+        self.now += seconds
+        self.slept += seconds
+        if self.on_sleep is not None:
+            self.on_sleep(self)
+
+
 @pytest.fixture
 def fake_sky(monkeypatch):
     fake = FakeSky()
     monkeypatch.setattr(session_service, "sky", fake)
-    # _wait_job_running รอ 5 วินาทีต่อรอบ ในเทสไม่ต้องรอจริง
-    monkeypatch.setattr(session_service.time, "sleep", lambda seconds: None)
+    # _wait_job_running / รอ pod ใช้ time.sleep + time.monotonic — ในเทสใช้นาฬิกาปลอม ไม่รอจริง
+    monkeypatch.setattr(session_service, "time", FakeClock())
     monkeypatch.setattr(session_service, "get_ecr_token", lambda region: "fake-ecr-token")
     return fake
 
@@ -46,12 +69,16 @@ def world(db):
                     lecturer_name="Lecturer", created_by=user.id)
     db.add(course)
     db.flush()
+    # เปิด lab ได้เฉพาะนักศึกษาที่ลงทะเบียนวิชานั้น (session_service.create_session)
+    db.add(Enrollment(user_id=user.id, course_id=course.id, role_in_course=RoleInCourse.STUDENT))
+    db.flush()
 
     def image(repository, entrypoint="/bin/bash /run.sh", ports=(8080, 5173, 8443)):
         img = LabImage(uploaded_by=user.id, course_id=course.id, repository=repository,
                        tag="lab-01", image_digest=f"sha256:{uuid.uuid4().hex}", size_mb=100,
                        lifespan_minutes=60, exposed_ports=list(ports),
-                       entrypoint_script=entrypoint, env_vars={"IDE_PASSWORD": "x"})
+                       entrypoint_script=entrypoint, env_vars={"IDE_PASSWORD": "x"},
+                       status=ImageStatus.APPROVED)  # image ที่ยังไม่อนุมัติ launch ไม่ได้
         db.add(img)
         db.flush()
         return img
@@ -61,7 +88,8 @@ def world(db):
 
     def lab(title, img, target, order_no):
         lb = Lab(course_id=course.id, title=title, order_no=order_no,
-                 image_id=img.id if img else None, run_target=target)
+                 image_id=img.id if img else None, run_target=target,
+                 status=LabStatus.PUBLISHED)  # lab ที่ยังไม่ publish launch ไม่ได้
         db.add(lb)
         db.flush()
         return lb

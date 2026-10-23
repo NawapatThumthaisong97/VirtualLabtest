@@ -1,0 +1,301 @@
+# ใช้ SkyPilot กลางแต่ไม่มี token = backend ได้ 401 ทุกครั้งที่ launch เช็กก่อนลงอะไรทั้งหมด
+# ค่าอื่น pydantic ปฏิเสธ → backend ไม่ start เช็กก่อนลงอะไรทั้งหมด
+- name: Validate LAB_MACHINE_LAUNCH
+  ansible.builtin.assert:
+    that: webservice_lab_machine_launch in ['pod', 'skypilot']
+    fail_msg: "webservice_lab_machine_launch ต้องเป็น pod หรือ skypilot (ได้ '{{ webservice_lab_machine_launch }}')"
+
+- name: Require backend token when using the central SkyPilot API server
+  ansible.builtin.assert:
+    that: webservice_skypilot_token | length > 0
+    fail_msg: >-
+      ตั้ง skypilot_backend_token ใน group_vars/all.yml (สร้าง service account token จาก
+      https://{{ skypilot_domain | default('<skypilot_domain>') }}/dashboard) หรือตั้ง
+      webservice_skypilot_endpoint="" เพื่อใช้ SkyPilot ใน container แทน
+  when: webservice_skypilot_endpoint | length > 0
+
+# ---------- Docker ----------
+# ติดตั้งจาก repo ทางการของ Docker ไม่ใช้ docker.io ของ Ubuntu
+# เพราะตัวนั้นเก่าและไม่มี compose v2 plugin ติดมาด้วย
+
+- name: Install Docker apt prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - rsync
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Add Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+
+- name: Install Docker Engine and compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+    # กันไม่ให้ดึง apt index ใหม่ทุกรอบ — เน็ตไป archive.ubuntu.com ช้าจนค้างเป็นสิบนาที
+    cache_valid_time: 3600
+
+- name: Ensure Docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Add remote user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+
+# ---------- Source code ----------
+
+- name: Create web-service app directory
+  ansible.builtin.file:
+    path: "{{ webservice_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+# ส่งเฉพาะ source — node_modules/venv สร้างใน image, storage/ เป็นข้อมูลฝั่ง server
+# synchronize เอา become จาก play มาเติม sudo ให้ rsync อยู่ดีแม้ใส่ become: false
+# และ sudo นั้นไม่มี tty รับรหัส -K ไม่ได้ จึงต้อง override rsync_path ด้วย
+- name: Sync web-portal source to target
+  become: false
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../web-portal/"
+    dest: "{{ webservice_dir }}/"
+    rsync_path: "rsync"
+    delete: yes
+    rsync_opts:
+      - "--exclude=node_modules"
+      - "--exclude=venv"
+      - "--exclude=__pycache__"
+      - "--exclude=.env"
+      - "--exclude=storage"
+      - "--exclude=dist"
+      - "--exclude=kubeconfig.yaml"
+      - "--exclude=aws-credentials"
+
+- name: Ensure storage directory exists (ไฟล์เอกสารแลป — ห้ามถูก rsync ลบ)
+  ansible.builtin.file:
+    path: "{{ webservice_dir }}/backend/storage"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+# ---------- kubeconfig ----------
+# k3s ชี้ server เป็น 127.0.0.1 เสมอ ต้องเปลี่ยนเป็น Tailscale IP ของ master
+# (cert ครอบไว้แล้วด้วย --tls-san) ไม่งั้น backend จะเรียกหาตัวเอง
+
+- name: Read kubeconfig from master
+  ansible.builtin.slurp:
+    src: /etc/rancher/k3s/k3s.yaml
+  delegate_to: "{{ groups['master'][0] }}"
+  register: master_kubeconfig
+
+- name: Write kubeconfig with master IP substituted
+  ansible.builtin.copy:
+    content: >-
+      {{ master_kubeconfig.content | b64decode
+         | regex_replace('https://127\.0\.0\.1:6443',
+                         'https://' ~ webservice_k8s_master_ip ~ ':6443') }}
+    dest: "{{ webservice_dir }}/backend/kubeconfig.yaml"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  no_log: true
+
+# ---------- Config ----------
+
+- name: Render backend .env
+  ansible.builtin.template:
+    src: backend.env.j2
+    dest: "{{ webservice_dir }}/backend/.env"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  notify: restart web-service
+
+# สร้างทุกรอบแม้ไม่มี key — compose mount ไฟล์นี้ ถ้าไม่มีไฟล์ docker จะสร้างเป็น directory แทน
+- name: Render AWS credentials for the backend (profile skypilot)
+  ansible.builtin.copy:
+    content: |
+      [skypilot]
+      aws_access_key_id = {{ webservice_aws_access_key_id }}
+      aws_secret_access_key = {{ webservice_aws_secret_access_key }}
+    dest: "{{ webservice_dir }}/backend/aws-credentials"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  no_log: true
+  notify: restart web-service
+
+- name: Render compose .env
+  ansible.builtin.template:
+    src: compose.env.j2
+    dest: "{{ webservice_dir }}/.env"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  notify: restart web-service
+
+# ---------- Deploy ----------
+
+# ทุก port ผูกกับ BIND_IP (IP ของ tailscale0) แต่ตอนบูต docker เริ่มก่อน Tailscale ได้ IP
+# → bind ไม่ได้ (cannot assign requested address) frontend Exited (128) และ docker ไม่ลองใหม่ให้ — เว็บล่มหลังรีบูต
+# (backend รอดเพราะ uvicorn ล้มแล้ว restart วน) ให้ kernel ยอม bind IP ที่ยังไม่มีบน interface
+- name: Allow binding to the Tailscale IP before it is up (boot order)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    sysctl_file: /etc/sysctl.d/60-vlab-nonlocal-bind.conf
+    state: present
+    reload: yes
+
+
+- name: Build and start web-portal stack
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.prod.yml up -d --build
+    chdir: "{{ webservice_dir }}"
+  register: compose_up
+  changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr"
+
+# ต้องยิงที่ bind IP ไม่ใช่ 127.0.0.1 — compose ผูก port ไว้กับ tailscale0 เท่านั้น
+# ฉะนั้น loopback ไม่มีอะไร listen อยู่ เรียกไปก็ connection refused ตลอด
+- name: Wait for backend to become healthy
+  ansible.builtin.uri:
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_api_port }}/health"
+    status_code: 200
+  register: backend_health
+  until: backend_health.status == 200
+  retries: 30
+  delay: 5
+
+- name: Wait for frontend to respond
+  ansible.builtin.uri:
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_http_port }}/"
+    status_code: 200
+  register: frontend_health
+  until: frontend_health.status == 200
+  retries: 12
+  delay: 5
+
+# ---------- Database schema ----------
+# create_all เป็น idempotent (มีตารางแล้วข้าม ไม่แตะข้อมูล) จึงรันทุก deploy ได้
+- name: Create database schema
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      python script/init_db.py
+    chdir: "{{ webservice_dir }}"
+  register: init_db
+  changed_when: "'Database initialized' in init_db.stdout"
+
+# seed เป็น optional เพราะทับข้อมูลเดิมได้ สั่งเปิดด้วย -e webservice_seed=true
+- name: Seed initial data (ต้องสั่งเปิดเอง)
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      python script/run_seed.py
+    chdir: "{{ webservice_dir }}"
+  when: webservice_seed | bool
+  changed_when: true
+
+# role / permission ของ RBAC + ผูก user ตาม role เดิม (student / instructor / admin) — ไม่มี = ทุก API ตอบ 403
+# seed ซ้ำได้ ไม่ทับข้อมูลแอป จึงรันทุก deploy
+- name: Seed RBAC roles and permissions
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      python script/run_rbac_seed.py
+    chdir: "{{ webservice_dir }}"
+  register: rbac_seed
+  changed_when: false
+
+# ---------- Verify ----------
+# /health เช็คแค่ต่อ DB ติด ต้องยิง endpoint ที่ query ตารางจริงถึงจะจับเคสตารางหายได้
+- name: Verify the API can actually query the database
+  ansible.builtin.uri:
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_api_port }}{{ webservice_api_prefix }}/sessions"
+    status_code: [200, 401, 403]
+  register: db_probe
+  retries: 6
+  delay: 5
+  until: db_probe.status in [200, 401, 403]
+
+# กฎ Start: เครื่องแลป → K8s, ที่อื่น → AWS ตัดสินจาก IP ของ connection ถ้ามี NAT คั่น (เช่น Tailscale
+# MASQUERADE ตอน backend อยู่หลัง docker bridge) backend เห็นทุกคนเป็น IP เดียว → ทุกการกด Start ไป AWS
+# ให้ worker ตัวแรกเรียก /v1/whoami แล้วต้องได้ IP ของตัวเองและนับเป็นเครื่องแลป ไม่งั้น deploy fail
+- name: Verify backend sees the real IP of a lab machine (no NAT in between)
+  ansible.builtin.uri:
+    url: "http://{{ webservice_bind_ip }}:{{ webservice_api_port }}{{ webservice_api_prefix }}/v1/whoami"
+    return_content: true
+  delegate_to: "{{ groups['workers'][0] }}"
+  become: false
+  register: whoami
+  failed_when: >-
+    whoami.json.data.clientIp != hostvars[groups['workers'][0]]['ansible_host']
+    or whoami.json.data.labMachine is none
+  when: groups['workers'] | default([]) | length > 0
+
+# SkyPilot กลาง: backend ต้องคุยกับ server กลางได้ด้วย token (ผิด = 401, ไม่มี token = ไปไม่ถึง)
+# ต้องเห็น endpoint ของ server กลาง ไม่ใช่ "default local API server"
+- name: Verify backend reaches the central SkyPilot API server
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      sky api info
+    chdir: "{{ webservice_dir }}"
+  register: sky_api_info
+  changed_when: false
+  failed_when: >-
+    sky_api_info.rc != 0
+    or webservice_skypilot_endpoint not in sky_api_info.stdout
+    or 'HEALTHY' not in sky_api_info.stdout
+  when: webservice_skypilot_endpoint | length > 0
+
+# SkyPilot ใน container (ไม่ได้ตั้ง SkyPilot กลาง) ต้องมี kubectl, nc, socat, ssh, rsync ซึ่ง pip
+# ไม่ได้ลงให้ ถ้าขาดจะพังเป็น FileNotFoundError ที่ไม่บอกว่าตัวไหนหาย — ใช้ sky check ตรวจตอน deploy แทน
+- name: Verify SkyPilot can actually use the Kubernetes cluster
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T backend
+      sky check kubernetes
+    chdir: "{{ webservice_dir }}"
+  register: sky_check
+  changed_when: false
+  failed_when: "'Kubernetes: disabled' in sky_check.stdout"
+  when:
+    - webservice_k8s_enabled | bool
+    - webservice_skypilot_endpoint | length == 0
+
+- name: Report access URL
+  ansible.builtin.debug:
+    msg: >-
+      web-service พร้อมใช้งานที่ http://{{ webservice_bind_ip }}
+      (API: http://{{ webservice_bind_ip }}:{{ webservice_api_port }}{{ webservice_api_prefix }})
+      — เข้าได้เฉพาะเครื่องที่อยู่ใน tailnet เดียวกัน

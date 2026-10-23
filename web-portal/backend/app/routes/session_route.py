@@ -21,6 +21,7 @@ from app.schemas.session_schema import (
     SessionResponse,
 )
 from app.schemas.response import ApiResponse
+from app.services import session_service
 from app.services.session_service import SessionService
 from app.services.rbac_service import ResourceContextPolicy
 
@@ -107,8 +108,8 @@ def create_session(
     - Return: session information with endpoints
     - กดจากเครื่องแลปที่มี warm pod ว่าง (WARM_POD_ENABLED) ได้ pod นั้นทันที (launch_mode = warm_pod)
     """
-    # ถ้าไม่มี userId ใช้ default UUID
-    user_id = request.user_id or UUID("00000000-0000-0000-0000-000000000000")
+    # user = คนที่ login (schema ไม่รับ user_id แล้ว — เดิมเรียก request.user_id ได้ AttributeError → 500 ทุกครั้ง)
+    user_id = current_user.id
     # IP ของ connection จริง ไม่อ่าน X-Forwarded-For เพราะ client ใส่เองได้ (ปลอมเป็นเครื่องอื่นได้)
     client_ip = http_request.client.host if http_request.client else None
 
@@ -146,3 +147,24 @@ def delete_session(
         "data": controller.delete_session(session_id),
     }
 
+
+
+@router.get("/v1/whoami", response_model=ApiResponse[dict])
+def whoami(http_request: Request):
+    """
+    backend เห็น IP ของเครื่องนี้เป็นอะไร และนับเป็นเครื่องแลปไหน (กฎ Start: เครื่องแลป → K8s, ที่อื่น → AWS)
+    - ไม่ต้อง login: ansible เรียกจาก worker หลัง deploy ถ้า clientIp ไม่ใช่ IP ของ worker = มี NAT คั่น
+      (ทุกการกด Start จะไป AWS หมด) deploy ต้อง fail
+    - ตอบแค่ข้อมูลของเครื่องที่ถามเอง
+    """
+    client_ip = http_request.client.host if http_request.client else None
+    try:
+        node = session_service.get_warm_pod_service().node_for_ip(client_ip)
+        lab_machine, error = (node[0] if node else None), None
+    except Exception as e:
+        lab_machine, error = None, f"cannot reach Kubernetes: {e}"
+    return {
+        "success": True,
+        "message": "Client identified",
+        "data": {"clientIp": client_ip, "labMachine": lab_machine, "error": error},
+    }

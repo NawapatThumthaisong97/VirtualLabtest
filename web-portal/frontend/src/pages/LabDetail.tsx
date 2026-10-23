@@ -17,7 +17,6 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import LabLoader from '../components/LabLoader.tsx';
 import { labService } from '../services/lab';
-import { authService } from '../services/auth';
 import { sessionService } from '../services/session';
 import type { LabSession } from '../services/session';
 
@@ -65,7 +64,7 @@ export default function LabDetailPage() {
     isError,
   } = useQuery({
     queryKey: ['lab', labId],
-    queryFn: () => labService.getById(labId),
+    queryFn: () => labService.getDetail(labId),
     enabled: Boolean(labId),
   });
 
@@ -116,8 +115,7 @@ export default function LabDetailPage() {
     setIsLaunching(true);
     setLaunchError(null);
     try {
-      const me = await authService.me();
-      setSession(await sessionService.create(labId, me.id));
+      setSession(await sessionService.create(labId));
     } catch (err) {
       setLaunchError(readError(err));
     } finally {

@@ -18,3 +18,43 @@
     value: "1"
     state: present
     reload: yes
+
+# นาฬิกาคลาดเกิน 5 นาที = EC2 API ตอบ AuthFailure ทั้งที่ key ถูก (STS ยังผ่าน หาสาเหตุยาก)
+# เจอบน VM webservice (Ubuntu 26.04 / chrony) ช้า 5–15 นาที: VM อยู่บนโน้ตบุ๊ก โน้ตบุ๊กพักเครื่อง = VM หยุด
+# ตื่นมานาฬิกาช้าเท่าที่หลับ ค่าเดิม `makestep 1 3` step ได้แค่ 3 ครั้งแรกหลังบูต หลังจากนั้น slew ไล่ไม่ทัน
+# → ให้ step ได้ทุกครั้งที่คลาดเกิน 1 วินาที (-1 = ไม่จำกัดครั้ง) เครื่องที่ใช้ timesyncd ไม่มีไฟล์นี้ ข้ามไป
+- name: Check whether chrony is installed
+  ansible.builtin.stat:
+    path: /etc/chrony/chrony.conf
+  register: chrony_conf
+
+- name: Let chrony step the clock whenever it drifts (VM ที่ถูกพักบ่อย)
+  ansible.builtin.lineinfile:
+    path: /etc/chrony/chrony.conf
+    regexp: '^makestep\s'
+    line: "makestep 1 -1"
+  when: chrony_conf.stat.exists
+  register: chrony_makestep
+
+- name: Restart chrony to apply makestep
+  ansible.builtin.systemd:
+    name: chrony
+    state: restarted
+  when: chrony_makestep is changed
+
+# step ทันทีรอบนี้ด้วย ไม่ต้องรอ chrony วัดรอบถัดไป
+- name: Step the clock now if chrony is out of sync
+  ansible.builtin.shell: |
+    command -v chronyc >/dev/null || exit 0
+    [ "$(timedatectl show -p NTPSynchronized --value)" = yes ] && exit 0
+    chronyc makestep && echo stepped
+  register: clock_step
+  changed_when: "'stepped' in clock_step.stdout"
+
+- name: Check system clock is synchronized (EC2 / ECR ต้องการเวลาที่ตรง)
+  ansible.builtin.command: timedatectl show -p NTPSynchronized --value
+  register: clock_synced
+  changed_when: false
+  until: clock_synced.stdout == "yes"
+  retries: 6
+  delay: 10

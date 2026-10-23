@@ -24,7 +24,6 @@ env:
 jobs:
   session:
     name: Sky launch & session tests
-    if: false  # ปิดชั่วคราว รอ cluster / sky mock พร้อม
     # ระบุเวอร์ชันไว้ ubuntu-latest จะย้ายไป Ubuntu 26 เอง
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -63,7 +62,8 @@ jobs:
       - name: Run tests/session
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
-        run: pytest tests/session --color=yes
+        # test_skypilot_env.py อยู่นอกโฟลเดอร์ (ส่ง endpoint / token ของ SkyPilot กลางให้ sky SDK) รันใน job นี้
+        run: pytest tests/session tests/test_skypilot_env.py --color=yes
 
   course:
     name: Course & RBAC tests
