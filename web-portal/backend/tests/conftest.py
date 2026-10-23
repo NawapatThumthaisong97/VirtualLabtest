@@ -15,7 +15,25 @@ constraint ของ Postgres ใช้ SQLite ไม่ได้)
 (ไม่มี docstring จะใช้ชื่อ class / ฟังก์ชันแทน) ปิดได้ด้วย `pytest --no-case-table`
 """
 import os
+import sys
 from collections import Counter
+from types import ModuleType
+
+# ตั้งค่า default secret keys สำหรับ testing environment ถ้าไม่มีใน env
+os.environ.setdefault("SECRET_KEY", "test-secret-key-at-least-32-characters-long-123456")
+os.environ.setdefault("ADMIN_SESSION_SECRET_KEY", "test-admin-session-secret-key-at-least-32-characters")
+
+if sys.platform == "win32":
+    for _unix_mod in ("resource", "fcntl", "termios", "tty", "pty", "pwd", "grp", "syslog"):
+        if _unix_mod not in sys.modules:
+            _m = ModuleType(_unix_mod)
+            _m.__all__ = []  # type: ignore[attr-defined]
+            _m.getpagesize = lambda: 4096  # type: ignore[attr-defined]
+            _m.getrlimit = lambda *_: (1024, 4096)  # type: ignore[attr-defined]
+            _m.setrlimit = lambda *_: None  # type: ignore[attr-defined]
+            _m.ioctl = lambda _fd, _req, buf=b"", *_: buf  # type: ignore[attr-defined]
+            _m.__getattr__ = lambda _name: 0  # type: ignore[attr-defined]
+            sys.modules[_unix_mod] = _m
 
 import pytest
 from sqlalchemy import create_engine
@@ -45,14 +63,19 @@ def default_settings(monkeypatch):
     .env ของ dev เปิดฟีเจอร์ไว้ทดลอง (LAB_ISOLATION_ENABLED / WARM_POD_ENABLED / PREWARM_LEAD_MINUTES ฯลฯ)
     ถ้าเทสอ่านค่าพวกนี้ ผลจะขึ้นกับว่าเครื่องไหนรัน — เทสที่ต้องการค่าอื่นให้ monkeypatch เองในเทส
     """
-    defaults = type(settings)(_env_file=None)
-    for name in type(settings).model_fields:
-        if name not in SETTINGS_FROM_DOTENV:
+    # ค่าบังคับที่ไม่มี default (SECRET_KEY / ADMIN_SESSION_SECRET_KEY) ใช้ของเดิม ไม่งั้นสร้าง Settings ไม่ผ่าน
+    fields = type(settings).model_fields
+    required = {name: getattr(settings, name) for name, f in fields.items() if f.is_required()}
+    defaults = type(settings)(_env_file=None, **required)
+    for name in fields:
+        if name not in SETTINGS_FROM_DOTENV and name not in required:
             monkeypatch.setattr(settings, name, getattr(defaults, name))
 
 
 @pytest.fixture
 def service():
+    from app.services.session_service import SessionService
+
     # builder ไม่ใช้ db / repository เลยส่ง None ได้
     return SessionService(db=None, session_repository=None,
                           lab_repository=None, lab_image_repository=None)

@@ -11,9 +11,16 @@ exception ไว้ให้ get คืน / raise
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as _ns
 
-import sky
 from kubernetes.client.rest import ApiException
-from sky.exceptions import ClusterDoesNotExist
+
+try:
+    import sky
+    from sky.exceptions import ClusterDoesNotExist
+except ModuleNotFoundError:  # Windows ไม่มี module 'resource' ที่ sky เรียกใช้
+    sky = _ns(Task=object, StatusRefreshMode=object, ClusterStatus=_ns(UP="UP"))
+
+    class ClusterDoesNotExist(Exception):
+        pass
 
 
 class FakeRequest:
@@ -122,6 +129,8 @@ class FakeK8s:
         self.deleted_pods: list[str] = []
         self.error: Exception | None = None  # ตั้งไว้ = ทุกคำสั่ง raise (จำลอง K3s ล่ม)
         self.patch_conflict = False          # ตั้งไว้ = patch pod ได้ 409 (มีคนแย่งไปก่อน)
+        self.created_pods: list[dict] = []   # manifest ของ pod ตรงที่ create_namespaced_pod ได้รับ
+        self.pod_outcome = "ready"           # สถานะของ pod ตรงที่สร้าง (ดู create_namespaced_pod)
         self._rv = 0
         self.v1 = self
         self.apps_v1 = self
@@ -239,6 +248,35 @@ class FakeK8s:
         pod.metadata.resource_version = str(self._rv)
         return pod
 
+    def create_namespaced_pod(self, namespace, body):
+        """pod ตรง (build_lab_pod): สถานะตาม self.pod_outcome
+        ready = Running + Ready / unschedulable = เครื่องเต็ม / image_pull = ImagePullBackOff / pending = ค้างตลอด
+        """
+        self._check()
+        name = body["metadata"]["name"]
+        if self.pod(name) is not None:
+            raise ApiException(status=409, reason="AlreadyExists")
+        self.created_pods.append(body)
+        self._rv += 1
+        outcome = self.pod_outcome
+        conditions = [_ns(type="Ready", status="True" if outcome == "ready" else "False", reason=None, message=None)]
+        if outcome == "unschedulable":
+            conditions.append(_ns(type="PodScheduled", status="False", reason="Unschedulable",
+                                  message="0/2 nodes are available: 1 Insufficient memory."))
+        waiting = _ns(reason="ImagePullBackOff", message="Back-off pulling image") if outcome == "image_pull" else None
+        self.pods.append(_ns(
+            metadata=_ns(name=name, labels=dict(body["metadata"].get("labels", {})),
+                         annotations=dict(body["metadata"].get("annotations", {})),
+                         creation_timestamp=None, deletion_timestamp=None, resource_version=str(self._rv)),
+            spec=_ns(node_name=body["spec"].get("nodeSelector", {}).get("kubernetes.io/hostname")),
+            status=_ns(phase="Running" if outcome == "ready" else "Pending", conditions=conditions,
+                       container_statuses=[_ns(state=_ns(waiting=waiting, running=None, terminated=None))]),
+        ))
+
+    def read_namespaced_pod_log(self, name, namespace, tail_lines=None):
+        self._check()
+        return f"log of {name}"
+
     def delete_namespaced_pod(self, name, namespace):
         self._check()
         self.deleted_pods.append(name)
@@ -250,3 +288,46 @@ class FakeK8s:
     def list_node(self):
         self._check()
         return _ns(items=list(self.nodes))
+
+
+# ---------------------------------------------------------------- Google SSO
+
+from app.adapters.sso_adapter import SSOUserInfo
+from app.exceptions.domain import SSOAuthenticationError
+
+
+class FakeGoogleSSO:
+    """ตัวแทน GoogleSSOAdapter ตอนเทส ไม่เรียก Google OAuth2 จริง"""
+
+    def __init__(self):
+        self.codes: dict[str, SSOUserInfo] = {}
+        self.id_tokens: dict[str, SSOUserInfo] = {}
+        self.access_tokens: dict[str, SSOUserInfo] = {}
+        self.exchanged_codes: list[tuple[str, str | None]] = []
+
+    def build_authorization_url(
+        self, state: str | None = None, redirect_uri: str | None = None
+    ) -> str:
+        redir = redirect_uri or "http://localhost:8000/api/auth/sso/callback"
+        url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id=test-client&redirect_uri={redir}&hd=dome.tu.ac.th"
+        if state:
+            url += f"&state={state}"
+        return url
+
+    def exchange_code(
+        self, code: str, redirect_uri: str | None = None
+    ) -> SSOUserInfo:
+        self.exchanged_codes.append((code, redirect_uri))
+        if code not in self.codes:
+            raise SSOAuthenticationError("invalid authorization code")
+        return self.codes[code]
+
+    def verify_id_token(self, id_token: str) -> SSOUserInfo:
+        if id_token not in self.id_tokens:
+            raise SSOAuthenticationError("invalid id_token")
+        return self.id_tokens[id_token]
+
+    def fetch_user_info(self, access_token: str) -> SSOUserInfo:
+        if access_token not in self.access_tokens:
+            raise SSOAuthenticationError("invalid access_token")
+        return self.access_tokens[access_token]

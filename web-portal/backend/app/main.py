@@ -6,13 +6,30 @@ Entry point for the FastAPI backend
 import asyncio
 import os
 import sys
+from types import ModuleType
+
+if sys.platform == "win32":
+    for _unix_mod in ("resource", "fcntl", "termios", "tty", "pty", "pwd", "grp", "syslog"):
+        if _unix_mod not in sys.modules:
+            _m = ModuleType(_unix_mod)
+            _m.__all__ = []  # type: ignore[attr-defined]
+            _m.getpagesize = lambda: 4096  # type: ignore[attr-defined]
+            _m.getrlimit = lambda *_: (1024, 4096)  # type: ignore[attr-defined]
+            _m.setrlimit = lambda *_: None  # type: ignore[attr-defined]
+            _m.ioctl = lambda _fd, _req, buf=b"", *_: buf  # type: ignore[attr-defined]
+            _m.__getattr__ = lambda _name: 0  # type: ignore[attr-defined]
+            sys.modules[_unix_mod] = _m
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqladmin import Admin, ModelView
 
 from app.configs import settings, check_db_connection
@@ -43,6 +60,7 @@ from app.exceptions.domain import (
 )
 from app.middlewares.admin_auth import AdminAuth
 from app.routes import api_router
+from app.schemas.response import ApiResponse, ErrorDetail
 from app.utils.logger import logger
 
 
@@ -227,6 +245,14 @@ STATUS_MAP = {
 }
 
 
+def error_response_content(code: str, message: str) -> dict:
+    return ApiResponse[None](
+        success=False,
+        message=message,
+        error=ErrorDetail(code=code, message=message),
+    ).model_dump(by_alias=True, exclude_none=True)
+
+
 @app.exception_handler(DomainError)
 async def domain_exception_handler(request, exc: DomainError):
     """
@@ -245,14 +271,75 @@ async def domain_exception_handler(request, exc: DomainError):
             break
 
     logger.warning(f"[{exc.code}] {exc.message}")
+    
+    # Generic message based on error type for top-level message
+    generic_messages = {
+        status.HTTP_404_NOT_FOUND: "Resource not found",
+        status.HTTP_403_FORBIDDEN: "Access denied",
+        status.HTTP_401_UNAUTHORIZED: "Authentication required",
+        status.HTTP_409_CONFLICT: "Resource conflict",
+        status.HTTP_400_BAD_REQUEST: "Invalid request",
+        status.HTTP_500_INTERNAL_SERVER_ERROR: "Internal server error",
+    }
+    
+    generic_message = generic_messages.get(status_code, "Request failed")
 
     return JSONResponse(
         status_code=status_code,
+        content=error_response_content(exc.code, exc.message),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(request, exc: RequestValidationError):
+    logger.warning("Request validation failed")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=error_response_content(
+            "validation_error", "Request validation failed"
+        ),
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request, exc: StarletteHTTPException):
+    message = str(exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response_content("http_error", message),
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """
+    จับ Pydantic validation errors (เช่น UUID ผิดรูปแบบ, required field หาย)
+    แปลงให้เป็น format เดียวกับระบบ
+    """
+    # ดึง error message แรก (ปกติจะมีหลาย errors)
+    errors = exc.errors()
+    first_error = errors[0] if errors else {}
+    
+    # สร้าง error message ที่อ่านง่าย
+    field_name = " -> ".join(str(loc) for loc in first_error.get("loc", []))
+    error_msg = first_error.get("msg", "Validation error")
+    
+    message = f"Invalid {field_name}: {error_msg}"
+    
+    logger.warning(f"Validation error: {message}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
         content={
             "success": False,
-            "message": exc.message,
+            "message": message,
             "data": None,
-            "error": {"code": exc.code, "message": exc.message},
+            "error": {
+                "code": "validation_error",
+                "message": message,
+                "details": errors,  # รายละเอียดเต็มสำหรับ debug
+            },
         },
     )
 
@@ -261,21 +348,33 @@ async def domain_exception_handler(request, exc: DomainError):
 async def sqlalchemy_exception_handler(request, exc):
     """จับ database errors"""
     logger.error(f"Database error: {str(exc)}")
-    return JSONResponse(status_code=500, content={"detail": "Database error occurred"})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_response_content("database_error", "Database error occurred"),
+    )
 
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request, exc):
     """จับ validation errors"""
     logger.warning(f"Validation error: {str(exc)}")
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    message = str(exc)
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=error_response_content("validation_error", message),
+    )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """จับ unexpected errors"""
     logger.error(f"Unexpected error: {str(exc)}", exc_info=True)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_response_content(
+            "internal_server_error", "Internal server error"
+        ),
+    )
 
 
 # Health Check Endpoint
@@ -307,7 +406,14 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 
 # Setup SQLAdmin
 admin = Admin(
-    app, engine, authentication_backend=AdminAuth(secret_key=settings.SECRET_KEY)
+    app,
+    engine,
+    authentication_backend=AdminAuth(
+        secret_key=settings.ADMIN_SESSION_SECRET_KEY,
+        session_cookie="virtual_lab_admin_session",
+        same_site="strict",
+        https_only=True,
+    ),
 )
 
 # Add model views to admin

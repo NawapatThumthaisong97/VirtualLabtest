@@ -19,6 +19,14 @@ class AnnouncementResponse(CamelModel):
     author_name: str | None = None
 
 
+class AnnouncementCreateRequest(CamelModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+class AnnouncementUpdateRequest(CamelModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
 class CourseResponse(CamelModel):
     id: UUID
     code: str
@@ -41,7 +49,7 @@ class CourseCreateRequest(CamelModel):
     image_url: str | None = Field(None, max_length=2048)
     background_key: BackgroundKey | None = None
     icon_key: IconKey | None = None
-    created_by: UUID
+    # created_by จะถูกดึงจาก JWT token ใน route handler
 
 
 class CourseUpdateRequest(CamelModel):

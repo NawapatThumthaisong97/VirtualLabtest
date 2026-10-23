@@ -1,0 +1,94 @@
+[SERVICE]
+    Flush         1
+    Log_Level     info
+    Daemon        off
+    HTTP_Server   On
+    HTTP_Listen   127.0.0.1
+    HTTP_Port     {{ fluent_bit_http_port }}
+    Parsers_File  parsers.conf
+
+# ==============================================================================
+# INPUTS: STRICT PLANE SEPARATION
+# ONLY monitor System & Boundary logs. NEVER monitor student pod container logs
+# ==============================================================================
+
+# 1. System OOM, Node Crashes, Kernel errors via Systemd Journal
+[INPUT]
+    Name            systemd
+    Tag             system.journal
+    Path            /var/log/journal
+    Read_From_Tail  On
+    Strip_Underscores On
+
+# 2. Squid Proxy Boundary Logs (TCP_DENIED / Egress Drops)
+[INPUT]
+    Name            tail
+    Tag             boundary.squid
+    Path            {{ squid_access_log_path }}
+    Parser          squid_parser
+    Read_From_Head  Off
+    Skip_Long_Lines On
+    DB              /var/log/fluent-bit-squid.db
+
+# 3. Kyverno / Admission Controller Audit Logs (Security Boundary Violations)
+[INPUT]
+    Name            tail
+    Tag             boundary.kyverno
+    Path            {{ kyverno_log_path }}
+    Parser          json
+    Read_From_Head  Off
+    Skip_Long_Lines On
+    DB              /var/log/fluent-bit-kyverno.db
+
+# 4. Tailscale ACL Deny Events
+[INPUT]
+    Name            tail
+    Tag             boundary.tailscale
+    Path            {{ tailscale_log_path }}
+    Parser          json
+    Read_From_Head  Off
+    Skip_Long_Lines On
+    DB              /var/log/fluent-bit-tailscale.db
+
+# ==============================================================================
+# FILTERS: FILTERING, REDACTING & TRANSFORMING TO STANDARD SIEM SCHEMA
+# ==============================================================================
+
+# Filter out non-security journal entries, retain only OOM / Crash / Failures
+[FILTER]
+    Name    grep
+    Match   system.journal
+    Regex   MESSAGE (?i)(oom[_-]killer|out of memory|kernel panic|segfault|systemd\[1\]: Failed to start)
+
+
+# Transform & Map fields to Standard Ingestion Schema
+[FILTER]
+    Name    lua
+    Match   boundary.*
+    script  transform_siem.lua
+    call    cb_transform_boundary
+
+[FILTER]
+    Name    lua
+    Match   system.journal
+    script  transform_siem.lua
+    call    cb_transform_journal
+
+# ==============================================================================
+# OUTPUT: FORWARD TO BACKEND SIEM INGESTION VIA ZERO TRUST PATHWAY
+# ==============================================================================
+
+[OUTPUT]
+    Name                http
+    Match               *
+    Host                {{ siem_ingest_host }}
+    Port                {{ siem_ingest_port }}
+    URI                 {{ siem_ingest_path }}
+    Format              json
+    Header              Content-Type application/json
+    {% if siem_ingest_token | length > 0 %}
+    Header              Authorization Bearer {{ siem_ingest_token }}
+    {% endif %}
+    Retry_Limit         5
+    tls                 Off
+

@@ -66,6 +66,10 @@ class SessionAlreadyExistsError(ConflictError):
     code = "session_already_exists"
 
 
+class QuotaExceededError(ConflictError):
+    code = "quota_exceeded"
+
+
 # ---------- 401 ----------
 class UnauthorizedError(DomainError):
     """ยังไม่ได้ล็อกอิน หรือ token ใช้ไม่ได้"""
@@ -81,11 +85,23 @@ class InvalidTokenError(UnauthorizedError):
     code = "invalid_token"
 
 
+class SSOAuthenticationError(UnauthorizedError):
+    """การยืนยันตัวตนผ่านระบบ SSO ไม่สำเร็จ หรือข้อมูลจาก SSO ไม่ครบถ้วน"""
+
+    code = "sso_authentication_failed"
+
+
 # ---------- 403 ----------
 class ForbiddenError(DomainError):
     """ไม่มีสิทธิ์ทำสิ่งนี้"""
 
     code = "forbidden"
+
+
+class InvalidEmailDomainError(ForbiddenError):
+    """อีเมลไม่อยู่ภายใต้โดเมนของมหาวิทยาลัยที่อนุญาต"""
+
+    code = "invalid_email_domain"
 
 
 # ---------- 400 ----------

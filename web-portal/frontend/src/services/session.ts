@@ -33,10 +33,10 @@ export const sessionService = {
    * สร้าง session ใหม่ — ใช้เวลาราว 1-2 นาที เพราะรอ pod พร้อมก่อนถึงจะตอบกลับ
    * ไม่ได้ตอบทันทีแล้วให้ poll เอา ฉะนั้นฝั่ง UI ต้องมี loader คั่นไว้
    */
-  create: async (labId: string, userId: string): Promise<LabSession> => {
+  // backend ใช้ user ที่ login (cookie) ไม่รับ user_id ใน body (schema extra=forbid → 422)
+  create: async (labId: string): Promise<LabSession> => {
     const response = await apiClient.post<ApiResponse<LabSession>>('/sessions', {
-      lab_id: labId,
-      user_id: userId,
+      labId,
     });
     return (response as unknown as ApiResponse<LabSession>).data;
   },

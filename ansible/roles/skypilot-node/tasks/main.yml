@@ -7,6 +7,8 @@
       - cloudflare_tunnel_token is defined
       - skypilot_chart_version is defined
       - skypilot_admin_password is defined
+      - skypilot_aws_access_key_id is defined
+      - skypilot_aws_secret_access_key is defined
     fail_msg: "Missing required variables. Please check group_vars/all.yml"
     success_msg: "All required variables are defined"
 
@@ -110,6 +112,25 @@
   no_log: true
   when: skypilot_admin_secret.rc != 0
 
+# AWS credential ของ IAM user Skypilot-IAM (ไม่ใช่ root) ให้ server กลาง launch lab บน EC2
+# helm อ่านจาก secret นี้ (awsCredentials.enabled ข้างล่าง) ถ้าไม่มี pod ของ server ขึ้นไม่ได้
+# apply ทับทุกรอบ เปลี่ยน key ใน group_vars แล้วรันใหม่ได้เลย (ต้อง restart pod ให้อ่านค่าใหม่)
+- name: Create AWS credentials secret (Skypilot-IAM)
+  ansible.builtin.shell: |
+    set -o pipefail
+    k3s kubectl create secret generic aws-credentials -n skypilot \
+      --from-literal=aws_access_key_id="$AWS_ACCESS_KEY_ID" \
+      --from-literal=aws_secret_access_key="$AWS_SECRET_ACCESS_KEY" \
+      --dry-run=client -o yaml | k3s kubectl apply -f -
+  args:
+    executable: /bin/bash
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ skypilot_aws_access_key_id }}"
+    AWS_SECRET_ACCESS_KEY: "{{ skypilot_aws_secret_access_key }}"
+  register: aws_secret
+  changed_when: "'unchanged' not in aws_secret.stdout"
+  no_log: true
+
 # ติดตั้ง SkyPilot API Server ผ่าน Helm
 - name: Add SkyPilot Helm repo
   ansible.builtin.shell: |
@@ -123,14 +144,18 @@
     content: |
       # API Service configuration
       apiService:
-        # Resources for SkyPilot API Server (1.5 CPU, 1.5Gi RAM เพื่อให้พอดีกับ node)
+        # Resources for SkyPilot API Server
+        # memory: เดิม limit 2Gi → container ชนเพดานตลอด (memory.events max หลายร้อยครั้ง) ช้าจน backend
+        # ได้ "Could not connect" และโดน OOMKilled 3 ครั้งใน 1 วัน (2026-10-19) เพราะ server แยก process
+        # ต่อ request ตัวละ 150–290MB ระหว่าง launch — ขยายเป็น 2Gi / 4Gi (master มี RAM 7G)
+        # requests ใช้เป็น SKYPILOT_POD_MEMORY_BYTES_LIMIT ให้ SkyPilot คำนวณจำนวน worker ด้วย
         resources:
           requests:
             cpu: "1500m"
-            memory: "1536Mi"
+            memory: "2Gi"
           limits:
             cpu: "2000m"
-            memory: "2Gi"
+            memory: "4Gi"
         
         # Upgrade strategy (Recreate จำเป็นเมื่อ storage เป็น ReadWriteOnce)
         upgradeStrategy: Recreate
@@ -166,7 +191,7 @@
             remote_identity: vlab-lab-ecr-pull
 
       # AWS credential (IAM user Skypilot-IAM) จาก secret aws-credentials ใน ns skypilot
-      # secret สร้างเองครั้งเดียว (role ไม่สร้าง) ถ้าไม่ตั้งค่านี้ helm upgrade จะถอด credential ออก
+      # secret สร้างใน task "Create AWS credentials secret" ถ้าไม่ตั้งค่านี้ helm upgrade จะถอด credential ออก
       # แล้ว lab ที่ run_target = AWS launch ไม่ได้
       awsCredentials:
         enabled: true
@@ -336,9 +361,13 @@
             containers:
             - name: cloudflared
               image: cloudflare/cloudflared:latest
+              # --protocol http2: เน็ตบ้านบล็อก UDP 7844 (QUIC) cloudflared รุ่นใหม่ไม่ถอยไป http2 เอง
+              # วน retry QUIC ไม่จบ → dashboard ตอบ 530 (เจอตอนลง master ใหม่ 2026-10-20)
               args:
               - tunnel
               - --no-autoupdate
+              - --protocol
+              - http2
               - run
               - --token
               - $(TUNNEL_TOKEN)

@@ -33,6 +33,14 @@ LOCALHOST = "127.0.0.1"
 # ชื่อ pod ของ DaemonSet = <ชื่อ DaemonSet>-xxxxx reconciler / delete ใช้ prefix นี้แยก session ของ
 # warm pod ออกจาก session seed ที่มี k8s_pod_name แต่ไม่ได้มาจาก launch จริง
 WARM_POD_PREFIX = "warm-"
+# pod ตรง (สร้างตอนกด Start จากเครื่องแลปที่ไม่มี warm pod) = lab-pod-<session id 8 ตัวแรก>
+# ไม่ใช้แค่ "lab-" เพราะ seed มี session ที่ k8s_pod_name = lab-se301-sophia (ไม่มี pod จริง) reconciler จะไปปิดมัน
+DIRECT_POD_PREFIX = "lab-pod-"
+DIRECT_LABEL = "vlab/direct"
+
+# container ค้างสถานะนี้ = ไม่มีวันขึ้นเอง ไม่ต้องรอจนหมดเวลา
+FATAL_WAITING_REASONS = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName",
+                         "CreateContainerConfigError", "CrashLoopBackOff"}
 
 
 def warm_daemonset_name(lab_image) -> str:
@@ -73,19 +81,16 @@ def _host_port(port: int) -> dict:
     return mapping
 
 
-def build_warm_daemonset(lab_image) -> dict:
-    """DaemonSet ที่รัน lab จริงบนทุก worker
+def _lab_container(lab_image) -> dict:
+    """container ของ lab — warm pod (DaemonSet) กับ pod ตรง (build_lab_pod) ใช้ตัวเดียวกัน
 
     พอร์ตใช้ hostPort = เปิดที่ IP ของเครื่องนั้นตรง ๆ นักศึกษาที่นั่งเครื่องนั้นเปิด http://<IP เครื่อง>:<port>
-    ข้อจำกัด: 1 เครื่องมี warm pod ที่ใช้พอร์ตเดียวกันได้แค่ 1 ตัว (2 lab ที่ใช้ 8080 พร้อมกัน ตัวที่ 2 จะ Pending)
+    ข้อจำกัด: 1 เครื่องมี pod ที่ใช้พอร์ตเดียวกันได้แค่ 1 ตัว (2 lab ที่ใช้ 8080 พร้อมกัน ตัวที่ 2 จะ Pending)
     """
-    name = warm_daemonset_name(lab_image)
-    image = k8s_image_ref(lab_image)
     ports = lab_image.get_skypilot_resources().get("ports") or []
-
     container: dict[str, Any] = {
         "name": "lab",
-        "image": image,
+        "image": k8s_image_ref(lab_image),
         "imagePullPolicy": "IfNotPresent",
         "env": [{"name": k, "value": v} for k, v in lab_envs(lab_image).items()],
         "ports": [_host_port(int(p)) for p in ports],
@@ -101,6 +106,14 @@ def build_warm_daemonset(lab_image) -> dict:
                                   ("memory", _memory(lab_image.memory_requirement))) if v}
     if requests:
         container["resources"] = {"requests": requests}
+    return container
+
+
+def build_warm_daemonset(lab_image) -> dict:
+    """DaemonSet ที่รัน lab จริงบนทุก worker (container จาก _lab_container)"""
+    name = warm_daemonset_name(lab_image)
+    image = k8s_image_ref(lab_image)
+    container = _lab_container(lab_image)
 
     return {
         "apiVersion": "apps/v1",
@@ -130,6 +143,59 @@ def build_warm_daemonset(lab_image) -> dict:
             },
         },
     }
+
+
+def direct_pod_name(session_id) -> str:
+    return f"{DIRECT_POD_PREFIX}{str(session_id)[:8]}"
+
+
+def build_lab_pod(lab_image, node: str, session_id) -> dict:
+    """pod ตรงของ lab บนเครื่องที่กด Start — container เดียวกับ warm pod แต่สร้างตอนกด (docs/LAB_DIRECT_POD.md)
+
+    nodeSelector (ไม่ใช้ nodeName) ให้ scheduler เช็กที่ว่างก่อน เต็ม = Pending / Unschedulable แทนที่จะ
+    ไปลงแล้วโดน kubelet ปฏิเสธ (OutOfcpu) label vlab/lab ให้ NetworkPolicy vlab-lab-isolation ปิดขาเข้า
+    """
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": direct_pod_name(session_id),
+            "labels": {LAB_LABEL: "true", DIRECT_LABEL: "true"},
+            "annotations": {LAB_IMAGE_ANNOTATION: str(lab_image.id), SESSION_ANNOTATION: str(session_id)},
+        },
+        "spec": {
+            "nodeSelector": {"kubernetes.io/hostname": node},
+            "restartPolicy": "Always",
+            "terminationGracePeriodSeconds": 5,
+            "containers": [_lab_container(lab_image)],
+        },
+    }
+
+
+def is_ready(pod) -> bool:
+    return any(c.type == "Ready" and c.status == "True" for c in ((pod.status.conditions or []) if pod.status else []))
+
+
+def pod_problem(pod) -> Optional[str]:
+    """เหตุผลที่ pod ไม่มีวันขึ้นเอง (None = ยังรอต่อได้)
+
+    - Unschedulable: เครื่องไม่มีที่ว่าง (CPU / RAM / hostPort ชนกับ pod อื่น)
+    - container ค้าง ErrImagePull / ImagePullBackOff / CrashLoopBackOff …
+    - phase Failed / Succeeded (restartPolicy Always ไม่ควรเกิด ถ้าเกิดคือพังแล้ว)
+    """
+    status = pod.status
+    if status is None:
+        return None
+    if status.phase in ("Failed", "Succeeded"):
+        return f"pod {status.phase}"
+    for c in status.conditions or []:
+        if c.type == "PodScheduled" and c.status == "False" and getattr(c, "reason", None) == "Unschedulable":
+            return f"Unschedulable: {getattr(c, 'message', '') or ''}".strip()
+    for cs in status.container_statuses or []:
+        waiting = cs.state.waiting if cs.state else None
+        if waiting is not None and waiting.reason in FATAL_WAITING_REASONS:
+            return f"{waiting.reason}: {getattr(waiting, 'message', '') or ''}".strip()
+    return None
 
 
 class WarmPodService:
@@ -213,9 +279,37 @@ class WarmPodService:
                 continue
             if pod.metadata.deletion_timestamp is not None or pod.status.phase != "Running":
                 continue
-            if any(c.type == "Ready" and c.status == "True" for c in (pod.status.conditions or [])):
+            if is_ready(pod):
                 return pod
         return None
+
+    def has_starting_pod(self, node: str, lab_image_id) -> bool:
+        """มี warm pod ว่างของ lab image นี้บนเครื่องนี้ที่กำลังขึ้น (ยังไม่ Ready ไม่ได้ถูกลบ ไม่ได้พัง)"""
+        pods = self.v1.list_namespaced_pod(
+            self.namespace,
+            label_selector=f"{WARM_LABEL}=true,{STATE_LABEL}=free",
+            field_selector=f"spec.nodeName={node}",
+        ).items
+        return any(
+            (pod.metadata.annotations or {}).get(LAB_IMAGE_ANNOTATION) == str(lab_image_id)
+            and pod.metadata.deletion_timestamp is None
+            and not is_ready(pod)
+            and pod_problem(pod) is None
+            for pod in pods
+        )
+
+    def create_pod(self, body: dict) -> None:
+        self.v1.create_namespaced_pod(self.namespace, body)
+
+    def read_pod(self, name: str):
+        return self.v1.read_namespaced_pod(name, self.namespace)
+
+    def pod_log_tail(self, name: str, lines: int = 200) -> str:
+        """ท้าย log ของ pod (ไว้ log ก่อนลบ pod ที่พัง ลบแล้วดูไม่ได้อีก) อ่านไม่ได้ = ข้อความบอกเหตุ"""
+        try:
+            return self.v1.read_namespaced_pod_log(name, self.namespace, tail_lines=lines) or ""
+        except Exception as e:
+            return f"(cannot read pod log: {e})"
 
     def claim(self, pod, session_id) -> bool:
         """แจก pod ให้ session ถ้ามีคนแย่งไปก่อน (resourceVersion เปลี่ยน) k8s ตอบ 409 → คืน False

@@ -7,6 +7,7 @@
     - { role: tailscale, tags: ['tailscale'] }
     - { role: k3s-server, tags: ['k3s-server'] }
     - { role: skypilot-node, tags: ['skypilot-node'] }
+    - { role: siem-log-forwarding, tags: ['siem-log-forwarding', 'monitoring'] }
 
 - name: Provision Virtual-Lab workers
   hosts: workers
@@ -14,7 +15,8 @@
   roles:
     - { role: common, tags: ['common'] }
     - { role: tailscale, tags: ['tailscale'] }
-    - { role: k3s-agent, tags: ['k3s-agent'] }  
+    - { role: k3s-agent, tags: ['k3s-agent'] }
+    - { role: siem-log-forwarding, tags: ['siem-log-forwarding', 'monitoring'] }  
 
 - name: Provision Virtual-Lab registry
   hosts: registry
@@ -24,10 +26,10 @@
     - { role: registry, tags: ['registry'] }
 
 # วางท้ายสุดเพราะต้องดึง kubeconfig จาก master ที่ provision เสร็จแล้ว
-- name: Provision Virtual-Lab web portal
-  hosts: webportal
+- name: Provision Virtual-Lab web service
+  hosts: webservice
   become: yes
   roles:
     - { role: common, tags: ['common'] }
     - { role: tailscale, tags: ['tailscale'] }
-    - { role: web-portal, tags: ['web-portal'] }
+    - { role: web-service, tags: ['web-service'] }

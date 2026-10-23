@@ -3,8 +3,9 @@ from app.configs.settings import SKYPILOT_ENV_KEYS, Settings, export_skypilot_en
 
 
 def _settings(**values) -> Settings:
-    # ไม่อ่าน .env จริงของเครื่อง
-    return Settings(_env_file=None, **values)
+    # ไม่อ่าน .env จริงของเครื่อง (ค่าบังคับที่ไม่มี default ใส่ค่าเทสให้)
+    required = {"SECRET_KEY": "s" * 32, "ADMIN_SESSION_SECRET_KEY": "x" * 32}
+    return Settings(_env_file=None, **{**required, **values})
 
 
 def test_exports_endpoint_and_token(monkeypatch):

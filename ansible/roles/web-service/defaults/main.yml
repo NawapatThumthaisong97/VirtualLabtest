@@ -1,0 +1,65 @@
+# ที่ตั้งของ web-portal (โค้ดแอป) บนเครื่อง target
+webservice_dir: /opt/web-service
+
+# ผูก port กับ Tailscale IP ของเครื่องเอง ไม่ใช่ 0.0.0.0
+# กัน service โผล่บน interface อื่นโดยไม่ตั้งใจ
+webservice_bind_ip: "{{ ansible_host }}"
+
+webservice_http_port: 80
+webservice_api_port: 8000
+
+# --- Postgres ---
+webservice_postgres_user: postgres
+webservice_postgres_db: virtual_lab
+# ค่าจริงควรมาจาก vault — default ไว้ให้รันได้ก่อนแต่ต้องเปลี่ยน
+webservice_postgres_password: "{{ vault_postgres_password | default('changeme-in-vault') }}"
+
+# --- Backend ---
+# SECRET_KEY / ADMIN_SESSION_SECRET_KEY ต้องยาว >= 32 ตัว (settings บังคับ ไม่งั้น backend ไม่ start)
+# สร้างด้วย: python3 -c 'import secrets;print(secrets.token_urlsafe(48))' แล้วใส่ใน group_vars
+webservice_secret_key: "{{ vault_backend_secret_key }}"
+webservice_admin_session_secret_key: "{{ vault_admin_session_secret_key }}"
+webservice_debug: false
+webservice_api_prefix: /api
+
+# master ที่ backend จะคุยด้วยผ่าน kubeconfig
+webservice_k8s_master_ip: "{{ hostvars[groups['master'][0]]['ansible_host'] }}"
+
+# registry ที่ SkyPilot จะดึง image ของ lab ไปใช้ — ดึงจาก inventory ไม่ฮาร์ดโค้ด
+# ค่า default ในโค้ด (session_service) ชี้ registry เก่าที่ตายแล้ว ต้องส่งค่านี้
+# ไปทับเสมอ ไม่งั้น pod จะ pull image ไม่ได้
+webservice_registry_endpoint: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}:5001"
+webservice_k8s_enabled: true
+
+# seed ข้อมูล persona (Sophia + วิชา + lab) — ปิดไว้เป็นค่าเริ่มต้นเพราะเขียนทับ
+# ข้อมูลเดิมได้ เปิดตอนตั้งเครื่องใหม่ด้วย -e webservice_seed=true
+webservice_seed: false
+
+# SkyPilot กลางที่ backend ส่ง launch ไป (role skypilot-node) — "" = ใช้ SkyPilot ใน container แทน
+# ชี้ NodePort 30880 บน master ผ่าน Tailscale (k8s/skypilot-api-tailnet-service.yaml) ไม่ใช่ https://<skypilot_domain>
+# เพราะทาง Cloudflare ช้าจน sky SDK timeout — เครื่อง web-service ต้องติด tag:vlab-server ถึงเข้าพอร์ตนี้ได้
+webservice_skypilot_endpoint: "http://{{ webservice_k8s_master_ip }}:30880"
+# token ของ service account (สร้างจาก dashboard) ต้องตั้งใน group_vars เมื่อใช้ SkyPilot กลาง
+webservice_skypilot_token: "{{ skypilot_backend_token | default('') }}"
+
+# --- AWS (lab ที่ run_target = AWS / AUTO จากข้างนอก) ---
+# ค่าเดิมของ VPC vlab-ecr-pull ดู docs/NextToU.md หัวข้อ 2.1 — server กลางเป็นคน launch EC2
+# backend ใช้ AWS เองแค่ขอ ECR token (ใส่ใน setup ของ lab ให้ EC2 docker pull ได้)
+webservice_aws_region: ap-southeast-1
+webservice_aws_lab_ami: ami-0da9046ec7f57f3af
+webservice_aws_instance_type: m7i-flex.large
+webservice_aws_disk_size: 30
+webservice_ecr_registry_host: 568318158381.dkr-ecr.ap-southeast-1.on.aws
+# key ของ IAM user Skypilot-IAM ชุดเดียวกับ role skypilot-node — ห้ามใช้ root
+# ไม่ตั้ง = ไม่มี credential ใน container → lab AWS / AUTO จากข้างนอก launch ไม่ได้
+webservice_aws_access_key_id: "{{ skypilot_aws_access_key_id | default('') }}"
+webservice_aws_secret_access_key: "{{ skypilot_aws_secret_access_key | default('') }}"
+
+# --- prewarm / warm pod / lab isolation (ดู docs/RUNBOOK.md หัวข้อ 3) ---
+webservice_prewarm_enabled: true
+webservice_prewarm_lead_minutes: 30
+webservice_warm_pod_enabled: true
+webservice_lab_isolation_enabled: true
+# กดจากเครื่องแลปแต่ไม่มี warm pod: pod = สร้าง pod ตรง (ค่าเริ่ม) / skypilot = ทางเดิม SkyPilot in-cluster (สำรอง)
+# ดู docs/LAB_DIRECT_POD.md สลับตอนรัน: -e webservice_lab_machine_launch=skypilot
+webservice_lab_machine_launch: pod

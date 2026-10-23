@@ -7,9 +7,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import styles from './Login.module.css';
-import { authService } from '../services/auth';
+import { useAuth } from '../contexts/AuthContext';
 
 import art1 from '../assets/login/ART_1.jpeg';
 import art2 from '../assets/login/ART_2.jpeg';
@@ -62,13 +62,52 @@ const LINES = [
   { x1: 59, y1: 68, x2: 60, y2: 92, d: '2.15s' },
 ];
 
+const GOOGLE_PATHS: [string, string][] = [
+  [
+    '#4285F4',
+    'M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47a5.55 5.55 0 0 1-2.4 3.64v3h3.86c2.26-2.09 3.56-5.17 3.56-8.88z',
+  ],
+  [
+    '#34A853',
+    'M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09A11.99 11.99 0 0 0 12 24z',
+  ],
+  ['#FBBC05', 'M5.27 14.29a7.19 7.19 0 0 1 0-4.58V6.62H1.29a12.04 12.04 0 0 0 0 10.76l3.98-3.09z'],
+  [
+    '#EA4335',
+    'M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z',
+  ],
+];
+
 type Point = { x: number; y: number };
 
 export default function LoginPage() {
   const pageRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { login, loginWithSSO, isAuthenticated, isLoading } = useAuth();
+
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState(false);
+
+  // Determine redirection destination after successful authentication
+  const destination = (location.state as { from?: { pathname?: string } })?.from?.pathname || '/';
+
+  // If already authenticated, redirect to destination immediately
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      navigate(destination, { replace: true });
+    }
+  }, [isAuthenticated, isLoading, navigate, destination]);
+
+  // Read error message from URL query params (e.g. from OAuth redirect failure)
+  useEffect(() => {
+    const errorParam = searchParams.get('error');
+    if (errorParam) {
+      setError(errorParam);
+    }
+  }, [searchParams]);
 
   /* The two segments behind the quote are measured at runtime: images are
      px-sized and the quote's box depends on the webfont, so hard-coded %
@@ -115,6 +154,24 @@ export default function LoginPage() {
     setLine(`.${styles.lQuoteBottom}`, B, gapEnd);
   }, []);
 
+  const handleSsoClick = async () => {
+    setError(null);
+    setSsoLoading(true);
+    try {
+      await loginWithSSO();
+    } catch (err: unknown) {
+      let msg = 'ไม่สามารถเชื่อมต่อกับระบบ SSO ของมหาวิทยาลัยได้';
+      if (typeof err === 'object' && err !== null && 'response' in err) {
+        const resp = (err as { response?: { data?: { error?: { message?: string } } } }).response;
+        if (resp?.data?.error?.message) {
+          msg = resp.data.error.message;
+        }
+      }
+      setError(msg);
+      setSsoLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -129,9 +186,9 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await authService.login(username, password);
-      navigate('/');
-    } catch (err) {
+      await login(username, password);
+      navigate(destination, { replace: true });
+    } catch (err: unknown) {
       const status = (err as { response?: { status?: number } }).response?.status;
       setError(
         status === 401
@@ -146,14 +203,28 @@ export default function LoginPage() {
   useEffect(() => {
     const page = pageRef.current;
     layoutQuoteLines();
-    const raf = requestAnimationFrame(() => page?.classList.add(styles.play));
+    // เริ่ม animation (art node / เส้น / quote อยู่ใต้ .play ใน Login.module.css) หลังเฟรมแรก
+    // ไม่ใส่ = ทุกอย่างโผล่ทันที (หายตอน merge main — effect นี้ถูกเขียนใหม่ให้มี ResizeObserver)
+    const playRaf = requestAnimationFrame(() => page?.classList.add(styles.play));
+
+    let raf = 0;
+    const observer =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(layoutQuoteLines);
+          })
+        : null;
+    if (page && observer) observer.observe(page);
 
     window.addEventListener('resize', layoutQuoteLines);
     // the quote uses a webfont — its box changes once the serif loads
     document.fonts?.ready.then(layoutQuoteLines);
     return () => {
+      cancelAnimationFrame(playRaf);
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', layoutQuoteLines);
+      if (observer) observer.disconnect();
     };
   }, [layoutQuoteLines]);
 
@@ -225,6 +296,23 @@ export default function LoginPage() {
         <h1>Sign in to our lab</h1>
         <p>Please login with your university account</p>
 
+        {/* Primary University SSO Action (Acceptance Criteria 1) */}
+        <button
+          type="button"
+          onClick={handleSsoClick}
+          disabled={ssoLoading || submitting}
+          className={`${styles.btn} ${styles.btnSso}`}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {GOOGLE_PATHS.map(([fill, d]) => (
+              <path key={fill} fill={fill} d={d} />
+            ))}
+          </svg>
+          {ssoLoading ? 'Connecting to University SSO…' : 'Login with University Email'}
+        </button>
+
+        <div className={styles.dividerWithText}>or sign in with credentials</div>
+
         <form className={styles.form} onSubmit={handleSubmit}>
           <label className={styles.field}>
             Username
@@ -250,7 +338,7 @@ export default function LoginPage() {
 
           {error && <p className={styles.error}>{error}</p>}
 
-          <button type="submit" className={styles.btnPrimary} disabled={submitting}>
+          <button type="submit" className={styles.btnPrimary} disabled={submitting || ssoLoading}>
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>

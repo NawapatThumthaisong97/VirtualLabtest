@@ -4,7 +4,7 @@ Prewarm Scheduler
 
 ทุกรอบ:
 1. รวม image ที่ต้องมีบนทุก worker ตอนนี้ (desired) จาก
-   - class_slots ที่ starts_at - PREWARM_LEAD_MINUTES <= now < ends_at (เฉพาะ run_target KUBERNETES)
+   - class_slots ที่ starts_at - PREWARM_LEAD_MINUTES <= now < ends_at (run_target KUBERNETES หรือ AUTO)
    - settings.PREWARM_TARGETS (ตั้งเองใน .env ไว้ทดลอง)
 2. เทียบกับ DaemonSet ที่มีอยู่ สร้างตัวที่ขาด ลบตัวที่ไม่มีคาบไหนใช้แล้ว
    (2 คาบคนละ image = 2 DaemonSet คาบไหนจบก็ลบของคาบนั้น ถ้าใช้ image เดียวกัน ลบตอนคาบสุดท้ายจบ)
@@ -33,6 +33,8 @@ from app.utils.logger import logger
 ADVISORY_LOCK_KEY = 880_002
 
 LIVE_STATUSES = (ClassSlotStatus.SCHEDULED, ClassSlotStatus.PREWARMING, ClassSlotStatus.READY)
+# คาบ AUTO: คนที่นั่งเครื่องแลปจะได้ K8s → ต้องเตรียม pre-pull / warm pod เหมือนคาบ KUBERNETES
+K8S_TARGETS = (RunTarget.KUBERNETES, RunTarget.AUTO)
 
 
 def slot_image(slot: ClassSlot) -> str:
@@ -48,12 +50,59 @@ def active_slots(db: Session, now: datetime) -> list[ClassSlot]:
         .filter(
             ClassSlot.deleted_at.is_(None),
             ClassSlot.status.in_(LIVE_STATUSES),
-            ClassSlot.run_target == RunTarget.KUBERNETES,
+            ClassSlot.run_target.in_(K8S_TARGETS),
             ClassSlot.starts_at <= now + lead,
             ClassSlot.ends_at > now,
         )
         .all()
     )
+
+
+def build_schedule(db: Session, now: datetime, limit: int = 10) -> dict:
+    """scheduler จะทำงานเมื่อไหร่ (GET /api/prewarm/schedule) ดูอย่างเดียว ไม่แตะ DaemonSet / slot
+
+    ใช้เงื่อนไขเดียวกับ active_slots: slot ที่ยังไม่จบ (LIVE_STATUSES, ends_at > now) เฉพาะ KUBERNETES / AUTO
+    prewarm_at = starts_at - PREWARM_LEAD_MINUTES คือรอบแรกที่ scheduler จะสร้าง DaemonSet (+ warm pod)
+    ให้คาบนั้น (ถ้า scheduler เปิดอยู่) และลบตอน ends_at
+    """
+    lead = timedelta(minutes=settings.PREWARM_LEAD_MINUTES)
+    slots = (
+        db.query(ClassSlot)
+        .options(joinedload(ClassSlot.lab_image), joinedload(ClassSlot.course))
+        .filter(
+            ClassSlot.deleted_at.is_(None),
+            ClassSlot.status.in_(LIVE_STATUSES),
+            ClassSlot.run_target.in_(K8S_TARGETS),
+            ClassSlot.ends_at > now,
+        )
+        .order_by(ClassSlot.starts_at)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "enabled": settings.PREWARM_ENABLED and settings.PREWARM_INTERVAL_SECONDS > 0,
+        "interval_seconds": settings.PREWARM_INTERVAL_SECONDS,
+        "lead_minutes": settings.PREWARM_LEAD_MINUTES,
+        "warm_pod_enabled": settings.WARM_POD_ENABLED,
+        "now": now,
+        "slots": [{
+            "id": str(s.id),
+            "course_code": s.course.code if s.course else None,
+            "image": slot_image(s),
+            "starts_at": s.starts_at,
+            "ends_at": s.ends_at,
+            "prewarm_at": s.starts_at - lead,
+            "status": s.status.name,
+            "active": s.starts_at - lead <= now < s.ends_at,
+            "note": s.note,
+        } for s in slots],
+        "targets": [{
+            "image": t.image,
+            "start_at": t.start_at,
+            "end_at": t.end_at,
+            "active": t.start_at <= now < t.end_at,
+        } for t in settings.PREWARM_TARGETS if t.end_at > now],
+    }
 
 
 def _target_images(now: datetime) -> set[str]:

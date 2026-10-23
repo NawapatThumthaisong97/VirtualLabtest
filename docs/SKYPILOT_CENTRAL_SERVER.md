@@ -177,3 +177,19 @@ prewarm ช่วยแค่ pull image ส่วน launch ผ่าน SkyPil
 | `sky check aws` | ผ่าน token → `AWS [compute]` | – |
 
 หมายเหตุ: ConfigMap `skypilot-api-config` ยังมีแค่ `ports: podip` (server ไม่ sync จาก PVC ทันที) ไม่กระทบเพราะ server อ่านจาก PVC
+
+## 9. หน่วยความจำของ API server (2026-10-20)
+
+อาการ: launch พังเป็นพักด้วย `Could not connect to SkyPilot API server` หรือ `Connection refused` และ container
+`skypilot-api` โดน **OOMKilled 3 ครั้งในวันเดียว** (limit 2Gi) — ทิ้ง pod lab / EC2 ค้างเพราะ launch พังหลังสร้างเครื่องแล้ว
+
+| หลักฐาน | ค่า |
+|---|---|
+| `memory.current` ของ container ตอนว่าง | 2,108MB จาก 2,147MB |
+| `memory.events` max (ชนเพดาน) | 609 ครั้ง ตั้งแต่ restart ล่าสุด |
+| peak ระหว่าง launch (หลังขยาย) | 2048Mi |
+
+สาเหตุ: server แยก process ต่อ request (ตัวละ 150–290MB) ระหว่าง launch backend ถามสถานะหลายอย่างพร้อมกัน
+ลดจำนวน worker ไม่ได้ — chart ส่ง `SKYPILOT_POD_MEMORY_BYTES_LIMIT` (= requests) ทำให้ SkyPilot ใช้ worker ขั้นต่ำอยู่แล้ว
+แก้: `helm upgrade --reuse-values --set apiService.resources.requests.memory=2Gi --set apiService.resources.limits.memory=4Gi`
+(role skypilot-node แก้ตามแล้ว) หลังแก้ AUTO ผ่านทั้ง 2 เคส restart 0 ครั้ง

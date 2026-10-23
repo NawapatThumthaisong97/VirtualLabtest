@@ -5,7 +5,6 @@ import { courseService } from '../services/course';
 import { labService } from '../services/lab';
 import type { LabSummary, ProgressStatus } from '../services/lab';
 import CoursePageHeader from '../components/CoursePageHeader';
-import styles from './CourseDetail.module.css';
 
 type LabTab = 'all' | 'incomplete' | 'complete';
 
@@ -41,7 +40,6 @@ export default function CourseDetailPage() {
     isPending: labsPending,
   } = useQuery({
     queryKey: ['course-labs', courseId],
-    // ผ่าน labService เพื่อให้ apiClient แนบ token ให้ — fetch() ดิบไม่แนบ
     queryFn: () => labService.listByCourse(courseId),
     enabled: Boolean(courseId),
   });
@@ -53,19 +51,25 @@ export default function CourseDetailPage() {
         .map((lab: LabSummary) => ({
           id: lab.id,
           title: lab.title,
-          // docUrl ที่ backend ส่งมาเป็น object key (labs/{id}/doc.pdf) ไม่ใช่ URL
-          // ที่เบราว์เซอร์เปิดได้ ต้องแปลงเป็นเส้น /labs/{id}/doc เสมอ
           href: labService.docUrl(lab.id),
         })),
     [labs]
   );
 
   if (isPending || labsPending) {
-    return <div className={styles.pageMessage}>กำลังโหลดข้อมูลรายวิชา...</div>;
+    return (
+      <div className="grid place-items-center min-h-[200px] text-gray-600">
+        กำลังโหลดข้อมูลรายวิชา...
+      </div>
+    );
   }
 
   if (isError || !course) {
-    return <div className={styles.pageMessage}>ไม่พบข้อมูลรายวิชา หรือโหลดข้อมูลไม่สำเร็จ</div>;
+    return (
+      <div className="grid place-items-center min-h-[200px] text-gray-600">
+        ไม่พบข้อมูลรายวิชา หรือโหลดข้อมูลไม่สำเร็จ
+      </div>
+    );
   }
 
   const labTasks = labs
@@ -76,7 +80,6 @@ export default function CourseDetailPage() {
       orderNo: lab.orderNo ?? 0,
       dueAt: lab.dueAt ?? null,
     }))
-    // lab ที่ยังไม่เคยเปิดทำ (progress = null) นับเป็น incomplete เหมือนกัน
     .filter((lab) => {
       if (tab === 'complete') return lab.progress === 'finished';
       if (tab === 'incomplete') return lab.progress !== 'finished';
@@ -84,101 +87,159 @@ export default function CourseDetailPage() {
     });
 
   return (
-    <div className={styles.pageShell}>
+    <div className="w-full min-h-screen bg-gray-50">
       <CoursePageHeader title={`${course.code} : ${course.name}`} />
 
-      <main className={styles.content}>
-        <div className={styles.cardRow}>
-          <section className={styles.card}>
-            <h2 className={styles.cardTitle}>Documents</h2>
-            <ul className={styles.docList}>
+      <main className="w-full max-w-[1250px] mx-auto px-6 my-6 pb-14">
+        {/* Documents & Announcements Row */}
+        <div className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr] gap-6 mb-6">
+          {/* Documents Card */}
+          <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+            <h2 className="m-0 px-5 py-5 text-lg font-bold text-gray-800 border-b border-gray-200">
+              Documents
+            </h2>
+            <ul className="list-none p-0 m-0 px-5 max-h-[280px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100">
               {documents.length > 0 ? (
                 documents.map((doc: { id: string; title: string; href: string }) => (
-                  <li key={doc.id}>
-                    <a href={doc.href} target="_blank" rel="noreferrer">
+                  <li
+                    key={doc.id}
+                    className="flex justify-between items-center gap-4 min-h-[46px] py-3 border-b border-gray-100 last:border-b-0"
+                  >
+                    <a
+                      href={doc.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700 hover:text-blue-900 font-medium text-[0.96rem] transition-colors no-underline"
+                    >
                       {doc.title}
                     </a>
-                    <span>{course.code}</span>
+                    <span className="text-gray-500 text-[0.81rem] whitespace-nowrap font-normal">
+                      {course.code}
+                    </span>
                   </li>
                 ))
               ) : (
-                <li className={styles.emptyRow}>ยังไม่มีเอกสารสำหรับรายวิชานี้</li>
+                <li className="text-gray-400 py-3 text-[0.93rem]">
+                  ยังไม่มีเอกสารสำหรับรายวิชานี้
+                </li>
               )}
             </ul>
           </section>
 
-          <section className={styles.card}>
-            <h2 className={styles.cardTitle}>Announcement</h2>
-            <div className={styles.announcementBox}>
+          {/* Announcements Card */}
+          <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+            <h2 className="m-0 px-5 py-5 text-lg font-bold text-gray-800 border-b border-gray-200">
+              Announcement
+            </h2>
+            <div className="px-5 max-h-[280px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100">
               {course.announcements.length > 0 ? (
                 <>
                   {course.announcements.map((item) => (
-                    <div key={item.id} className={styles.announcementItem}>
-                      <p className={styles.announcementAuthor}>
-                        {/* ประกาศเก่าที่ยังไม่มี author ให้ตกมาที่ชื่ออาจารย์ประจำวิชา */}
+                    <div
+                      key={item.id}
+                      className="flex flex-col gap-1 py-3.5 border-b border-gray-100 last:border-b-0"
+                    >
+                      <p className="m-0 text-gray-900 text-[0.86rem] font-bold">
                         {item.authorName ?? course.lecturerName}
                         {item.createdAt
                           ? ` · ${new Date(item.createdAt).toLocaleDateString('en-GB')}`
                           : ''}
                       </p>
-                      <p className={styles.announcementText}>{item.message}</p>
+                      <p className="m-0 text-gray-800 text-[0.94rem] leading-relaxed font-normal">
+                        {item.message}
+                      </p>
                     </div>
                   ))}
                 </>
               ) : (
-                <p className={styles.noAnnouncement}>ยังไม่มีประกาศสำหรับรายวิชานี้</p>
+                <p className="m-0 py-3.5 text-gray-400 text-[0.94rem] font-normal">
+                  ยังไม่มีประกาศสำหรับรายวิชานี้
+                </p>
               )}
             </div>
           </section>
         </div>
 
-        <section className={styles.tableCard}>
-          <div className={styles.tableHeader}>
-            <h2 className={styles.cardTitle}>My Lab work</h2>
+        {/* Lab Table */}
+        <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+          <div className="px-5 py-5 border-b border-gray-200">
+            <h2 className="m-0 text-lg font-bold text-gray-800">My Lab work</h2>
           </div>
 
-          <div className={styles.tableContentWrapper}>
-            <div className={styles.tabSidebar}>
+          <div className="flex">
+            {/* Tab Sidebar */}
+            <div className="flex flex-col w-[200px] py-4 border-r border-gray-200 bg-white min-h-[300px] overflow-y-auto">
               {TABS.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setTab(item.id)}
-                  className={`${styles.tabButton} ${tab === item.id ? styles.activeTab : ''}`}
+                  className={`appearance-none border-none bg-transparent text-left px-4 py-3 text-[0.87rem] font-medium cursor-pointer transition-all border-l-3 ${
+                    tab === item.id
+                      ? 'bg-blue-50 text-blue-700 font-semibold border-l-blue-600'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-blue-700 border-l-transparent'
+                  }`}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
 
-            <div className={styles.tableWrapper}>
-              <table>
+            {/* Table Wrapper */}
+            <div className="flex-1 overflow-x-auto">
+              <table className="w-full border-collapse">
                 <thead>
-                  <tr>
-                    <th className={styles.firstColumn}>Lab</th>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th>Expired date</th>
-                    <th className={styles.actionColumn}>Instruction</th>
+                  <tr className="bg-gray-50">
+                    <th className="px-3.5 py-3.5 border-b border-gray-200 text-left text-[0.92rem] font-bold text-gray-700 w-[18%]">
+                      Lab
+                    </th>
+                    <th className="px-3.5 py-3.5 border-b border-gray-200 text-left text-[0.92rem] font-bold text-gray-700">
+                      Name
+                    </th>
+                    <th className="px-3.5 py-3.5 border-b border-gray-200 text-left text-[0.92rem] font-bold text-gray-700">
+                      Status
+                    </th>
+                    <th className="px-3.5 py-3.5 border-b border-gray-200 text-left text-[0.92rem] font-bold text-gray-700">
+                      Expired date
+                    </th>
+                    <th className="px-3.5 py-3.5 border-b border-gray-200 text-right text-[0.92rem] font-bold text-gray-700 w-[130px]">
+                      Instruction
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {labTasks.length > 0 ? (
                     labTasks.map((lab) => {
                       const statusMeta = getProgressMeta(lab.progress);
+                      const statusClasses = {
+                        green: 'bg-green-50 text-green-700',
+                        yellow: 'bg-orange-50 text-orange-700',
+                        grey: 'bg-gray-100 text-gray-600',
+                      }[statusMeta.tone];
 
                       return (
-                        <tr key={lab.id}>
-                          <td className={styles.firstColumn}>{lab.orderNo ? `Lab ${lab.orderNo}` : 'Lab'}</td>
-                          <td>{lab.title}</td>
-                          <td>
-                            <span className={`${styles.statusTag} ${styles[statusMeta.tone]}`}>
+                        <tr key={lab.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-3.5 py-3.5 border-b border-gray-100 text-gray-600 font-medium text-[0.92rem]">
+                            {lab.orderNo ? `Lab ${lab.orderNo}` : 'Lab'}
+                          </td>
+                          <td className="px-3.5 py-3.5 border-b border-gray-100 text-gray-800 text-[0.92rem]">
+                            {lab.title}
+                          </td>
+                          <td className="px-3.5 py-3.5 border-b border-gray-100 text-[0.92rem]">
+                            <span
+                              className={`inline-flex items-center justify-center min-w-[72px] px-3 py-1 rounded-full text-[0.73rem] font-bold capitalize tracking-wide ${statusClasses}`}
+                            >
                               {statusMeta.label}
                             </span>
                           </td>
-                          <td>{lab.dueAt ? new Date(lab.dueAt).toLocaleDateString('en-GB') : '-'}</td>
-                          <td className={styles.actionColumn}>
-                            <Link to={`/labs/${lab.id}`} className={styles.instructionButton}>
+                          <td className="px-3.5 py-3.5 border-b border-gray-100 text-gray-800 text-[0.92rem]">
+                            {lab.dueAt ? new Date(lab.dueAt).toLocaleDateString('en-GB') : '-'}
+                          </td>
+                          <td className="px-3.5 py-3.5 border-b border-gray-100 text-right">
+                            <Link
+                              to={`/labs/${lab.id}`}
+                              className="inline-flex items-center justify-center min-w-[90px] h-8 border border-blue-700 bg-blue-700 text-white rounded text-[0.84rem] font-semibold no-underline transition-all hover:bg-blue-800 hover:border-blue-800 hover:shadow-md"
+                            >
                               Instruction
                             </Link>
                           </td>
@@ -187,10 +248,11 @@ export default function CourseDetailPage() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={5} className={styles.emptyTable}>
-                        {labs.length > 0
-                          ? 'ไม่มี lab ในหมวดนี้'
-                          : 'ยังไม่มี Lab สำหรับรายวิชานี้'}
+                      <td
+                        colSpan={5}
+                        className="text-center text-gray-400 py-7 px-3.5 text-[0.94rem]"
+                      >
+                        {labs.length > 0 ? 'ไม่มี lab ในหมวดนี้' : 'ยังไม่มี Lab สำหรับรายวิชานี้'}
                       </td>
                     </tr>
                   )}

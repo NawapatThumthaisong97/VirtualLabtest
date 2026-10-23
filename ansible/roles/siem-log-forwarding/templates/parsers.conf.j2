@@ -1,0 +1,13 @@
+[PARSER]
+    Name        squid_parser
+    Format      regex
+    Regex       ^(?<timestamp>[^ ]+)\s+(?<duration>[^ ]+)\s+(?<client_ip>[^ ]+)\s+(?<status_code>[^/]+)/(?<http_status>[^ ]+)\s+(?<bytes>[^ ]+)\s+(?<method>[^ ]+)\s+(?<url>[^ ]+)\s+(?<user>[^ ]+)\s+(?<hierarchy>[^/]+)/(?<server_ip>[^ ]+)\s+(?<content_type>.*)$
+    Time_Key    timestamp
+    Time_Format %s.%L
+
+[PARSER]
+    Name        json
+    Format      json
+    Time_Key    timestamp
+    Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+
