@@ -331,3 +331,21 @@ class FakeGoogleSSO:
         if access_token not in self.access_tokens:
             raise SSOAuthenticationError("invalid access_token")
         return self.access_tokens[access_token]
+
+
+class FakeR2:
+    """แทน app.adapters.r2_adapter.R2Adapter — ไม่ต่อ R2 จริง แค่จดว่าถูกขอ presign อะไร
+
+    presigned: list ของ {"key", "content_type", "expires_in"} เรียงตามที่ถูกเรียก
+    """
+
+    def __init__(self):
+        self.presigned: list[dict] = []
+
+    def generate_presigned_put_url(
+        self, key: str, content_type: str, expires_in: int | None = None
+    ) -> str:
+        self.presigned.append(
+            {"key": key, "content_type": content_type, "expires_in": expires_in}
+        )
+        return f"https://fake-r2.test/{key}?X-Amz-Expires={expires_in}&X-Amz-Signature=fake"

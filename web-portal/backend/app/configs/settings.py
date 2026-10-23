@@ -77,7 +77,27 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: Optional[str] = None
     R2_SECRET_ACCESS_KEY: Optional[str] = None
     R2_BUCKET_NAME: Optional[str] = None
+    # ไม่ตั้ง = https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com
     R2_ENDPOINT_URL: Optional[str] = None
+    # อายุ presigned PUT URL ของไฟล์ lab image (.tar) — R2 รับได้ 1 วินาทีถึง 7 วัน
+    R2_PRESIGN_EXPIRES_SECONDS: int = Field(default=3600, ge=60, le=604800)
+    # ต้องตรงกับ webhook_secret ใน terraform/cloudflare/r2-event-pipeline (Worker ส่งมาใน header Webhook-Secret)
+    # ไม่ตั้ง = webhook ปฏิเสธทุก request
+    R2_WEBHOOK_SECRET: Optional[str] = None
+    # secret ของ webhook approve lab image (POST /api/webhook/approve-lab-image) แยกจาก R2_WEBHOOK_SECRET
+    # เพราะ R2_WEBHOOK_SECRET ถูกเก็บใน Terraform / Cloudflare Worker ถ้าหลุด ต้องไม่ถึงขั้นอนุมัติ image ได้
+    # ไม่ตั้ง = webhook ปฏิเสธทุก request
+    LAB_IMAGE_APPROVE_WEBHOOK_SECRET: Optional[str] = None
+    # presigned URL เป็น PUT ครั้งเดียว R2 รับได้สูงสุด 5 GiB - 5 MiB ต่อ request (ใหญ่กว่านี้ต้อง multipart)
+    LAB_IMAGE_MAX_ARCHIVE_BYTES: int = 5 * 1024**3 - 5 * 1024**2
+
+    @property
+    def r2_endpoint_url(self) -> Optional[str]:
+        if self.R2_ENDPOINT_URL:
+            return self.R2_ENDPOINT_URL
+        if self.R2_ACCOUNT_ID:
+            return f"https://{self.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+        return None
     
     # Redis (Optional)
     REDIS_URL: Optional[str] = "redis://localhost:6379/0"
@@ -166,6 +186,8 @@ class Settings(BaseSettings):
             for domain in self.ALLOWED_EMAIL_DOMAINS_STR.split(",")
             if domain.strip()
         ]
+
+    @property
     def tailscale_trusted_proxy_cidrs(self) -> list[str]:
         return [
             cidr.strip()

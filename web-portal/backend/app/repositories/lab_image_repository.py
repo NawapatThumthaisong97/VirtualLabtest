@@ -25,6 +25,10 @@ class LabImageRepository(BaseRepository[LabImage]):
             .first()
         )
 
+    def find_by_archive_key(self, archive_key: str) -> Optional[LabImage]:
+        """ดึง lab image ตาม R2 object key (ใช้จับคู่ event จาก webhook)"""
+        return self.db.query(LabImage).filter(LabImage.archive_key == archive_key).first()
+
     def find_by_course(self, course_id: UUID, status: Optional[ImageStatus] = None) -> list[LabImage]:
         """ดึง lab images ทั้งหมดของ course"""
         query = (

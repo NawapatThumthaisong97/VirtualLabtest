@@ -12,6 +12,7 @@ from .courses_route import router as courses_router
 from .prewarm_route import router as prewarm_router
 from .monitor_route import router as monitor_router
 from .billing_route import router as billing_router
+from .lab_image_route import router as lab_image_router
 
 # สร้าง main router
 api_router = APIRouter()
@@ -26,5 +27,6 @@ api_router.include_router(courses_router, prefix="/courses", tags=["Courses"])
 api_router.include_router(prewarm_router, tags=["Prewarm"])
 api_router.include_router(monitor_router, tags=["Monitoring"])
 api_router.include_router(billing_router, tags=["Billing"])
+api_router.include_router(lab_image_router, tags=["Lab Images"])
 
 __all__ = ["api_router"]
