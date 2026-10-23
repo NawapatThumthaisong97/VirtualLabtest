@@ -9,10 +9,6 @@ from app.middlewares.request_validation import require_non_empty_body
 from app.models.user import User
 from app.repositories.lab_image_repository import LabImageRepository
 from app.schemas.lab_image_schema import (
-    LabImageApproveRequest,
-    LabImageApproveResponse,
-    LabImageRejectRequest,
-    LabImageRejectResponse,
     LabImageUploadRequest,
     LabImageUploadResponse,
     R2UploadWebhookPayload,
@@ -68,46 +64,4 @@ def r2_upload_webhook(
         "success": True,
         "message": "Upload event recorded" if data.updated else "No matching lab image",
         "data": data,
-    }
-
-
-@router.post(
-    "/webhook/approve-lab-image",
-    response_model=ApiResponse[LabImageApproveResponse],
-)
-def approve_lab_image_webhook(
-    payload: LabImageApproveRequest,
-    webhook_secret: str | None = Header(default=None, alias="Webhook-Secret"),
-    controller: LabImageController = Depends(get_controller),
-):
-    """อนุมัติ lab image (PENDING -> APPROVED) ตาม labImageId
-
-    ยืนยันตัวตนด้วย header Webhook-Secret เท่านั้น (ไม่ใช้ JWT) ใช้ secret
-    LAB_IMAGE_APPROVE_WEBHOOK_SECRET คนละชุดกับ webhook ของ Cloudflare
-    """
-    data = controller.approve_image(payload, webhook_secret)
-    return {
-        "success": True,
-        "message": "Lab image approved" if data.updated else "Lab image already approved",
-        "data": data,
-    }
-
-
-@router.post(
-    "/webhook/reject-lab-image",
-    response_model=ApiResponse[LabImageRejectResponse],
-)
-def reject_lab_image_webhook(
-    payload: LabImageRejectRequest,
-    webhook_secret: str | None = Header(default=None, alias="Webhook-Secret"),
-    controller: LabImageController = Depends(get_controller),
-):
-    """ปฏิเสธ lab image: ลบไฟล์บน R2 แล้วลบแถวใน DB (เฉพาะที่ยัง PENDING)
-
-    ยืนยันตัวตนด้วย Webhook-Secret ชุดเดียวกับ approve (LAB_IMAGE_APPROVE_WEBHOOK_SECRET)
-    """
-    return {
-        "success": True,
-        "message": "Lab image rejected and deleted",
-        "data": controller.reject_image(payload, webhook_secret),
     }

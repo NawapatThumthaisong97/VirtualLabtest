@@ -32,10 +32,6 @@ from app.models.user import User
 from app.repositories.lab_image_repository import LabImageRepository
 from app.repositories.rbac_repository import RBACRepository
 from app.schemas.lab_image_schema import (
-    LabImageApproveRequest,
-    LabImageApproveResponse,
-    LabImageRejectRequest,
-    LabImageRejectResponse,
     LabImageUploadRequest,
     LabImageUploadResponse,
     R2UploadWebhookPayload,
@@ -226,13 +222,6 @@ class LabImageService:
         """webhook จาก Cloudflare Worker (upload event)"""
         cls._verify_secret(provided, settings.R2_WEBHOOK_SECRET)
 
-    @classmethod
-    def verify_approve_secret(cls, provided: str | None) -> None:
-        """webhook อนุมัติ image — ใช้ secret คนละชุดกับของ Cloudflare ไม่รับแทนกัน"""
-        cls._verify_secret(provided, settings.LAB_IMAGE_APPROVE_WEBHOOK_SECRET)
-
-
-
     def handle_upload_event(
         self, payload: R2UploadWebhookPayload
     ) -> R2UploadWebhookResponse:
@@ -260,17 +249,18 @@ class LabImageService:
 
     # ------------------------------------------------------------ approve
 
-    def approve_image(self, payload: LabImageApproveRequest) -> LabImageApproveResponse:
-        """PENDING -> APPROVED (ทำซ้ำได้ ถ้าอนุมัติแล้วคืนผลเดิมโดยไม่แก้ข้อมูล)
+    def approve_image(self, image_id: UUID) -> bool:
+        """PENDING -> APPROVED เรียกจากภายใน (ไม่มี HTTP endpoint) เช่นขั้น scan ผ่านแล้ว
 
+        คืน True = เปลี่ยนสถานะ, False = อนุมัติไว้ก่อนแล้ว (ทำซ้ำได้ ไม่แก้ข้อมูล)
         ไม่เติม image_digest — เป็นหน้าที่ของขั้น import เข้า registry
         """
-        image = self.lab_image_repository.find_by_id(payload.lab_image_id, for_update=True)
+        image = self.lab_image_repository.find_by_id(image_id, for_update=True)
         if image is None:
-            raise LabImageNotFoundError(f"Lab image {payload.lab_image_id} not found")
+            raise LabImageNotFoundError(f"Lab image {image_id} not found")
 
         if image.status is ImageStatus.APPROVED:
-            return LabImageApproveResponse(image_id=image.id, status=image.status, updated=False)
+            return False
         if image.status is ImageStatus.REJECTED:
             raise ConflictError(f"Lab image {image.id} was rejected and cannot be approved")
         if image.archive_uploaded_at is None:
@@ -279,21 +269,23 @@ class LabImageService:
 
         image.status = ImageStatus.APPROVED
         self.db.commit()
-        return LabImageApproveResponse(image_id=image.id, status=image.status, updated=True)
+        return True
 
     # ------------------------------------------------------------ reject
 
-    def reject_image(self, payload: LabImageRejectRequest) -> LabImageRejectResponse:
-        """ปฏิเสธ = ลบ lab image ที่ยัง PENDING ทิ้งทั้งแถว DB และไฟล์บน R2
+    def reject_image(self, image_id: UUID) -> str | None:
+        """ปฏิเสธ = ลบ lab image ที่ยัง PENDING ทิ้งทั้งแถว DB และไฟล์บน R2 (เรียกจากภายใน ไม่มี HTTP endpoint)
+
+        คืน archive_key ของไฟล์ที่ลบ
 
         ลำดับ: ลบแถว (flush, ยังไม่ commit) -> ลบไฟล์ R2 -> commit
         - แถวที่ถูกอ้างอิงอยู่ (lab / session / ตารางเรียน) ถูกปฏิเสธก่อนแตะ R2
         - R2 ลบไม่สำเร็จ -> rollback แถวยังอยู่ ยิงซ้ำได้ (ลบ R2 ซ้ำได้ ไม่ error)
         - ไม่มีกรณีที่แถวหายแต่ไฟล์ค้างบน R2 โดยไม่มีใครรู้
         """
-        image = self.lab_image_repository.find_by_id(payload.lab_image_id, for_update=True)
+        image = self.lab_image_repository.find_by_id(image_id, for_update=True)
         if image is None:
-            raise LabImageNotFoundError(f"Lab image {payload.lab_image_id} not found")
+            raise LabImageNotFoundError(f"Lab image {image_id} not found")
         if image.status is not ImageStatus.PENDING:
             raise ConflictError(
                 f"Lab image {image.id} is {image.status.value}, only pending images can be rejected"
@@ -302,7 +294,7 @@ class LabImageService:
         if self.lab_image_repository.is_referenced(image.id):
             raise ConflictError(f"Lab image {image.id} is still referenced by a lab or session")
 
-        image_id, archive_key = image.id, image.archive_key
+        archive_key = image.archive_key
         try:
             self.lab_image_repository.delete(image)
         except IntegrityError as error:
@@ -316,4 +308,4 @@ class LabImageService:
         except Exception:
             self.db.rollback()
             raise
-        return LabImageRejectResponse(image_id=image_id, archive_key=archive_key, deleted=True)
+        return archive_key

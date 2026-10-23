@@ -25,13 +25,11 @@ from app.services.lab_image_service import LabImageService
 from tests.fakes import FakeR2
 
 WEBHOOK_SECRET = "test-webhook-secret"
-APPROVE_SECRET = "test-approve-secret"
 
 
 @pytest.fixture(autouse=True)
 def r2_settings(monkeypatch):
     monkeypatch.setattr(settings, "R2_WEBHOOK_SECRET", WEBHOOK_SECRET)
-    monkeypatch.setattr(settings, "LAB_IMAGE_APPROVE_WEBHOOK_SECRET", APPROVE_SECRET)
     monkeypatch.setattr(settings, "R2_PRESIGN_EXPIRES_SECONDS", 900)
 
 

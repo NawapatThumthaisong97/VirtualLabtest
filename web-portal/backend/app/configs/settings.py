@@ -88,10 +88,6 @@ class Settings(BaseSettings):
     # ต้องตรงกับ webhook_secret ใน terraform/cloudflare/r2-event-pipeline (Worker ส่งมาใน header Webhook-Secret)
     # ไม่ตั้ง = webhook ปฏิเสธทุก request
     R2_WEBHOOK_SECRET: Optional[str] = None
-    # secret ของ webhook approve/reject lab image (POST /api/webhook/approve-lab-image, reject-lab-image) แยกจาก R2_WEBHOOK_SECRET
-    # เพราะ R2_WEBHOOK_SECRET ถูกเก็บใน Terraform / Cloudflare Worker ถ้าหลุด ต้องไม่ถึงขั้นอนุมัติ image ได้
-    # ไม่ตั้ง = webhook ปฏิเสธทุก request
-    LAB_IMAGE_APPROVE_WEBHOOK_SECRET: Optional[str] = None
     # presigned URL เป็น PUT ครั้งเดียว R2 รับได้สูงสุด 5 GiB - 5 MiB ต่อ request (ใหญ่กว่านี้ต้อง multipart)
     LAB_IMAGE_MAX_ARCHIVE_BYTES: int = 5 * 1024**3 - 5 * 1024**2
 
