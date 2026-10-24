@@ -115,7 +115,6 @@ export default function AdminMonitorPage() {
       const next = new URLSearchParams(prev);
       if (sev === 'ALL') next.delete('severity');
       else next.set('severity', sev);
-      return next;
     });
     setLogOffset(0);
   };
@@ -125,7 +124,6 @@ export default function AdminMonitorPage() {
       const next = new URLSearchParams(prev);
       if (cat === 'ALL') next.delete('category');
       else next.set('category', cat);
-      return next;
     });
     setLogOffset(0);
   };
@@ -311,6 +309,22 @@ export default function AdminMonitorPage() {
             <CreditCard className="h-4 w-4" />
             <span>Billing & Financial Reports</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('grafana')}
+            className={`flex items-center gap-2 border-b-2 px-4 py-3 transition-colors cursor-pointer ${
+              activeTab === 'grafana'
+                ? 'border-emerald-500 text-emerald-400 font-semibold'
+                : 'border-transparent text-white/60 hover:text-white'
+            }`}
+          >
+            <Activity className="h-4 w-4 text-emerald-400" />
+            <span>Grafana 5-Layer SIEM (Live)</span>
+            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30">
+              Layer 5
+            </span>
+          </button>
         </div>
 
         {/* Tab Content Display */}
@@ -346,6 +360,54 @@ export default function AdminMonitorPage() {
             onGroupByChange={handleBillingGroupByChange}
             isLoading={isBillingLoading}
           />
+        )}
+
+        {activeTab === 'grafana' && (
+          <div className="flex flex-col gap-4 rounded-xl border border-white/10 bg-white/[0.02] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-white">
+                  Layer 5: Grafana SIEM Command Center (Sigma Rules + LogsQL + Falco eBPF Fast-Track)
+                </h2>
+                <p className="text-xs text-white/60">
+                  Unified 5-Layer SIEM Visualization powered by Grafana, VictoriaLogs (14d Hot Storage), and AWS S3 .parquet (90d–365d Cold Storage).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <a
+                  href="http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg bg-emerald-600/80 hover:bg-emerald-500 px-3 py-1.5 font-semibold text-white transition"
+                >
+                  Open Grafana Full Screen &rarr;
+                </a>
+                <a
+                  href="http://100.69.137.47:30428/select/vmui"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 px-3 py-1.5 font-semibold text-sky-300 transition"
+                >
+                  VictoriaLogs Hot UI (LogsQL) &rarr;
+                </a>
+                <a
+                  href="http://100.69.137.47:30900"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 font-semibold text-indigo-300 transition"
+                >
+                  AWS S3 (.parquet) Explorer &rarr;
+                </a>
+              </div>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-white/10 bg-[#111217]">
+              <iframe
+                title="Grafana 5-Layer SIEM Command Center"
+                src="http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1&kiosk"
+                className="h-[780px] w-full border-0"
+              />
+            </div>
+          </div>
         )}
 
         {/* Side Drawer for Log Details & Bastion Runbook */}

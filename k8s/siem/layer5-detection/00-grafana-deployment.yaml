@@ -158,13 +158,13 @@ spec:
               cpu: 400m
               memory: 256Mi
           volumeMounts:
-            - name: grafana-Datasources
+            - name: grafana-datasources
               mountPath: /etc/grafana/provisioning/datasources/datasources.yaml
               subPath: datasources.yaml
-            - name: grafana-Dashboards-provider
+            - name: grafana-dashboards-provider
               mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml
               subPath: dashboards.yaml
-            - name: grafana-Alerting
+            - name: grafana-alerting
               mountPath: /etc/grafana/provisioning/alerting/alerting.yaml
               subPath: alerting.yaml
             - name: grafana-dashboard-json
@@ -172,13 +172,13 @@ spec:
             - name: grafana-storage
               mountPath: /var/lib/grafana
       volumes:
-        - name: grafana-Datasources
+        - name: grafana-datasources
           configMap:
             name: grafana-siem-provisioning
-        - name: grafana-Dashboards-provider
+        - name: grafana-dashboards-provider
           configMap:
             name: grafana-siem-provisioning
-        - name: grafana-Alerting
+        - name: grafana-alerting
           configMap:
             name: grafana-siem-provisioning
         - name: grafana-dashboard-json
@@ -186,3 +186,4 @@ spec:
             name: grafana-siem-dashboards
         - name: grafana-storage
           emptyDir: {}
+
