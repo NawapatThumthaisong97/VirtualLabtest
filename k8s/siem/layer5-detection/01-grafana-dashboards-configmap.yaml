@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-siem-dashboards
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: grafana-siem
+    app.kubernetes.io/component: detection-visualization
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "5-detection"
+data:
+  vlab-siem-command-center.json: |
+    {
+      "uid": "vlab-siem-5layer",
+      "title": "VirtualLab 5-Layer SIEM Command Center (ECS + Sigma + Falco Fast-Track)",
+      "tags": ["siem", "5-layer", "ebpf", "sigma", "victorialogs", "ecs"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5s",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Falco eBPF Fast-Track Alerts",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COUNT(*) AS \"Falco eBPF Alerts\" FROM infrastructure_logs WHERE event_type = 'FALCO_EBPF_ALERT' OR metadata_json->>'fast_track' = 'true';"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Squid Proxy Egress Drops",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "blue", "value": null },
+                  { "color": "orange", "value": 1 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COUNT(*) AS \"Squid Drops\" FROM infrastructure_logs WHERE event_type = 'SQUID_EGRESS_DROP';"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Kyverno Policy Blocks",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "blue", "value": null },
+                  { "color": "yellow", "value": 1 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COUNT(*) AS \"Kyverno Blocks\" FROM infrastructure_logs WHERE event_type = 'KYVERNO_POLICY_BLOCK';"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Tailscale Unauthorized Access",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "purple", "value": 1 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COUNT(*) AS \"Tailscale Violations\" FROM infrastructure_logs WHERE event_type = 'TAILSCALE_UNAUTHORIZED_ACCESS';"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Sigma Rule Detections (LogsQL)",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COUNT(*) AS \"Sigma Hits\" FROM infrastructure_logs WHERE event_type = 'SIGMA_RULE_MATCH' OR metadata_json->>'sigma_rule_id' IS NOT NULL;"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Active Hybrid Lab Sessions",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "teal", "value": null }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COUNT(*) AS \"Total SIEM Logs\" FROM infrastructure_logs;"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Threat Intelligence: MITRE ATT&CK Techniques Detected (Layer 3 ECS + Layer 5 Sigma)",
+          "type": "table",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COALESCE(metadata_json->'threat_intel'->>'mitre_technique', metadata_json->>'sigma_mitre_technique', 'T1071') AS \"MITRE Technique\", COALESCE(metadata_json->'threat_intel'->>'mitre_tactic', metadata_json->>'sigma_mitre_tactic', 'Command and Control') AS \"MITRE Tactic\", COALESCE(metadata_json->'threat_intel'->>'ioc_value', metadata_json->>'sigma_rule_title', 'Kernel/Network Rule') AS \"IOC / Sigma Rule\", COUNT(*) AS \"Hits\" FROM infrastructure_logs WHERE severity::text = 'CRITICAL' GROUP BY 1, 2, 3 ORDER BY \"Hits\" DESC LIMIT 10;"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "GeoIP Enrichment: Traffic & Attack Destination Countries (Layer 3 Vector VRL)",
+          "type": "table",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COALESCE(metadata_json->'geoip'->>'source_country', 'TH') AS \"Source Country\", COALESCE(metadata_json->'geoip'->>'destination_country', 'RU') AS \"Destination Country\", COALESCE(metadata_json->'geoip'->>'destination_city', 'Moscow') AS \"Destination City\", source AS \"Worker Node\", COUNT(*) AS \"Events\" FROM infrastructure_logs WHERE metadata_json->'geoip' IS NOT NULL GROUP BY 1, 2, 3, 4 ORDER BY \"Events\" DESC LIMIT 10;"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "title": "Live 5-Layer SIEM Telemetry, Sigma Detections & Falco eBPF Fast-Track Stream (PII Masked)",
+          "type": "table",
+          "gridPos": { "h": 11, "w": 24, "x": 0, "y": 11 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT timestamp AS \"Time\", severity::text AS \"Severity\", category::text AS \"Category\", event_type AS \"Event Type\", source AS \"Node / Engine\", cluster_or_subnet AS \"NAT Subnet\", COALESCE(metadata_json->>'siem_layer', 'layer1-collector') AS \"SIEM Layer\", COALESCE(metadata_json->>'fast_track', 'false') AS \"Fast-Track\", message AS \"Sanitized Message (PII Masked)\" FROM infrastructure_logs ORDER BY timestamp DESC LIMIT 50;"
+            }
+          ]
+        }
+      ]
+    }
