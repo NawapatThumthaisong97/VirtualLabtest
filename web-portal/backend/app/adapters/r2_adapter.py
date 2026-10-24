@@ -17,6 +17,10 @@ from app.configs.settings import settings
 from app.exceptions.domain import InternalServerError
 
 
+# ค่าของ header If-None-Match ที่เซ็นไว้ใน presigned PUT (S3/R2 รับเฉพาะ "*") client ต้องส่งค่านี้ตรงกัน
+ARCHIVE_IF_NONE_MATCH = "*"
+
+
 class R2NotConfiguredError(InternalServerError):
     code = "r2_not_configured"
 
@@ -72,14 +76,25 @@ class R2Adapter:
         content_type: str,
         expires_in: int | None = None,
     ) -> str:
-        """presigned URL สำหรับ PUT object 1 ไฟล์
+        """presigned URL สำหรับ PUT object 1 ไฟล์ (ใช้อัปโหลดสำเร็จได้ครั้งเดียวต่อ key)
 
         content_type ถูกรวมใน signature: client ต้องส่ง header Content-Type ค่าเดียวกันเป๊ะ
         ไม่งั้น R2 ตอบ 403 SignatureDoesNotMatch
+
+        If-None-Match: * ถูกรวมใน signature เช่นกัน: R2 จะรับ PUT เฉพาะเมื่อ key นี้ยังไม่มี object
+        PUT ครั้งแรกที่สำเร็จจึงทำให้ URL เดิม (และ URL อื่นที่เซ็นไว้สำหรับ key เดียวกัน) ถูกปฏิเสธ
+        ด้วย 412 PreconditionFailed แม้ยังไม่หมดอายุ — R2 ประเมินเงื่อนไขนี้แบบ atomic ตอน commit
+        ถ้า PUT ครั้งแรกล้มกลางทาง (ไม่มี object เกิดขึ้น) URL เดิมยังลองใหม่ได้จนกว่าจะหมดอายุ
+        client ต้องส่ง header If-None-Match: * ด้วย ไม่งั้น R2 ตอบ 403 SignatureDoesNotMatch
         """
         return self.client.generate_presigned_url(
             ClientMethod="put_object",
-            Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "ContentType": content_type,
+                "IfNoneMatch": ARCHIVE_IF_NONE_MATCH,
+            },
             ExpiresIn=expires_in or settings.R2_PRESIGN_EXPIRES_SECONDS,
             HttpMethod="PUT",
         )

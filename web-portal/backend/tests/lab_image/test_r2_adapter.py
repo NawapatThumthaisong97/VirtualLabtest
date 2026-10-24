@@ -41,6 +41,12 @@ class TestPresignedPutUrl:
         signed = parse_qs(urlparse(url).query)["X-Amz-SignedHeaders"][0].split(";")
         assert "content-type" in signed
 
+    def test_if_none_match_is_signed(self, r2_credentials):
+        """If-None-Match is part of the signature, so R2 only accepts the first PUT for a key (later ones get 412)"""
+        url = R2Adapter().generate_presigned_put_url("k.tar", "application/x-tar", 900)
+        signed = parse_qs(urlparse(url).query)["X-Amz-SignedHeaders"][0].split(";")
+        assert "if-none-match" in signed
+
     def test_default_expiry_comes_from_settings(self, r2_credentials, monkeypatch):
         """Without an explicit expiry the R2_PRESIGN_EXPIRES_SECONDS setting is used"""
         monkeypatch.setattr(settings, "R2_PRESIGN_EXPIRES_SECONDS", 1200)

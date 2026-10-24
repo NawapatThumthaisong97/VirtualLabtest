@@ -16,7 +16,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.adapters.r2_adapter import R2Adapter
+from app.adapters.r2_adapter import ARCHIVE_IF_NONE_MATCH, R2Adapter
 from app.configs.settings import settings
 from app.exceptions.domain import (
     ConflictError,
@@ -67,7 +67,7 @@ def build_archive_key(course_code: str, image_id: UUID, now: datetime) -> str:
 
     - รหัสวิชาเหลือเฉพาะ A-Z a-z 0-9 - (course.code กรอกอะไรก็ได้ ห้ามให้มี / หรือ .. หลุดเข้า path)
     - วันที่ใช้เวลาไทย (ตรงกับที่คนเห็น) ณ ตอนออก presign ครั้งแรก
-    - ส่วน image_id กันไฟล์ทับกันเมื่อวิชาเดียวอัปหลาย image ในวันเดียว (PUT ผ่าน presigned URL ทับไฟล์เดิมได้)
+    - ส่วน image_id กัน key ชนกันเมื่อวิชาเดียวอัปหลาย image ในวันเดียว (ส่วนการทับไฟล์เดิมผ่าน URL ถูกกันด้วย If-None-Match)
     """
     code = _UNSAFE_KEY_CHARS.sub("-", course_code).strip("-") or "course"
     day = now.astimezone(SCHEDULE_TZ)
@@ -203,7 +203,11 @@ class LabImageService:
             status=image.status,
             archive_key=image.archive_key,
             upload_url=upload_url,
-            headers={"Content-Type": ARCHIVE_CONTENT_TYPE},
+            headers={
+                "Content-Type": ARCHIVE_CONTENT_TYPE,
+                # เซ็นไว้ใน URL: ทำให้ PUT สำเร็จได้ครั้งเดียวต่อ key (ครั้งต่อไปได้ 412)
+                "If-None-Match": ARCHIVE_IF_NONE_MATCH,
+            },
             expires_at=expires_at,
         )
 

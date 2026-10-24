@@ -91,7 +91,10 @@ class TestPresignResult:
         expected_key = data["archiveKey"]
         assert _key_pattern(world.course.code, data["imageId"]).match(expected_key)
         assert data["method"] == "PUT"
-        assert data["headers"] == {"Content-Type": "application/x-tar"}
+        assert data["headers"] == {
+            "Content-Type": "application/x-tar",
+            "If-None-Match": "*",
+        }
         assert data["status"] == "pending"
         assert expected_key in data["uploadUrl"]
         assert data["expiresAt"]
