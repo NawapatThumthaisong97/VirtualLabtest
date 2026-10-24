@@ -74,6 +74,14 @@ def apply_layer5_manifests(v1: client.CoreV1Api, apps_v1: client.AppsV1Api, batc
             except Exception as exc:
                 print(f"  ! Warning applying {kind}/{name}: {exc}")
 
+    # Restart grafana-siem pod to reload provisioned dashboard JSONs immediately
+    for p in v1.list_namespaced_pod("siem-system", label_selector="app.kubernetes.io/name=grafana-siem").items:
+        try:
+            v1.delete_namespaced_pod(p.metadata.name, "siem-system")
+        except Exception:
+            pass
+    time.sleep(2)
+
 
 def wait_for_layer5_pods(v1: client.CoreV1Api, timeout_sec: int = 120) -> str:
     print("\n[2/5] Waiting for Grafana & Falco Fast-Track Relay pods in 'siem-system'...")
@@ -178,14 +186,15 @@ def test_sigma_rules_logsql_detection(v1: client.CoreV1Api, batch_v1: client.Bat
 
 
 def verify_grafana_dashboard_api():
-    print("\n[5/5] Verifying Grafana SIEM Command Center Dashboard API (:30300)...")
-    url = f"http://{K3S_TAILSCALE_IP}:30300/api/dashboards/uid/vlab-siem-5layer"
-    with urllib.request.urlopen(url, timeout=8) as res:
-        data = json.loads(res.read().decode("utf-8"))
-        dash = data["dashboard"]
-        print(f"  ✓ Dashboard Title : {dash['title']}")
-        print(f"  ✓ Dashboard UID   : {dash['uid']} ({len(dash['panels'])} interactive SIEM panels provisioned)")
-    print(f"  ★ Open Grafana SIEM Command Center : http://{K3S_TAILSCALE_IP}:30300/d/vlab-siem-5layer?orgId=1")
+    print("\n[5/5] Verifying Grafana SIEM Command Center & Visual Threat Analytics Dashboards (:30300)...")
+    for uid in ("vlab-siem-5layer", "vlab-siem-analytics"):
+        url = f"http://{K3S_TAILSCALE_IP}:30300/api/dashboards/uid/{uid}"
+        with urllib.request.urlopen(url, timeout=8) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            dash = data["dashboard"]
+            print(f"  ✓ Dashboard [{dash['uid']}] : {dash['title']} ({len(dash['panels'])} panels)")
+    print(f"  ★ Tab 1 (SIEM Command Center)      : http://{K3S_TAILSCALE_IP}:30300/d/vlab-siem-5layer?orgId=1")
+    print(f"  ★ Tab 2 (Visual Threat Analytics)  : http://{K3S_TAILSCALE_IP}:30300/d/vlab-siem-analytics?orgId=1")
 
 
 if __name__ == "__main__":

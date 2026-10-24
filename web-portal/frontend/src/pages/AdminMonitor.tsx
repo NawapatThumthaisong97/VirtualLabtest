@@ -1,27 +1,25 @@
 /**
- * AdminMonitor Page — Full-Screen Grafana 5-Layer SIEM Command Center
- * Replaces legacy monitor tabs with a dedicated full-screen Grafana SIEM view:
- * - Layer 1: Collector (Vector Agent + Falco eBPF over Tailscale)
- * - Layer 2: Buffer (NATS JetStream StatefulSet + KV Store)
- * - Layer 3: Processing (Vector Aggregator VRL -> ECS v8.11.0 + GeoIP + Threat Intel)
- * - Layer 4: Storage (VictoriaLogs 14d Hot Storage + AWS S3 .parquet 90d-365d Cold Storage)
- * - Layer 5: Detection & Visualization (Grafana + Sigma Rules LogsQL CronJob + Falco Fast-Track)
+ * AdminMonitor Page — Full-Screen Grafana 5-Layer SIEM Command Center & Visual Threat Analytics
+ * Replaces legacy monitor tabs with 2 full-screen Grafana SIEM views:
+ * - Tab 1: SIEM Command Center (SOC Overview, Fast-Track, MITRE, GeoIP, Live Logs)
+ * - Tab 2: Visual Threat Analytics (Gauge, Donut Chart, Pie Chart, LCD Bar Gauge, Stacked Area Time-Series, Node Bar Chart)
  */
 import { useState } from 'react';
 import {
+  BarChart3,
+  Database,
   ExternalLink,
+  HardDrive,
   Lock,
   RefreshCw,
   ShieldAlert,
-  Database,
-  HardDrive,
 } from 'lucide-react';
 
-const GRAFANA_DASHBOARD_URL =
+const GRAFANA_COMMAND_CENTER_URL =
   import.meta.env.VITE_SIEM_GRAFANA_URL ||
   'http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1&kiosk';
-const GRAFANA_FULL_URL =
-  'http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1';
+const GRAFANA_VISUAL_ANALYTICS_URL =
+  'http://100.69.137.47:30300/d/vlab-siem-analytics?orgId=1&kiosk';
 const VICTORIALOGS_UI_URL =
   import.meta.env.VITE_SIEM_VICTORIALOGS_URL ||
   'http://100.69.137.47:30428/select/vmui';
@@ -30,16 +28,27 @@ const S3_EXPLORER_URL =
   'http://100.69.137.47:30900';
 
 export default function AdminMonitorPage() {
+  const [activeDashboard, setActiveDashboard] = useState<'command' | 'analytics'>('command');
   const [iframeKey, setIframeKey] = useState<number>(0);
 
   const handleReloadGrafana = () => {
     setIframeKey((prev) => prev + 1);
   };
 
+  const currentGrafanaUrl =
+    activeDashboard === 'command'
+      ? GRAFANA_COMMAND_CENTER_URL
+      : GRAFANA_VISUAL_ANALYTICS_URL;
+
+  const currentFullTabUrl =
+    activeDashboard === 'command'
+      ? 'http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1'
+      : 'http://100.69.137.47:30300/d/vlab-siem-analytics?orgId=1';
+
   return (
     <div className="flex h-screen w-full flex-col bg-[#0a0a0d] text-white overflow-hidden">
       {/* Compact Full-Screen SIEM Header Bar */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#111217] px-4 py-2.5 shrink-0">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#111217] px-4 py-2 shrink-0">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-emerald-400" />
@@ -52,31 +61,56 @@ export default function AdminMonitorPage() {
             [🔒 READ-ONLY MODE]
           </span>
 
-          <div className="hidden xl:flex items-center gap-1.5 text-[11px] text-white/70">
-            <span className="rounded bg-white/5 px-2 py-0.5 border border-white/10">
+          {/* Dashboard View Switcher Tabs */}
+          <div className="flex items-center rounded-lg border border-white/10 bg-black/40 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveDashboard('command')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-semibold transition cursor-pointer ${
+                activeDashboard === 'command'
+                  ? 'bg-emerald-600 text-white shadow'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <ShieldAlert className="h-3.5 w-3.5" />
+              <span>SIEM Command Center</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveDashboard('analytics')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-semibold transition cursor-pointer ${
+                activeDashboard === 'analytics'
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              <span>Visual Threat Analytics (Graphs)</span>
+            </button>
+          </div>
+
+          <div className="hidden 2xl:flex items-center gap-1 text-[10px] text-white/60">
+            <span className="rounded bg-white/5 px-1.5 py-0.5 border border-white/10">
               L1: Vector + Falco eBPF
             </span>
-            <span>&rarr;</span>
-            <span className="rounded bg-white/5 px-2 py-0.5 border border-white/10">
+            <span className="rounded bg-white/5 px-1.5 py-0.5 border border-white/10">
               L2: NATS JetStream + KV
             </span>
-            <span>&rarr;</span>
-            <span className="rounded bg-white/5 px-2 py-0.5 border border-white/10">
+            <span className="rounded bg-white/5 px-1.5 py-0.5 border border-white/10">
               L3: ECS + GeoIP + Threat Intel
             </span>
-            <span>&rarr;</span>
-            <span className="rounded bg-white/5 px-2 py-0.5 border border-white/10">
+            <span className="rounded bg-white/5 px-1.5 py-0.5 border border-white/10">
               L4: VictoriaLogs + AWS S3 (.parquet)
             </span>
-            <span>&rarr;</span>
-            <span className="rounded bg-emerald-500/15 text-emerald-300 px-2 py-0.5 border border-emerald-500/30 font-semibold">
+            <span className="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5 border border-emerald-500/30 font-semibold">
               L5: Grafana + Sigma + Fast-Track
             </span>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="hidden md:flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/60">
+          <div className="hidden lg:flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/60">
             <Lock className="h-3 w-3 text-amber-400" />
             <span>Strict View-Only</span>
           </div>
@@ -113,7 +147,7 @@ export default function AdminMonitorPage() {
           </a>
 
           <a
-            href={GRAFANA_FULL_URL}
+            href={currentFullTabUrl}
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1 text-xs font-semibold text-white transition"
@@ -127,10 +161,10 @@ export default function AdminMonitorPage() {
       {/* Full-Screen Embedded Grafana 5-Layer SIEM Dashboard */}
       <main className="relative flex-1 w-full bg-[#111217]">
         <iframe
-          key={iframeKey}
+          key={`${activeDashboard}-${iframeKey}`}
           data-testid="grafana-siem-fullscreen-iframe"
           title="Grafana 5-Layer SIEM Command Center"
-          src={GRAFANA_DASHBOARD_URL}
+          src={currentGrafanaUrl}
           className="h-full w-full border-0"
         />
       </main>

@@ -16,7 +16,7 @@ data:
       "tags": ["siem", "5-layer", "ebpf", "sigma", "victorialogs", "ecs"],
       "timezone": "browser",
       "schemaVersion": 39,
-      "version": 1,
+      "version": 2,
       "refresh": "5s",
       "time": {
         "from": "now-6h",
@@ -29,6 +29,7 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -55,6 +56,7 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -81,6 +83,7 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -107,6 +110,7 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -133,6 +137,7 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -155,10 +160,11 @@ data:
         },
         {
           "id": 6,
-          "title": "Active Hybrid Lab Sessions",
+          "title": "Total 5-Layer SIEM Events",
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -217,6 +223,246 @@ data:
               "refId": "A",
               "format": "table",
               "rawSql": "SELECT timestamp AS \"Time\", severity::text AS \"Severity\", category::text AS \"Category\", event_type AS \"Event Type\", source AS \"Node / Engine\", cluster_or_subnet AS \"NAT Subnet\", COALESCE(metadata_json->>'siem_layer', 'layer1-collector') AS \"SIEM Layer\", COALESCE(metadata_json->>'fast_track', 'false') AS \"Fast-Track\", message AS \"Sanitized Message (PII Masked)\" FROM infrastructure_logs ORDER BY timestamp DESC LIMIT 50;"
+            }
+          ]
+        }
+      ]
+    }
+  vlab-siem-visual-analytics.json: |
+    {
+      "uid": "vlab-siem-analytics",
+      "title": "VirtualLab SIEM Visual Threat Analytics & Multi-Chart Showcase",
+      "tags": ["siem", "analytics", "charts", "mitre", "geoip", "sigma"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5s",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 101,
+          "title": "Max Threat Risk Score Index (ECS Risk 0-100)",
+          "type": "gauge",
+          "gridPos": { "h": 6, "w": 5, "x": 0, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": {
+            "showThresholdLabels": true,
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 100,
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 40 },
+                  { "color": "orange", "value": 70 },
+                  { "color": "red", "value": 90 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT MAX(COALESCE((metadata_json->'threat_intel'->>'risk_score')::int, 95)) AS \"Max Threat Risk Score\" FROM infrastructure_logs;"
+            }
+          ]
+        },
+        {
+          "id": 102,
+          "title": "Attack Vector Breakdown (Donut Chart)",
+          "type": "piechart",
+          "gridPos": { "h": 6, "w": 6, "x": 5, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": {
+            "pieType": "donut",
+            "displayLabels": ["name", "percent"],
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "values": ["value", "percent"]
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT event_type AS \"Event Type\", COUNT(*) AS \"Count\" FROM infrastructure_logs GROUP BY event_type ORDER BY \"Count\" DESC;"
+            }
+          ]
+        },
+        {
+          "id": 103,
+          "title": "GeoIP Destination Country Share (Pie Chart)",
+          "type": "piechart",
+          "gridPos": { "h": 6, "w": 6, "x": 11, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": {
+            "pieType": "pie",
+            "displayLabels": ["name", "value"],
+            "legend": {
+              "displayMode": "list",
+              "placement": "right",
+              "values": ["value", "percent"]
+            }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COALESCE(metadata_json->'geoip'->>'destination_country', 'TH') || ' (' || COALESCE(metadata_json->'geoip'->>'destination_city', 'Local') || ')' AS \"Destination\", COUNT(*) AS \"Events\" FROM infrastructure_logs GROUP BY 1 ORDER BY \"Events\" DESC;"
+            }
+          ]
+        },
+        {
+          "id": 104,
+          "title": "MITRE ATT&CK Technique Hits (LCD Bar Gauge)",
+          "type": "bargauge",
+          "gridPos": { "h": 6, "w": 7, "x": 17, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "lcd",
+            "showUnfilled": true,
+            "valueMode": "color"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 30,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "blue", "value": null },
+                  { "color": "orange", "value": 3 },
+                  { "color": "red", "value": 8 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COALESCE(metadata_json->'threat_intel'->>'mitre_technique', metadata_json->>'sigma_mitre_technique', 'T1071') AS \"MITRE Technique\", COUNT(*) AS \"Hits\" FROM infrastructure_logs WHERE severity::text = 'CRITICAL' GROUP BY 1 ORDER BY \"Hits\" DESC;"
+            }
+          ]
+        },
+        {
+          "id": 105,
+          "title": "Real-Time SIEM Event Velocity Over Time by Severity (Stacked Area Time-Series)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 15, "x": 0, "y": 6 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 35,
+                "gradientMode": "opacity",
+                "showPoints": "always",
+                "pointSize": 5,
+                "stacking": { "mode": "normal", "group": "A" }
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "time_series",
+              "rawSql": "SELECT date_trunc('minute', timestamp) AS \"time\", severity::text AS metric, COUNT(*) AS value FROM infrastructure_logs WHERE timestamp >= NOW() - INTERVAL '6 hours' GROUP BY 1, 2 ORDER BY 1;"
+            }
+          ]
+        },
+        {
+          "id": 106,
+          "title": "5-Layer Pipeline Throughput by SIEM Layer (Gradient Bar Gauge)",
+          "type": "bargauge",
+          "gridPos": { "h": 8, "w": 9, "x": 15, "y": 6 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "showUnfilled": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 40,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "teal", "value": null },
+                  { "color": "purple", "value": 5 },
+                  { "color": "red", "value": 15 }
+                ]
+              }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COALESCE(metadata_json->>'siem_layer', 'layer1-collector') AS \"SIEM Layer\", COUNT(*) AS \"Processed Events\" FROM infrastructure_logs GROUP BY 1 ORDER BY \"Processed Events\" DESC;"
+            }
+          ]
+        },
+        {
+          "id": 107,
+          "title": "Hybrid Cloud Worker Node & Subnet Event Comparison (Bar Chart)",
+          "type": "barchart",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "options": {
+            "orientation": "vertical",
+            "xTickLabelRotation": 0,
+            "showValue": "always"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT source AS \"Worker Node / Engine\", COUNT(*) FILTER (WHERE severity::text = 'CRITICAL') AS \"CRITICAL\", COUNT(*) FILTER (WHERE severity::text = 'WARNING') AS \"WARNING\", COUNT(*) FILTER (WHERE severity::text = 'INFO') AS \"INFO\" FROM infrastructure_logs GROUP BY source ORDER BY \"CRITICAL\" DESC LIMIT 8;"
+            }
+          ]
+        },
+        {
+          "id": 108,
+          "title": "Sigma Detection-as-Code Rule Execution Matrix (LogsQL Matches & MITRE Mapping)",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT COALESCE(metadata_json->>'sigma_rule_id', 'sigma-vlab-rule') AS \"Sigma Rule ID\", COALESCE(metadata_json->>'sigma_mitre_technique', 'T1071') AS \"MITRE ID\", COALESCE(metadata_json->>'sigma_rule_title', message) AS \"Rule Title\", COALESCE((metadata_json->>'matches_found')::int, 1) AS \"LogsQL Matches\", MAX(timestamp) AS \"Last Triggered\" FROM infrastructure_logs WHERE event_type = 'SIGMA_RULE_MATCH' GROUP BY 1, 2, 3, 4 ORDER BY \"Last Triggered\" DESC;"
             }
           ]
         }
