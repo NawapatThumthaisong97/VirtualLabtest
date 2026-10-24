@@ -31,9 +31,6 @@ export default function Navbar() {
         <Link to="/admin">
           <img src="/virtual-lab-logo-white@2x.png" alt="Virtual Lab" style={{ height: 22, width: 'auto', display: 'block' }} />
         </Link>
-        <span style={{ color: '#fff', fontSize: 12, border: '1px solid rgba(255,255,255,0.35)', borderRadius: 4, padding: '1px 6px' }}>
-          Admin
-        </span>
       </div>
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: 22, flex: 1, justifyContent: 'center' }}>
