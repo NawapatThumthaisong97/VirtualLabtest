@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { colors } from './theme';
 import { Card, ExternalIcon, cellBorder } from './ui';
@@ -39,6 +40,7 @@ function niceMax(v: number): number {
 export default function LogExplorer() {
   const [category, setCategory] = useState<LogCategory>('CLUSTER');
   const [detail, setDetail] = useState(false);
+  const navigate = useNavigate();
   const hist = useQuery({
     queryKey: ['admin', 'logs-histogram', category],
     queryFn: () => adminLogService.getHistogram(category),
@@ -68,6 +70,12 @@ export default function LogExplorer() {
         </button>
         <button
           onClick={() => setDetail((d) => !d)}
+          style={{ fontSize: 12, cursor: 'pointer', background: 'none', border: 0, color: colors.text, fontFamily: 'inherit' }}
+        >
+          {detail ? 'ซ่อน' : 'ล่าสุด'}
+        </button>
+        <button
+          onClick={() => navigate('/admin/logs')}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer', background: 'none', border: 0, color: colors.text, fontFamily: 'inherit' }}
         >
           Log detail

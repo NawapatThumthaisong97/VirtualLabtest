@@ -150,11 +150,13 @@ def get_logs_histogram(
     category: Optional[str] = Query(None, pattern="^(CLUSTER|CLOUD|cluster|cloud)$"),
     hours: int = Query(72, ge=2, le=24 * 30),
     bucket_hours: int = Query(2, ge=1, le=24, alias="bucketHours"),
+    severity: Optional[str] = Query(None, description="INFO / WARNING / ERROR / CRITICAL"),
+    type: Optional[str] = Query(None, description="event type เช่น POD_EVENT"),
     db: Session = Depends(get_db),
 ):
-    """จำนวน log ต่อช่วงเวลา (กราฟแท่ง Log Explorer) + แยกตามประเภท"""
+    """จำนวน log ต่อช่วงเวลา (กราฟแท่ง Log Explorer) + แยกตามประเภท — กรองตาม severity / event ได้"""
     return {
         "success": True,
         "message": "Log histogram retrieved successfully",
-        "data": admin_log_service.histogram(db, category, hours, bucket_hours),
+        "data": admin_log_service.histogram(db, category, hours, bucket_hours, severity=severity, event_type=type),
     }

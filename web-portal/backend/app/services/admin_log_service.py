@@ -204,11 +204,12 @@ def list_logs(db: DbSession, category: Optional[str] = None, event_type: Optiona
 
 
 def histogram(db: DbSession, category: Optional[str] = None, hours: int = 72, bucket_hours: int = 2,
-              now: Optional[datetime] = None) -> LogHistogramResponse:
+              now: Optional[datetime] = None, severity: Optional[str] = None,
+              event_type: Optional[str] = None) -> LogHistogramResponse:
     """จำนวน log ต่อช่วงเวลา เก่า → ใหม่ (ช่วงละ bucket_hours) + แยกตามประเภท"""
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(hours=hours)
-    rows = _query(db, category, None, None, start, now).with_entities(
+    rows = _query(db, category, event_type, severity, start, now).with_entities(
         InfrastructureLog.timestamp, InfrastructureLog.event_type).all()
     size = timedelta(hours=bucket_hours)
     counts = [0] * (hours // bucket_hours)

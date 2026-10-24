@@ -137,10 +137,27 @@ export interface LogHistogram {
   byType: Record<string, number>;
 }
 
+export interface LogQuery {
+  category?: LogCategory;
+  severity?: string;
+  type?: string;
+}
+
+const logParams = (q: LogQuery) =>
+  Object.entries(q)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `&${k}=${encodeURIComponent(String(v))}`)
+    .join('');
+
 export const adminLogService = {
   getHistogram: (category: LogCategory) =>
     getData<LogHistogram>(`/v1/admin/logs/histogram?category=${category}&hours=72&bucketHours=2`),
   getLogs: (category: LogCategory, limit = 10) => getData<LogList>(`/v1/admin/logs?category=${category}&limit=${limit}`),
+  /** หน้า Log Explorer (/admin/logs): กรองได้ทุกแบบ */
+  histogram: (q: LogQuery, hours: number, bucketHours: number) =>
+    getData<LogHistogram>(`/v1/admin/logs/histogram?hours=${hours}&bucketHours=${bucketHours}${logParams(q)}`),
+  list: (q: LogQuery, limit: number, offset: number) =>
+    getData<LogList>(`/v1/admin/logs?limit=${limit}&offset=${offset}${logParams(q)}`),
 };
 
 // ---------- จองห้อง (หน้า /admin/scheduler) ----------

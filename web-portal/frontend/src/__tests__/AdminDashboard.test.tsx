@@ -147,7 +147,7 @@ describe('AdminDashboard (/admin)', () => {
   it('log explorer shows counts by type, detail lists latest logs, switches to cloud', async () => {
     renderPage();
     expect(await screen.findByText('NODE_NOT_READY · 3')).toBeDefined();
-    fireEvent.click(screen.getByText('Log detail'));
+    fireEvent.click(screen.getByText('ล่าสุด'));
     expect(await screen.findByTitle('Node worker-pete NotReady')).toBeDefined();
     fireEvent.click(screen.getByText('Cloud Usage'));
     expect(adminLogService.getHistogram).toHaveBeenCalledWith('CLOUD');
