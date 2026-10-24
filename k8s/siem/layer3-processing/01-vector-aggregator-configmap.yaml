@@ -121,12 +121,20 @@ data:
           }
 
           # 4. Build Elastic Common Schema (ECS v8.11.0) Normalized Document
+          ev_kind = "event"
+          ev_cats = ["host", "process"]
+          if cat == "SECURITY_VIOLATION" {
+            ev_kind = "alert"
+            ev_cats = ["intrusion_detection", "network"]
+          }
+          ev_type_lower = downcase(ev_type)
+
           ecs_doc = {
             "ecs": { "version": "8.11.0" },
             "event": {
-              "kind": if cat == "SECURITY_VIOLATION" { "alert" } else { "event" },
-              "category": if cat == "SECURITY_VIOLATION" { ["intrusion_detection", "network"] } else { ["host", "process"] },
-              "type": [downcase(ev_type)],
+              "kind": ev_kind,
+              "category": ev_cats,
+              "type": [ev_type_lower],
               "severity": risk_score,
               "dataset": "vlab.siem.telemetry"
             },
@@ -225,3 +233,4 @@ data:
           type: disk
           max_size: 536870912
           when_full: drop_newest
+

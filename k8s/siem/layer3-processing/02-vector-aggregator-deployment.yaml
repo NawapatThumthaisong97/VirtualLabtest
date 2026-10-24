@@ -44,6 +44,8 @@ spec:
         vlab.siem/layer: "3-processing"
     spec:
       serviceAccountName: vector-agent-sa
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       # Schedule Vector Aggregator on Worker nodes separate from Master (Control-Plane)
       # Uses weight 100 preferred anti-affinity so multi-node clusters strictly avoid Master,
       # while single-node test clusters can still schedule and test the Deployment live.
@@ -104,3 +106,4 @@ spec:
             name: vector-aggregator-threat-geoip
         - name: aggregator-data
           emptyDir: {}
+
