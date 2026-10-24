@@ -87,7 +87,8 @@ export interface BillingSummary {
     forecastUsd: number;
     usedPct: number;
     alert: 'none' | 'warn' | 'over';
-    source: 'estimate' | 'cost-explorer';
+    source: 'estimate' | 'mixed' | 'cost-explorer';
+    reconciledAt: string | null;
     hourlyPriceUsd: number;
     instancesRunning: number;
     sessionHours: number;

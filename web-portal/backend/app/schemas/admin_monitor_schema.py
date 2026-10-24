@@ -96,7 +96,10 @@ class AwsBilling(CamelModel):
     forecast_usd: float = Field(..., description="คาดทั้งเดือน = used / วันที่ผ่านไป × วันทั้งเดือน")
     used_pct: float
     alert: Literal["none", "warn", "over"] = Field(..., description="warn = ถึง AWS_BUDGET_ALERT_PCT, over = เกิน budget")
-    source: Literal["estimate", "cost-explorer"] = Field(..., description="estimate = ชั่วโมง × hourlyPriceUsd")
+    source: Literal["estimate", "mixed", "cost-explorer"] = Field(
+        ..., description="estimate = ชั่วโมง × hourlyPriceUsd, cost-explorer = ยอดจริงจาก AWS, mixed = ยอดจริงถึงเมื่อวาน + ประมาณวันนี้"
+    )
+    reconciled_at: Optional[datetime] = Field(None, description="ดึงยอดจาก Cost Explorer ล่าสุดเมื่อไหร่")
     hourly_price_usd: float
     instances_running: int
     session_hours: float

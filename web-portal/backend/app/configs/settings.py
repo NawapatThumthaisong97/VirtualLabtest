@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     # budget AWS ต่อเดือน (USD) และเกณฑ์เตือน (%)
     AWS_MONTHLY_BUDGET_USD: float = 200.0
     AWS_BUDGET_ALERT_PCT: int = 80
+    # ยอดจริงจาก Cost Explorer (วันละครั้ง ครั้งละ $0.01) แทนค่าประมาณของวันที่ผ่านไปแล้ว — ปิดไว้เป็นค่าเริ่มต้น
+    # (เทส / dev ไม่ยิง AWS) prod เปิดผ่าน ansible บัญชีรวม → นับเฉพาะ resource ที่มี tag นี้
+    AWS_COST_EXPLORER_ENABLED: bool = False
+    AWS_COST_TAG_KEY: str = "skypilot-user"
+    AWS_COST_TAG_VALUE: str = "vlab-backend"
+    AWS_COST_LOOKBACK_DAYS: int = 62
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
 

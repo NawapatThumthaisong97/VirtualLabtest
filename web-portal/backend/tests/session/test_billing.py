@@ -127,3 +127,67 @@ class TestBurstSwitch:
         billing.set_burst(db, True, None, world.user.id)
         svc.create_session(world.user.id, world.k8s_lab.id, client_ip=OUTSIDE_IP)
         assert len(fake_sky.launched) == 1
+
+
+class FakeCE:
+    """ตัวแทน boto3 Cost Explorer client: คืนยอดรายวันตามที่ตั้ง + จดว่าถูกเรียกด้วยอะไร"""
+
+    def __init__(self, days):
+        self.days = days          # {date: usd}
+        self.calls = []
+
+    def get_cost_and_usage(self, **kw):
+        self.calls.append(kw)
+        return {"ResultsByTime": [
+            {"TimePeriod": {"Start": d.isoformat()}, "Total": {"UnblendedCost": {"Amount": str(v), "Unit": "USD"}}}
+            for d, v in self.days.items()
+        ]}
+
+
+class TestCostExplorer:
+    """PR 4: real AWS cost (tag filtered) replaces the estimate for finished days"""
+
+    NOW = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+
+    @pytest.fixture(autouse=True)
+    def clean(self, db):
+        from app.models.aws_daily_cost import AwsDailyCost
+        db.query(AwsDailyCost).delete()
+        db.commit()
+
+    def test_fetch_once_a_day(self, db):
+        """Writes daily rows; second call within 20 h skipped; filter = lab tag, no credits"""
+        from datetime import date
+        ce = FakeCE({date(2026, 10, 22): 0, date(2026, 10, 23): 0.0038})
+        assert billing.fetch_cost_explorer(db, now=self.NOW, client=ce) == 2
+        assert billing.fetch_cost_explorer(db, now=self.NOW + timedelta(hours=5), client=ce) == 0
+        assert billing.fetch_cost_explorer(db, now=self.NOW + timedelta(hours=21), client=ce) == 2
+        f = ce.calls[0]["Filter"]["And"]
+        assert f[0] == {"Tags": {"Key": "skypilot-user", "Values": ["vlab-backend"]}}
+        assert f[1]["Not"]["Dimensions"]["Values"] == ["Credit", "Refund"]
+
+    def test_disabled_by_default(self, db):
+        """AWS_COST_EXPLORER_ENABLED off and no client -> no AWS call"""
+        assert billing.fetch_cost_explorer(db, now=self.NOW) == 0
+
+    def test_summary_mixed(self, db):
+        """Days before today from Cost Explorer + today estimated -> source mixed"""
+        from datetime import date
+        billing.fetch_cost_explorer(db, now=self.NOW, client=FakeCE(
+            {date(2026, 10, 22): 1.5, date(2026, 10, 23): 2.25, date(2026, 10, 24): 9.0}))
+        s = billing.get_billing_summary(db, date(2026, 10, 1), now=self.NOW)
+        assert (s.aws.source, s.aws.used_usd) == ("mixed", 3.75)   # วันนี้ (24) ยังไม่ครบ ไม่นับยอดจริง
+        assert s.aws.reconciled_at == self.NOW
+
+    def test_past_month_all_real(self, db):
+        """Whole month covered -> source cost-explorer"""
+        from datetime import date
+        days = {date(2026, 9, d): 0.5 for d in range(1, 31)}
+        billing.fetch_cost_explorer(db, now=self.NOW, client=FakeCE(days))
+        s = billing.get_billing_summary(db, date(2026, 9, 1), now=self.NOW)
+        assert (s.aws.source, s.aws.used_usd) == ("cost-explorer", 15.0)
+
+    def test_no_data_estimate(self, db):
+        """No Cost Explorer rows -> estimate as before"""
+        from datetime import date
+        assert billing.get_billing_summary(db, date(2026, 10, 1), now=self.NOW).aws.source == "estimate"
