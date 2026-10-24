@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-ebpf-config
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: falco-ebpf
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "1-collector"
+data:
+  falco.yaml: |
+    # Falco eBPF Configuration for Virtual Lab (Layer 1 Collector)
+    # Uses modern_ebpf (CO-RE) so no kernel headers or DKMS compilation is required on K3s / EC2 nodes
+    engine:
+      kind: modern_ebpf
+      modern_ebpf:
+        cpus_for_each_buffer: 2
+        buf_size_preset: 4
+
+    rules_files:
+      - /etc/falco/falco_rules.yaml
+      - /etc/falco/rules.d/vlab_custom_rules.yaml
+
+    json_output: true
+    json_include_output_property: true
+    json_include_tags_property: true
+    priority: warning
+    buffered_outputs: false
+
+    # Output 1: Shared JSON alert log on host for Vector Agent tailing
+    file_output:
+      enabled: true
+      keep_alive: true
+      filename: /var/log/falco/falco-alerts.json
+
+    # Output 2: Localhost HTTP webhook directly into node-local Vector Agent (never exposed publicly)
+    http_output:
+      enabled: true
+      url: "http://127.0.0.1:8687/falco"
+      user_agent: "falco-ebpf-vlab/1.0"
+
+    stdout_output:
+      enabled: true
+
+  vlab_custom_rules.yaml: |
+    # Custom eBPF Kernel Security Rules for Virtual Lab Containers
+    - macro: vlab_container
+      condition: (container.id != host and container.name != "")
+
+    - list: vlab_shell_binaries
+      items: [bash, sh, zsh, dash, ksh, csh, tcsh, ash]
+
+    - list: vlab_sensitive_files
+      items:
+        - /etc/shadow
+        - /etc/sudoers
+        - /etc/pam.d
+        - /root/.ssh/authorized_keys
+        - /var/run/secrets/kubernetes.io/serviceaccount/token
+        - /etc/rancher/k3s/k3s.yaml
+
+    - list: vlab_forbidden_net_miner_tools
+      items: [xmrig, minerd, cpuminer, nc, ncat, netcat, nmap, masscan, socat]
+
+    # Rule 1: Detect unauthorized interactive shell spawned inside a container
+    - rule: VLab Unauthorized Interactive Shell in Container
+      desc: Detect an unexpected shell spawned by a non-entrypoint service process inside a container
+      condition: >
+        spawned_process and vlab_container
+        and proc.name in (vlab_shell_binaries)
+        and not proc.pname in (vlab_shell_binaries, docker-init, containerd-shim, dumb-init, tini, code-server, node)
+      output: >
+        Unauthorized shell spawned in container (user=%user.name container_id=%container.id
+        container_name=%container.name image=%container.image.repository cmdline=%proc.cmdline
+        parent=%proc.pname pid=%proc.pid)
+      priority: WARNING
+      tags: [container, shell, mitre_execution, T1059, vlab_layer1]
+
+    # Rule 2: Detect reading sensitive system or K8s credential files from inside a container
+    - rule: VLab Sensitive System File Read in Container
+      desc: Detect attempt to read sensitive system files (/etc/shadow, K8s serviceaccount token, k3s.yaml) inside a container
+      condition: >
+        open_read and vlab_container
+        and fd.name in (vlab_sensitive_files)
+        and not proc.name in (login, su, sudo, sshd)
+      output: >
+        Sensitive system file read detected in container (user=%user.name file=%fd.name
+        container_id=%container.id container_name=%container.name image=%container.image.repository
+        cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [container, filesystem, credential_access, mitre_credential_access, T1552, fast_track, vlab_layer1]
+
+    # Rule 3: Detect container escape or privileged kernel syscall attempts
+    - rule: VLab Container Escape Privileged Syscall Attempt
+      desc: Detect dangerous kernel syscalls (ptrace, mount, unshare, setns, init_module, bpf) executed inside a lab container
+      condition: >
+        evt.type in (ptrace, mount, unshare, setns, init_module, finit_module, bpf)
+        and evt.dir = <
+        and vlab_container
+      output: >
+        CRITICAL container escape syscall attempt detected (syscall=%evt.type user=%user.name
+        container_id=%container.id container_name=%container.name image=%container.image.repository
+        cmdline=%proc.cmdline)
+      priority: CRITICAL
+      tags: [container, escape, privilege_escalation, mitre_privilege_escalation, T1611, fast_track, vlab_layer1]
+
+    # Rule 4: Detect cryptomining or unauthorized network reconnaissance tools
+    - rule: VLab Cryptomining or Recon Tool Execution in Container
+      desc: Detect execution of cryptominers or network scanners inside a lab container
+      condition: >
+        spawned_process and vlab_container
+        and (proc.name in (vlab_forbidden_net_miner_tools) or proc.cmdline contains "stratum+tcp")
+      output: >
+        Forbidden cryptomining or network scanner executed in container (tool=%proc.name
+        cmdline=%proc.cmdline container_id=%container.id container_name=%container.name
+        image=%container.image.repository)
+      priority: CRITICAL
+      tags: [container, cryptomining, network_recon, mitre_impact, T1496, fast_track, vlab_layer1]

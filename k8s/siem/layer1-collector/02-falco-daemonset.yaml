@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: falco-ebpf-collector
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: falco-ebpf
+    app.kubernetes.io/component: kernel-sensor
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "1-collector"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falco-ebpf
+      vlab.siem/layer: "1-collector"
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: falco-ebpf
+        app.kubernetes.io/component: kernel-sensor
+        app.kubernetes.io/part-of: vlab-siem
+        vlab.siem/layer: "1-collector"
+    spec:
+      serviceAccountName: falco-agent-sa
+      hostPID: true
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      containers:
+        - name: falco-ebpf
+          image: falcosecurity/falco-no-driver:0.39.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - /usr/bin/falco
+            - -c
+            - /etc/falco/config/falco.yaml
+          env:
+            - name: HOST_ROOT
+              value: /host
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - BPF
+                - PERFMON
+                - SYS_RESOURCE
+                - SYS_PTRACE
+                - DAC_READ_SEARCH
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: falco-config
+              mountPath: /etc/falco/config/falco.yaml
+              subPath: falco.yaml
+              readOnly: true
+            - name: falco-config
+              mountPath: /etc/falco/rules.d/vlab_custom_rules.yaml
+              subPath: vlab_custom_rules.yaml
+              readOnly: true
+            - name: falco-shared-logs
+              mountPath: /var/log/falco
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys-tracing
+              mountPath: /sys/kernel/tracing
+              readOnly: true
+            - name: containerd-sock
+              mountPath: /run/k3s/containerd/containerd.sock
+              readOnly: true
+      volumes:
+        - name: falco-config
+          configMap:
+            name: falco-ebpf-config
+        - name: falco-shared-logs
+          hostPath:
+            path: /var/log/falco
+            type: DirectoryOrCreate
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
+        - name: host-sys-tracing
+          hostPath:
+            path: /sys/kernel/tracing
+            type: DirectoryOrCreate
+        - name: containerd-sock
+          hostPath:
+            path: /run/k3s/containerd/containerd.sock
+            type: Socket
