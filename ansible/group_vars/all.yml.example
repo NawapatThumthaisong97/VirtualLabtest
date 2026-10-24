@@ -48,3 +48,8 @@ skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 # --- web-service (backend) — ยาว >= 32 ตัว สร้างด้วย python3 -c 'import secrets;print(secrets.token_urlsafe(48))'
 vault_backend_secret_key: <BACKEND_SECRET_KEY>
 vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
+# --- เมลแจ้งผลจองห้อง (Gmail) — บัญชีที่เปิด 2-Step Verification แล้วสร้าง App Password ที่ myaccount.google.com/apppasswords
+# ไม่ใส่ vault_smtp_user = ไม่ส่งเมล (ระบบจองยังใช้ได้) / mail_redirect_to = ช่วงเทส ส่งทุกฉบับไปที่อยู่นี้แทนอาจารย์จริง
+vault_smtp_user: <GMAIL_ADDRESS>
+vault_smtp_password: <GMAIL_APP_PASSWORD_16_CHARS>
+mail_redirect_to: <TEST_INBOX_OR_EMPTY>

@@ -19,6 +19,7 @@ from .class_slot import ClassSlot, ClassSlotStatus
 from .health_check import HealthCheck
 from .cloud_control import CloudControl
 from .aws_daily_cost import AwsDailyCost
+from .booking_request import BookingRequest
 from .billing_report import BillingReport
 from .infrastructure_log import InfrastructureLog
 
@@ -56,4 +57,5 @@ __all__ = [
     "HealthCheck",
     "CloudControl",
     "AwsDailyCost",
+    "BookingRequest",
 ]

@@ -92,6 +92,13 @@ class AdminMonitorService:
         # unassigned ไว้ท้ายสุด
         return sorted(rooms, key=lambda r: (r.room == UNASSIGNED_ROOM, r.room))
 
+    def room_capacities(self) -> Optional[dict[str, int]]:
+        """ห้อง → จำนวนเครื่อง (ไม่นับ unassigned) ต่อ K3s ไม่ได้ = None (จองห้องข้ามการเช็กจำนวนเครื่อง)"""
+        nodes = self._list_nodes()
+        if nodes is None:
+            return None
+        return {r.room: r.pcs_total for r in self._rooms(nodes, Counter()) if r.room != UNASSIGNED_ROOM}
+
     def get_infra_map(self) -> InfraMapResponse:
         nodes = self._list_nodes()
         if nodes is None:
