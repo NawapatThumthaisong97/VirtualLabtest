@@ -127,6 +127,15 @@ describe('AdminDashboard (/admin)', () => {
     expect(screen.getByText('Idle')).toBeDefined();
   });
 
+  it('header has feature buttons; not-yet features are disabled', async () => {
+    renderPage();
+    expect(await screen.findByText('Bill Explorer')).toBeDefined();
+    expect((screen.getByText('Logs') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByText('Class Scheduler') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Class System') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('is pending review')).toBeNull();
+  });
+
   it('no sample numbers from the design are left', async () => {
     renderPage();
     expect(await screen.findByText('Log Explorer')).toBeDefined();
