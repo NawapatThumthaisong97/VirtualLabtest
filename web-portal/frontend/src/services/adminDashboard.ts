@@ -142,3 +142,75 @@ export const adminLogService = {
     getData<LogHistogram>(`/v1/admin/logs/histogram?category=${category}&hours=72&bucketHours=2`),
   getLogs: (category: LogCategory, limit = 10) => getData<LogList>(`/v1/admin/logs?category=${category}&limit=${limit}`),
 };
+
+// ---------- จองห้อง (หน้า /admin/scheduler) ----------
+
+export interface BookingItem {
+  id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requesterName: string;
+  requesterEmail: string;
+  courseId: string;
+  courseName: string;
+  labId: string;
+  labTitle: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  validFrom: string;
+  validUntil: string;
+  machines: number;
+  room: string | null;
+  note: string | null;
+  decisionNote: string | null;
+  classScheduleId: string | null;
+  slotsCreated: number | null;
+  mailStatus: string | null;
+  createdAt: string;
+}
+
+export interface CalendarEventItem {
+  id: string;
+  title: string;
+  date: string;
+  start: string;
+  end: string;
+  room: string | null;
+  courseId: string;
+  courseName: string;
+  machines: number;
+  status: string;
+}
+
+export interface SchedulerOptions {
+  courses: { id: string; code: string; name: string; instructors: string[] }[];
+  labs: { id: string; courseId: string; title: string; hasImage: boolean }[];
+  rooms: { room: string; pcsTotal: number }[];
+}
+
+export interface ScheduleFormBody {
+  courseId?: string;
+  labId: string;
+  room: string;
+  machines: number;
+  firstDate: string;
+  startTime: string;
+  endTime: string;
+  until: string;
+  note?: string;
+}
+
+async function postData<T>(url: string, body: unknown): Promise<T> {
+  const res = (await apiClient.post(url, body)) as unknown as ApiResponse<T>;
+  return res.data;
+}
+
+export const bookingService = {
+  getCalendar: (month: string) =>
+    getData<{ month: string; events: CalendarEventItem[] }>(`/v1/admin/calendar?month=${month}`),
+  getPending: () => getData<{ items: BookingItem[]; pendingCount: number }>('/v1/admin/bookings?status=pending'),
+  getOptions: () => getData<SchedulerOptions>('/v1/admin/scheduler/options'),
+  approve: (id: string, body: ScheduleFormBody) => postData<BookingItem>(`/v1/admin/bookings/${id}/approve`, body),
+  reject: (id: string, reason: string) => postData<BookingItem>(`/v1/admin/bookings/${id}/reject`, { reason }),
+  create: (body: ScheduleFormBody) => postData<BookingItem>('/v1/admin/schedules', body),
+};

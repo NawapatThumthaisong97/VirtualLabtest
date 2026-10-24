@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Time, Date, DateTime, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Integer, String, Time, Date, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -24,6 +24,7 @@ class ClassSchedule(Base):
     valid_until = Column(Date, nullable=False)
     default_lab_image_id = Column(UUID(as_uuid=True), ForeignKey("lab_images.id"), nullable=True)
     expected_seats = Column(Integer, nullable=False)
+    room = Column(String(64), nullable=True)            # ห้องแลป (label vlab/room) จากการจอง — ไม่มี = ไม่ผูกห้อง
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)

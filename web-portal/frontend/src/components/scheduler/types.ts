@@ -12,7 +12,7 @@ export interface ClassEvent {
 }
 
 export interface ClassRequest {
-  id: number;
+  id: string;
   requester: string;
   purpose: string;
   course: string;
@@ -24,13 +24,19 @@ export interface ClassRequest {
   isNew?: boolean;
 }
 
+/** ฟอร์ม Class Scheduler — ค่าจริงส่งเข้า API (approve / create) */
 export interface EventForm {
-  course: string;
-  instructor: string;
-  lab: string;
+  /** มี = เปิดจากคำขออาจารย์ (Approve / Reject) ไม่มี = Create new event */
+  bookingId?: string;
+  courseId: string;
+  labId: string;
   room: string;
-  max: string;
+  machines: number;
+  /** คาบแรก yyyy-mm-dd */
   date: string;
   start: string;
   end: string;
+  /** ทำซ้ำทุกสัปดาห์ถึงวันที่ yyyy-mm-dd */
+  until: string;
+  note: string;
 }
