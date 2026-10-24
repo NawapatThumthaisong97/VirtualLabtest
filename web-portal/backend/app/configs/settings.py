@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     MAIL_FROM_NAME: str = "Virtual Lab Team"
     # ช่วงเทส: ส่งทุกฉบับไปที่อยู่นี้แทนผู้รับจริง (บอกผู้รับจริงในเนื้อเมล) — prod ปล่อยว่าง
     MAIL_REDIRECT_TO: Optional[str] = None
+    # ส่งได้เฉพาะผู้รับในรายการ (คั่นด้วย , : เมลเต็ม หรือ @โดเมน) — ว่าง = ไม่ส่งให้ใครเลยนอกจาก MAIL_REDIRECT_TO
+    # "*" = ทุกคน (ใช้เมื่อบัญชีอาจารย์ใน DB เป็นของจริงทั้งหมดแล้ว — seed มีเมล @dome.tu.ac.th สมมติที่อาจเป็นของคนจริง)
+    MAIL_ALLOWED_RECIPIENTS: str = ""
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
 

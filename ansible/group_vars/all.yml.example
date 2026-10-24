@@ -53,3 +53,6 @@ vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
 vault_smtp_user: <GMAIL_ADDRESS>
 vault_smtp_password: <GMAIL_APP_PASSWORD_16_CHARS>
 mail_redirect_to: <TEST_INBOX_OR_EMPTY>
+# ส่งได้เฉพาะในรายการ (เมลเต็ม / @โดเมน คั่นด้วย ,) — ว่าง = ไม่ส่งให้ใครนอกจาก mail_redirect_to
+# ใส่ "*" ได้ก็ต่อเมื่อบัญชีอาจารย์ใน DB เป็นของจริงทั้งหมด (seed มีเมล @dome.tu.ac.th สมมติ)
+mail_allowed_recipients: ""

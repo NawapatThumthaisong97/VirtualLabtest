@@ -173,3 +173,47 @@ class TestMail:
         """No SMTP_USER -> not sent (skipped)"""
         monkeypatch.setattr(settings, "SMTP_USER", None)
         assert mail_service.send_mail(["a@b.c"], "s", "b") is False
+
+
+class TestAllowList:
+    """MAIL_ALLOWED_RECIPIENTS: never mail someone not on the list, even without redirect"""
+
+    @pytest.fixture
+    def smtp(self, monkeypatch):
+        sent = []
+
+        class FakeSMTP:
+            def __init__(self, *a, **kw): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def starttls(self): pass
+            def login(self, u, p): pass
+            def send_message(self, msg): sent.append(msg["To"])
+
+        monkeypatch.setattr(mail_service.smtplib, "SMTP", FakeSMTP)
+        monkeypatch.setattr(settings, "SMTP_USER", "sender@gmail.com")
+        monkeypatch.setattr(settings, "SMTP_PASSWORD", "app-pass")
+        monkeypatch.setattr(settings, "MAIL_REDIRECT_TO", None)
+        return sent
+
+    def test_empty_list_sends_nobody(self, smtp, monkeypatch):
+        """No redirect + empty allow list -> nothing sent, error (mail_status failed)"""
+        monkeypatch.setattr(settings, "MAIL_ALLOWED_RECIPIENTS", "")
+        with pytest.raises(ValueError, match="no allowed recipient"):
+            mail_service.send_mail(["kittipong.som@dome.tu.ac.th"], "s", "b")
+        assert smtp == []
+
+    def test_only_listed(self, smtp, monkeypatch):
+        """Exact address and @domain rules; others dropped"""
+        monkeypatch.setattr(settings, "MAIL_ALLOWED_RECIPIENTS", "peraphat.ekd@dome.tu.ac.th, @staff.example.com")
+        mail_service.send_mail(["peraphat.ekd@dome.tu.ac.th", "kittipong.som@dome.tu.ac.th", "a@staff.example.com"], "s", "b")
+        assert smtp == ["peraphat.ekd@dome.tu.ac.th, a@staff.example.com"]
+
+    def test_star_and_redirect(self, smtp, monkeypatch):
+        """'*' allows everyone; redirect target always allowed"""
+        monkeypatch.setattr(settings, "MAIL_ALLOWED_RECIPIENTS", "*")
+        mail_service.send_mail(["x@y.z"], "s", "b")
+        monkeypatch.setattr(settings, "MAIL_ALLOWED_RECIPIENTS", "")
+        monkeypatch.setattr(settings, "MAIL_REDIRECT_TO", "tester@dome.tu.ac.th")
+        mail_service.send_mail(["kittipong.som@dome.tu.ac.th"], "s", "b")
+        assert smtp == ["x@y.z", "tester@dome.tu.ac.th"]
