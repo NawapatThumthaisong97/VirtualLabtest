@@ -14,7 +14,7 @@ export interface HeaderFeature {
 const defaultFeatures: HeaderFeature[] = [
   { label: 'Class Scheduler', to: '/admin/scheduler' },
   { label: 'Bill Explorer', target: 'billing' },
-  { label: 'Logs', target: 'logs' },
+  { label: 'Logs', to: '/admin/logs' },
   { label: 'Class System', note: 'เร็ว ๆ นี้' },
 ];
 

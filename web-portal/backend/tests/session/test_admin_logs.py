@@ -154,3 +154,5 @@ class TestRead:
         assert h.buckets[-1].count == 1 and h.buckets[-3].count == 1
         assert h.by_type == {"POD_EVENT": 1, "NODE_NOT_READY": 1}
         assert h.model_dump(by_alias=True)["bucketHours"] == 2
+        only = logs.histogram(clean, None, hours=72, bucket_hours=2, now=NOW, event_type="pod_event")
+        assert only.by_type == {"POD_EVENT": 1}
