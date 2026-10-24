@@ -17,11 +17,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session as DbSession
 
 from app.configs.settings import settings
+from app.models.aws_daily_cost import AwsDailyCost
 from app.models.cloud_control import CloudControl
 from app.models.lab_image import LabImage
 from app.models.session import Session as SessionModel, SessionStatus
 from app.models.usage_record import UsageRecord
 from app.services.admin_log_service import log_burst_toggled
+from app.utils.logger import logger
 from app.schemas.admin_monitor_schema import (
     AwsBilling,
     BillingMonth,
@@ -150,6 +152,74 @@ def _usage(db: DbSession, start: datetime, end: datetime, now: datetime) -> dict
     return totals
 
 
+# ---------- Cost Explorer (PR 4) ----------
+
+def _cost_explorer_client():
+    import boto3
+    return boto3.client("ce", region_name="us-east-1")   # Cost Explorer มีแค่ us-east-1
+
+
+def fetch_cost_explorer(db: DbSession, now: Optional[datetime] = None, client=None, force: bool = False) -> int:
+    """ดึงยอดรายวันย้อนหลัง AWS_COST_LOOKBACK_DAYS วัน (filter tag ของ lab, ไม่นับ credit / refund) เขียนทับ aws_daily_costs
+
+    วันละครั้ง (ครั้งละ $0.01) — ข้ามถ้าดึงไปแล้วใน 20 ชม. ที่ผ่านมา คืนจำนวนวันที่เขียน
+    """
+    if not settings.AWS_COST_EXPLORER_ENABLED and client is None:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    last = db.query(AwsDailyCost.fetched_at).order_by(AwsDailyCost.fetched_at.desc()).first()
+    if not force and last is not None and now - _utc(last[0]) < timedelta(hours=20):
+        return 0
+    client = client or _cost_explorer_client()
+    today = now.date()
+    resp = client.get_cost_and_usage(
+        TimePeriod={"Start": (today - timedelta(days=settings.AWS_COST_LOOKBACK_DAYS)).isoformat(),
+                    "End": (today + timedelta(days=1)).isoformat()},
+        Granularity="DAILY",
+        Metrics=["UnblendedCost"],
+        Filter={"And": [
+            {"Tags": {"Key": settings.AWS_COST_TAG_KEY, "Values": [settings.AWS_COST_TAG_VALUE]}},
+            {"Not": {"Dimensions": {"Key": "RECORD_TYPE", "Values": ["Credit", "Refund"]}}},
+        ]},
+    )
+    written = 0
+    for item in resp.get("ResultsByTime", []):
+        day = date.fromisoformat(item["TimePeriod"]["Start"])
+        amount = float(item["Total"]["UnblendedCost"]["Amount"])
+        row = db.get(AwsDailyCost, day) or AwsDailyCost(day=day)
+        row.cost_usd = amount
+        row.fetched_at = now
+        db.add(row)
+        written += 1
+    db.commit()
+    logger.info(f"Cost Explorer: {written} days fetched")
+    return written
+
+
+def _aws_cost(db: DbSession, month: date, start: datetime, end: datetime, now: datetime,
+              estimate_usd) -> tuple[float, str, Optional[datetime]]:
+    """$ AWS ของเดือน: วันที่ Cost Explorer มียอดครบแล้ว (ก่อนวันนี้ UTC) ใช้ยอดจริง ที่เหลือใช้ค่าประมาณ
+
+    estimate_usd(from_) = ค่าประมาณตั้งแต่ from_ ถึงสิ้นเดือน/ตอนนี้ — คืน (usd, source, reconciled_at)
+    """
+    first = month.replace(day=1)
+    next_first = (first + timedelta(days=32)).replace(day=1)
+    rows = (
+        db.query(AwsDailyCost)
+        .filter(AwsDailyCost.day >= first, AwsDailyCost.day < min(next_first, now.date()))
+        .all()
+    )
+    if not rows:
+        return estimate_usd(start), "estimate", None
+    last_day = max(r.day for r in rows)
+    covered_until = datetime.combine(last_day + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    actual = sum(float(r.cost_usd) for r in rows)
+    reconciled = max(_utc(r.fetched_at) for r in rows)
+    if covered_until >= min(end, now):
+        return actual, "cost-explorer", reconciled
+    return actual + estimate_usd(max(start, covered_until)), "mixed", reconciled
+
+
 def get_billing_summary(db: DbSession, month: Optional[date] = None,
                         now: Optional[datetime] = None) -> BillingSummaryResponse:
     now = now or datetime.now(timezone.utc)
@@ -157,6 +227,9 @@ def get_billing_summary(db: DbSession, month: Optional[date] = None,
     month = month or local_now.date().replace(day=1)
     start, end = _month_range(month)
     totals = _usage(db, start, end, now)
+    aws_usd, source, reconciled_at = _aws_cost(db, month, start, end, now,
+                                               lambda from_: _usage(db, from_, end, now)["aws_usd"])
+    totals["aws_usd"] = aws_usd
 
     days_total = calendar.monthrange(month.year, month.month)[1]
     current = start <= now < end
@@ -193,7 +266,8 @@ def get_billing_summary(db: DbSession, month: Optional[date] = None,
             forecast_usd=round(forecast, 2),
             used_pct=round(used_pct, 1),
             alert=alert,
-            source="estimate",
+            source=source,
+            reconciled_at=reconciled_at,
             hourly_price_usd=settings.AWS_HOURLY_PRICE_USD,
             instances_running=instances if current else 0,
             session_hours=round(totals["aws_hours"], 2),
@@ -217,7 +291,10 @@ def get_billing_monthly(db: DbSession, months: int = 6, now: Optional[datetime] 
     for back in range(months - 1, -1, -1):
         year, month = divmod(local.year * 12 + local.month - 1 - back, 12)
         first = date(year, month + 1, 1)
-        totals = _usage(db, *_month_range(first), now)
+        start, end = _month_range(first)
+        totals = _usage(db, start, end, now)
+        totals["aws_usd"], _, _ = _aws_cost(db, first, start, end, now,
+                                            lambda from_, e=end: _usage(db, from_, e, now)["aws_usd"])
         result.append(BillingMonth(
             month=f"{first.year:04d}-{first.month:02d}",
             on_prem_hours=round(totals["on_prem_hours"], 2),

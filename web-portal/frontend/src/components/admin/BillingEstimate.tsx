@@ -4,6 +4,11 @@ import Donut from './Donut';
 import type { BillingSummary } from '../../services/adminDashboard';
 
 const alertColor = { none: colors.money, warn: colors.yellow, over: colors.error } as const;
+const sourceLabel = {
+  estimate: 'estimate (hours × price)',
+  mixed: 'AWS actual + today estimate',
+  'cost-explorer': 'AWS actual',
+} as const;
 
 /** ค่า AWS เดือนนี้เทียบ budget + เหลือกี่วันในเดือน */
 export default function BillingEstimate({ data }: { data: BillingSummary | undefined }) {
@@ -32,6 +37,10 @@ export default function BillingEstimate({ data }: { data: BillingSummary | undef
             of ${aws.budgetUsd.toFixed(0)} budget ({aws.usedPct}%)
             <br />
             forecast ${aws.forecastUsd.toFixed(2)} · AWS {aws.sessionHours} h
+            <br />
+            <span title={aws.reconciledAt ? `Cost Explorer: ${new Date(aws.reconciledAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}` : undefined}>
+              {sourceLabel[aws.source]}
+            </span>
           </div>
           {!data.burstEnabled && (
             <div style={{ marginTop: 8, fontSize: 11, color: colors.error }}>AWS burst ปิดอยู่</div>

@@ -160,7 +160,12 @@ def collect(db: DbSession, k8s) -> None:
             collect_pod_events(db, k8s)
         except Exception as e:
             logger.warning(f"[logs] cannot read k8s events: {e}")
-    from app.services.admin_billing_service import get_billing_summary
+    from app.services.admin_billing_service import fetch_cost_explorer, get_billing_summary
+    try:
+        fetch_cost_explorer(db)   # วันละครั้ง ข้ามเองถ้าดึงไปแล้ว
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"[billing] Cost Explorer failed: {e}")
     summary = get_billing_summary(db)
     log_budget_alert(db, summary.month, summary.aws.alert, summary.aws.used_usd, summary.aws.budget_usd)
     db.commit()

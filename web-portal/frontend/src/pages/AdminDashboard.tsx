@@ -68,11 +68,13 @@ export default function AdminDashboardPage() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
           <SystemTable data={status.data} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24 }}>
+          <div id="billing" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24, scrollMarginTop: 16 }}>
             <BillingEstimate data={billing.data} />
             <BillingUsage monthly={monthly.data} summary={billing.data} />
           </div>
-          <LogExplorer />
+          <div id="logs" style={{ scrollMarginTop: 16 }}>
+            <LogExplorer />
+          </div>
         </div>
 
         <InfraVisualizer map={map.data} usage={usage.data} status={status.data} />

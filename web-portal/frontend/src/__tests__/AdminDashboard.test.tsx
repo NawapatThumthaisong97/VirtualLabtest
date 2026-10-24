@@ -43,7 +43,7 @@ const usage: RoomUsage = {
 
 const summary: BillingSummary = {
   month: '2026-10',
-  aws: { budgetUsd: 200, usedUsd: 172.4, forecastUsd: 210.5, usedPct: 86.2, alert: 'warn', source: 'estimate',
+  aws: { budgetUsd: 200, usedUsd: 172.4, forecastUsd: 210.5, usedPct: 86.2, alert: 'warn', source: 'mixed', reconciledAt: '2026-10-24T05:00:00Z',
          hourlyPriceUsd: 0.1236, instancesRunning: 1, sessionHours: 1394.8 },
   onPrem: { sessionHours: 812 },
   share: { onPremPct: 36.8, awsPct: 63.2 },
@@ -127,6 +127,15 @@ describe('AdminDashboard (/admin)', () => {
     expect(screen.getByText('Idle')).toBeDefined();
   });
 
+  it('header has feature buttons; not-yet features are disabled', async () => {
+    renderPage();
+    expect(await screen.findByText('Bill Explorer')).toBeDefined();
+    expect((screen.getByText('Logs') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByText('Class Scheduler') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Class System') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('is pending review')).toBeNull();
+  });
+
   it('no sample numbers from the design are left', async () => {
     renderPage();
     expect(await screen.findByText('Log Explorer')).toBeDefined();
@@ -149,6 +158,7 @@ describe('AdminDashboard (/admin)', () => {
     expect(await screen.findByText('$172.40')).toBeDefined();
     expect(screen.getByText(/of \$200 budget \(86.2%\)/)).toBeDefined();
     expect(screen.getByText('AWS burst ปิดอยู่')).toBeDefined();
+    expect(screen.getByText('AWS actual + today estimate')).toBeDefined();
     expect(screen.getByText('remain 8/31 days')).toBeDefined();
     expect(screen.getByText('2206.8 h')).toBeDefined();
     expect(screen.getAllByText('Oct').length).toBeGreaterThan(0);
