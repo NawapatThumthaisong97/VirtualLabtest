@@ -166,32 +166,60 @@ GET /admin/logs?source=&type=&severity=&from=&to=&limit=50&offset=0
   "total": 37 }
 ```
 
-## ระบบจองห้อง (API อย่างเดียว ยังไม่มี UI)
+## ระบบจองห้อง (PR 6) — ตาม UI `ClassScheduler.zip` (หน้า `/admin/scheduler`)
+
+หน้าเว็บทำแล้ว (ข้อมูลตัวอย่าง) — ส่วนนี้คือ flow / API ที่จะต่อเข้าไป **รอ Pete รีวิวก่อนเขียน backend**
+
+### Flow
 
 ```
-อาจารย์ ──POST /bookings──▶ pending ──admin approve──▶ approved ──▶ class_schedule + class_slots ──▶ prewarm DaemonSet
-                                     └─admin reject──▶ rejected        └──▶ เมลแจ้งอาจารย์ "Virtual Lab Team จองให้แล้ว"
+อาจารย์ ── ส่งคำขอ (API ก่อน, หน้าอาจารย์ทีหลัง) ──▶ booking_requests: pending
+                                                         │  badge ที่ปุ่ม "Class Request" = จำนวน pending
+admin ── Class Request ─▶ Detail ─▶ ฟอร์ม Class Scheduler (กรอกจากคำขอให้แล้ว เลือกห้องจริง)
+            ├─ Approve ─▶ class_schedule + class_slots (ทุกสัปดาห์ในช่วงเทอม) ─▶ ขึ้นในปฏิทิน
+            │              ├─▶ เมลถึงอาจารย์ "Virtual Lab Team จองให้แล้ว" (Gmail SMTP)
+            │              └─▶ ก่อนคาบ 30 นาที prewarm image ลงเครื่องในห้อง (มีอยู่แล้ว)
+            └─ Reject (ใส่เหตุผล) ─▶ rejected ─▶ เมลแจ้งอาจารย์พร้อมเหตุผล
+admin ── Create new event ─▶ ฟอร์มเดียวกัน ไม่มีคำขอ ─▶ approved ทันที (+ เมลถึงอาจารย์ของวิชา)
 ```
 
-ตาราง `booking_requests`: id, requested_by, course_id, lab_image_id, preferred_room_id, weekday, start_time, end_time,
-valid_from, valid_until, pcs_needed, note, status (`pending` / `approved` / `rejected` / `cancelled`),
-room_id, decided_by, decided_at, decision_note, class_schedule_id, mail_status (`pending` / `sent` / `failed`)
+สถานะคำขอ: `pending` → `approved` / `rejected` / `cancelled` (อาจารย์ยกเลิกเอง) และ `mail_status`: `pending` / `sent` / `failed`
+
+### ฟอร์มในหน้า → field จริง
+
+| ใน UI ตอนนี้ (พิมพ์เอง) | จะเปลี่ยนเป็น | มาจาก |
+|---|---|---|
+| Course | dropdown | `courses` |
+| Instructor | แสดงอย่างเดียว | อาจารย์ของวิชา (enrollment role instructor) / ผู้ขอ |
+| Labs | dropdown ตามวิชา | lab ที่มี image อนุมัติแล้ว |
+| Classroom (ห้อง) | dropdown + บอกว่าชนคาบไหน | ห้องจาก label `vlab/room` |
+| Max Machines | ตัวเลข ≤ เครื่องในห้อง | `pcsTotal` ของห้อง |
+| Date & Time (วันเดียว) | **วัน + เวลา + "ทุกสัปดาห์ถึงวันที่ …"** | คำขอเป็นรายสัปดาห์ ("13:00-14:00 Tuesday") — ดูคำถามข้อ 1 |
+| Approve | Approve + **Reject** (เมื่อเปิดจากคำขอ) | ดูคำถามข้อ 2 |
+
+### API
 
 ```
-POST /bookings                              (อาจารย์)  สร้าง request
-GET  /bookings/mine                         (อาจารย์)  ดูของตัวเอง
-GET  /admin/bookings?status=pending&month=2026-11
-POST /admin/bookings/{id}/approve           { "roomId": "LC2-123", "note": "" }
-POST /admin/bookings/{id}/reject            { "reason": "ห้องเต็ม" }
-GET  /admin/rooms/calendar?month=2026-11    ทุก slot ของเดือน แยกห้อง (ใช้ดูว่าว่างไหม)
+POST  /api/v1/bookings                      (อาจารย์) course, lab, weekday, start, end, from, until, machines, room?, note
+GET   /api/v1/bookings/mine                 (อาจารย์) คำขอของตัวเอง + สถานะ
+GET   /api/v1/admin/bookings?status=pending         → ตาราง Class Request + badge
+POST  /api/v1/admin/bookings/{id}/approve   { room, machines, weekday, start, end, from, until, note }
+POST  /api/v1/admin/bookings/{id}/reject    { reason }
+POST  /api/v1/admin/schedules               (Create new event) ฟอร์มเดียวกัน ไม่มีคำขอ
+GET   /api/v1/admin/calendar?month=2026-11  → class_slots ทั้งเดือน (title = วิชา – lab, สีตามวิชา, ห้อง)
+POST  /api/v1/admin/bookings/{id}/resend-mail
 ```
 
-- approve: transaction เดียว → สร้าง `class_schedule` (+ `room_id`) → `schedule_service.generate_slots` → commit → ส่งเมลเป็น background task
-- **กันห้องชน**: เพิ่ม `room_id` ใน `class_slots` + exclusion constraint `(room_id =, tstzrange &&)`
-  (ตอนนี้ `ex_class_slots_no_overlap` กันแค่วิชาเดียวกัน) ชน → 409 พร้อม slot ที่ชน
-- `pcs_needed` > `pcsTotal` ของห้อง → 422
-- เมลส่งไม่ผ่าน → `mail_status=failed`, ไม่ rollback การจอง, มี `POST /admin/bookings/{id}/resend-mail`
-- Gmail: บัญชีที่เปิด 2FA + App Password, `smtp.gmail.com:587` STARTTLS (ส่งได้ราว 500 ฉบับ/วัน พอ)
+- approve = transaction เดียว: schedule + slots + เปลี่ยนสถานะ → commit → ส่งเมลแยก (ส่งไม่ผ่านไม่ยกเลิกการจอง)
+- **ห้องชนเวลา**: เพิ่ม `room` ใน `class_slots` + exclusion constraint `(room =, tstzrange &&)` ชน → 409 บอกคาบที่ชน
+- เครื่องไม่พอ (machines > เครื่องในห้อง) → 422
+- เมล: Gmail แยกของระบบ + App Password (`smtp.gmail.com:587` STARTTLS) ค่าลับอยู่ใน `group_vars/all.yml`
+
+### คำถาม (ต้องตอบก่อนเขียน backend)
+1. **คาบเดียว หรือทุกสัปดาห์:** คำขอในดีไซน์เป็นรายสัปดาห์ แต่ฟอร์ม Approve เลือกได้วันเดียว — เสนอเพิ่ม "ทุกสัปดาห์ถึงวันที่"
+2. **ปุ่ม Reject:** ในดีไซน์ยังไม่มี — เสนอปุ่มรองข้าง Approve + ช่องเหตุผล (ส่งในเมล)
+3. **อาจารย์ส่งคำขอจากไหน:** API อย่างเดียวก่อน (ตามที่ตกลง) หรือเพิ่มปุ่มในหน้า `/instructor`
+4. **badge "ใหม่":** นับ pending ทั้งหมด หรือเฉพาะที่ admin ยังไม่เปิดดู (ต้องเก็บว่าใครเปิดแล้ว)
 
 ## ลำดับทำ (PR เล็ก ทีละข้อ แต่ละ PR เทสกับ cluster จริงก่อน)
 
