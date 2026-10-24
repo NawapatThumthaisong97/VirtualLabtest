@@ -15,6 +15,7 @@ import SSOCallbackPage from '../pages/SSOCallback.tsx';
 import InstructorPage from '../pages/Instructor.tsx';
 import AdminMonitorPage from '../pages/AdminMonitor.tsx';
 import AdminDashboardPage from '../pages/AdminDashboard.tsx';
+import ClassSchedulePage from '../pages/ClassSchedule.tsx';
 
 export const router = createBrowserRouter([
   // Public auth pages: no navbar, no footer
@@ -75,6 +76,10 @@ export const router = createBrowserRouter([
           {
             path: '/admin',
             element: <AdminDashboardPage />,
+          },
+          {
+            path: '/admin/scheduler',
+            element: <ClassSchedulePage />,
           },
           {
             element: <RootLayout />,

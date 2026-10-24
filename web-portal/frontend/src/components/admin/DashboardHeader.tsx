@@ -1,15 +1,18 @@
+import { useNavigate } from 'react-router-dom';
 import { colors } from './theme';
 
 export interface HeaderFeature {
   label: string;
-  /** id ของการ์ดในหน้า — กดแล้วเลื่อนไปที่การ์ดนั้น ไม่มี = ยังไม่มี feature (ปุ่มจาง) */
+  /** id ของการ์ดในหน้า — กดแล้วเลื่อนไปที่การ์ดนั้น */
   target?: string;
+  /** หน้าแยก — กดแล้วไปหน้านั้น (ไม่มีทั้ง target และ to = ยังไม่มี feature ปุ่มจาง) */
+  to?: string;
   /** แสดงตอนเอาเมาส์ชี้ปุ่มที่ยังไม่มี feature */
   note?: string;
 }
 
 const defaultFeatures: HeaderFeature[] = [
-  { label: 'Class Scheduler', note: 'เร็ว ๆ นี้ — ระบบจองห้อง' },
+  { label: 'Class Scheduler', to: '/admin/scheduler' },
   { label: 'Bill Explorer', target: 'billing' },
   { label: 'Logs', target: 'logs' },
   { label: 'Class System', note: 'เร็ว ๆ นี้' },
@@ -37,8 +40,10 @@ export default function DashboardHeader({
   title?: string;
   features?: HeaderFeature[];
 }) {
-  const go = (target?: string) => {
-    if (target) document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const navigate = useNavigate();
+  const go = (f: HeaderFeature) => {
+    if (f.to) navigate(f.to);
+    else if (f.target) document.getElementById(f.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
@@ -57,19 +62,22 @@ export default function DashboardHeader({
       <h1 style={{ flex: 1, margin: 0, fontSize: 28, fontWeight: 200, letterSpacing: -0.2 }}>{title}</h1>
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: 40 }}>
-        {features.map((f) => (
+        {features.map((f) => {
+          const enabled = Boolean(f.target || f.to);
+          return (
           <button
             key={f.label}
-            onClick={() => go(f.target)}
-            disabled={!f.target}
-            title={f.target ? undefined : f.note}
-            style={button(Boolean(f.target))}
-            onMouseEnter={(e) => f.target && (e.currentTarget.style.textDecoration = 'underline')}
+            onClick={() => go(f)}
+            disabled={!enabled}
+            title={enabled ? undefined : f.note}
+            style={button(enabled)}
+            onMouseEnter={(e) => enabled && (e.currentTarget.style.textDecoration = 'underline')}
             onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}
           >
             {f.label}
           </button>
-        ))}
+          );
+        })}
       </nav>
     </div>
   );
