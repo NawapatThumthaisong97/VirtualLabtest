@@ -49,7 +49,9 @@ data:
           subnet = to_string(.clusterOrSubnet) ?? to_string(.nat_subnet) ?? "192.168.1.0/24"
           meta = if is_object(.metadata) { .metadata } else { {} }
           ts_ip = to_string(meta.tailscale_ip) ?? to_string(.tailscale_ip) ?? "100.69.137.47"
+          if ts_ip == "" { ts_ip = "100.69.137.47" }
           prov = to_string(meta.provider) ?? to_string(.provider) ?? "local_k3s"
+          if prov == "" { prov = "local_k3s" }
           fast = to_bool(meta.fast_track) ?? false
 
           # 2. Threat Intelligence Matching (IOC Blacklist: C2 IPs, Cryptomining Domains, Credential Files)
@@ -139,7 +141,7 @@ data:
               "dataset": "vlab.siem.telemetry"
             },
             "host": {
-              "name": src_node,
+              "hostname": src_node,
               "ip": [ts_ip]
             },
             "cloud": {
@@ -168,7 +170,7 @@ data:
                 "type": ioc_type,
                 "category": ioc_category
               },
-              "tactic": { "name": mitre_tactic },
+              "tactic": { "tactic_name": mitre_tactic },
               "technique": { "id": mitre_technique },
               "risk_score": risk_score
             },

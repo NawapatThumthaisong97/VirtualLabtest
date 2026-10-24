@@ -169,6 +169,8 @@ def verify_ecs_and_threat_intel_in_backend():
         print(f"  ✓ ECS Version      : {meta.get('ecs_version')}")
         print(f"  ✓ GeoIP Enrichment : {json.dumps(meta.get('geoip', {}))}")
         print(f"  ✓ Threat Intel Match: {json.dumps(meta.get('threat_intel', {}))}")
+        print("  ✓ Full ECS v8.11.0 Document:")
+        print(json.dumps(meta.get("ecs", {}), indent=4))
 
 
 if __name__ == "__main__":
