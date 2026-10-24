@@ -78,6 +78,8 @@ spec:
             - "-retentionPeriod=14d"
             - "-httpListenAddr=:9428"
             - "-logNewStreams=false"
+            - "-insert.maxLineSizeBytes=256KiB"
+            - "-search.maxQueryDuration=30s"
           ports:
             - name: http
               containerPort: 9428
@@ -118,3 +120,4 @@ spec:
         resources:
           requests:
             storage: 5Gi
+

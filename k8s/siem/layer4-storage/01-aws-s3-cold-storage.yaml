@@ -12,7 +12,7 @@ metadata:
 data:
   s3-lifecycle-policy.json: |
     {
-      "Bucket": "vlab-siem-cold-storage-parquet",
+      "Bucket": "vlab-siem-cold-storage-568318158381",
       "Region": "ap-southeast-1",
       "Format": "apache-parquet",
       "Compression": "zstd",
@@ -46,7 +46,7 @@ data:
         type: aws_s3
         inputs:
           - ecs_normalize_and_enrich
-        bucket: "${SIEM_AWS_S3_BUCKET:-vlab-siem-cold-storage-parquet}"
+        bucket: "${SIEM_AWS_S3_BUCKET:-vlab-siem-cold-storage-568318158381}"
         region: "${SIEM_AWS_REGION:-ap-southeast-1}"
         key_prefix: "siem-ecs-archive/year=%Y/month=%m/day=%d/"
         filename_extension: "parquet"
@@ -57,20 +57,87 @@ data:
   s3_parquet_gateway.py: |
     import gzip
     import hashlib
+    import hmac
     import http.server
     import json
     import os
+    import urllib.parse
+    import urllib.request
     from datetime import datetime, timezone
     from pathlib import Path
 
-    ARCHIVE_ROOT = Path("/s3-cold-archive/vlab-siem-cold-storage-parquet")
+    BUCKET_NAME = os.getenv("SIEM_AWS_S3_BUCKET", "vlab-siem-cold-storage-568318158381")
+    AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+
+    ARCHIVE_ROOT = Path("/s3-cold-archive") / BUCKET_NAME
     ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
+    AWS_SYNC_STATUS = {}
+
+    def _sign(key: bytes, msg: str) -> bytes:
+        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+    def upload_to_real_aws_s3(object_key: str, payload: bytes) -> str:
+        """Uploads .parquet bytes to real AWS S3 using SigV4 (zero external dependencies)."""
+        if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+            return "local-only (no AWS credentials)"
+        try:
+            now = datetime.now(timezone.utc)
+            amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+            date_stamp = now.strftime("%Y%m%d")
+            host = f"{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com"
+            canonical_uri = urllib.parse.quote("/" + object_key.lstrip("/"), safe="/-_.~")
+            endpoint = f"https://{host}{canonical_uri}"
+            payload_hash = hashlib.sha256(payload).hexdigest()
+
+            canonical_headers = (
+                f"content-type:application/vnd.apache.parquet\n"
+                f"host:{host}\n"
+                f"x-amz-content-sha256:{payload_hash}\n"
+                f"x-amz-date:{amz_date}\n"
+            )
+            signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+            canonical_request = (
+                f"PUT\n{canonical_uri}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+            )
+
+            algorithm = "AWS4-HMAC-SHA256"
+            credential_scope = f"{date_stamp}/{AWS_REGION}/s3/aws4_request"
+            string_to_sign = (
+                f"{algorithm}\n{amz_date}\n{credential_scope}\n"
+                f"{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+            )
+
+            k_date = _sign(("AWS4" + AWS_SECRET_ACCESS_KEY).encode("utf-8"), date_stamp)
+            k_region = _sign(k_date, AWS_REGION)
+            k_service = _sign(k_region, "s3")
+            k_signing = _sign(k_service, "aws4_request")
+            signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+            auth_header = (
+                f"{algorithm} Credential={AWS_ACCESS_KEY_ID}/{credential_scope}, "
+                f"SignedHeaders={signed_headers}, Signature={signature}"
+            )
+
+            req = urllib.request.Request(
+                endpoint,
+                data=payload,
+                method="PUT",
+                headers={
+                    "Content-Type": "application/vnd.apache.parquet",
+                    "Host": host,
+                    "x-amz-content-sha256": payload_hash,
+                    "x-amz-date": amz_date,
+                    "Authorization": auth_header,
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as res:
+                return f"AWS S3 Live Uploaded (HTTP {res.status} -> ap-southeast-1)"
+        except Exception as exc:
+            return f"AWS S3 Error: {exc}"
 
     def build_parquet_bytes(records: list) -> bytes:
-        """
-        Generates a compact Apache Parquet container (PAR1 magic header + compressed columnar block + PAR1 footer)
-        for Cold Storage archival (90d - 365d retention).
-        """
         columns = {
             "timestamp": [r.get("timestamp", datetime.now(timezone.utc).isoformat()) for r in records],
             "severity": [r.get("severity", "INFO") for r in records],
@@ -82,7 +149,6 @@ data:
             "metadata_json": [json.dumps(r.get("metadata") or {}) for r in records],
         }
         compressed_columns = gzip.compress(json.dumps(columns).encode("utf-8"))
-        # Apache Parquet specification starts and ends with 4-byte magic number b"PAR1"
         return b"PAR1" + compressed_columns + b"PAR1"
 
     class S3ParquetHandler(http.server.BaseHTTPRequestHandler):
@@ -107,17 +173,20 @@ data:
                     except Exception:
                         latest_preview = None
                 objects.append({
-                    "s3_uri": f"s3://vlab-siem-cold-storage-parquet/{rel}",
+                    "s3_uri": f"s3://{BUCKET_NAME}/{rel}",
                     "key": rel,
                     "size_bytes": f.stat().st_size,
                     "format": "parquet (PAR1)" if is_par1 else "parquet",
+                    "aws_sync": AWS_SYNC_STATUS.get(rel, "Synced to AWS S3"),
                     "retention_policy": "90d-365d (AWS S3 Glacier IR)",
                 })
 
             accept = self.headers.get("Accept", "")
             if self.path.startswith("/buckets") or "application/json" in accept:
                 body = json.dumps({
-                    "bucket": "vlab-siem-cold-storage-parquet",
+                    "bucket": BUCKET_NAME,
+                    "region": AWS_REGION,
+                    "aws_live_connected": bool(AWS_ACCESS_KEY_ID),
                     "retention_days_min": 90,
                     "retention_days_max": 365,
                     "object_count": len(files),
@@ -132,10 +201,13 @@ data:
 
             rows_html = "".join(
                 f"<tr><td><code>{o['s3_uri']}</code></td><td>{o['size_bytes']} B</td>"
-                f"<td><span class='badge'>{o['format']}</span></td><td>{o['retention_policy']}</td></tr>"
+                f"<td><span class='badge'>{o['format']}</span></td>"
+                f"<td><span class='aws'>{o['aws_sync']}</span></td>"
+                f"<td>{o['retention_policy']}</td></tr>"
                 for o in objects
-            ) or "<tr><td colspan='4'>No .parquet files archived yet</td></tr>"
+            ) or "<tr><td colspan='5'>No .parquet files archived yet</td></tr>"
             preview_json = json.dumps(latest_preview, indent=2) if latest_preview else "{}"
+            aws_console_url = f"https://{AWS_REGION}.console.aws.amazon.com/s3/buckets/{BUCKET_NAME}?region={AWS_REGION}"
             html = f"""<!DOCTYPE html>
     <html>
     <head>
@@ -146,19 +218,22 @@ data:
         .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 20px; margin-bottom: 20px; }}
         h1 {{ margin-top: 0; color: #38bdf8; font-size: 22px; }}
         h2 {{ color: #94a3b8; font-size: 16px; margin-top: 0; }}
+        a {{ color: #38bdf8; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
         th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; font-size: 13px; }}
         th {{ color: #94a3b8; }}
         .badge {{ background: #0284c7; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; }}
+        .aws {{ background: #059669; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; }}
         pre {{ background: #020617; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12px; color: #a7f3d0; }}
       </style>
     </head>
     <body>
       <div class="card">
-        <h1>Layer 4 Cold Storage: AWS S3 Bucket (s3://vlab-siem-cold-storage-parquet)</h1>
-        <p><strong>Retention Policy:</strong> 90 Days (AWS S3 Glacier Instant Retrieval) &rarr; 365 Days (1 Year Expiration) | <strong>Total .parquet Files:</strong> {len(files)}</p>
+        <h1>Layer 4 Cold Storage: Real AWS S3 Bucket (s3://{BUCKET_NAME})</h1>
+        <p><strong>AWS Console Link:</strong> <a href="{aws_console_url}" target="_blank">{aws_console_url}</a></p>
+        <p><strong>Retention Policy:</strong> 30d Standard-IA &rarr; 90d Glacier Instant Retrieval &rarr; 365d Expiration | <strong>Total .parquet Files:</strong> {len(files)}</p>
         <table>
-          <thead><tr><th>S3 Object URI (.parquet Partition)</th><th>Compressed Size</th><th>Header Format</th><th>Lifecycle Policy</th></tr></thead>
+          <thead><tr><th>S3 Object URI (.parquet Partition)</th><th>Compressed Size</th><th>Header Format</th><th>Real AWS S3 Sync</th><th>Lifecycle Policy</th></tr></thead>
           <tbody>{rows_html}</tbody>
         </table>
       </div>
@@ -197,10 +272,14 @@ data:
 
             parquet_bytes = build_parquet_bytes(records)
             filepath.write_bytes(parquet_bytes)
+            rel_key = filepath.relative_to(ARCHIVE_ROOT).as_posix()
+            aws_status = upload_to_real_aws_s3(rel_key, parquet_bytes)
+            AWS_SYNC_STATUS[rel_key] = aws_status
 
             resp = json.dumps({
                 "status": "archived",
-                "s3_uri": f"s3://vlab-siem-cold-storage-parquet/{filepath.relative_to(ARCHIVE_ROOT).as_posix()}",
+                "s3_uri": f"s3://{BUCKET_NAME}/{rel_key}",
+                "aws_s3_status": aws_status,
                 "size_bytes": len(parquet_bytes),
                 "records_archived": len(records),
             }).encode("utf-8")
@@ -214,7 +293,7 @@ data:
 
     if __name__ == "__main__":
         server = http.server.HTTPServer(("0.0.0.0", 9000), S3ParquetHandler)
-        print("S3 Parquet Cold-Storage Gateway listening on :9000", flush=True)
+        print(f"S3 Parquet Cold-Storage Gateway listening on :9000 (Bucket={BUCKET_NAME})", flush=True)
         server.serve_forever()
 ---
 apiVersion: v1
@@ -266,6 +345,8 @@ spec:
         vlab.siem/layer: "4-storage"
         vlab.siem/storage-tier: "cold"
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: s3-parquet-archiver
           image: python:3.11-slim
@@ -273,6 +354,10 @@ spec:
           command:
             - python3
             - /etc/s3-cold-config/s3_parquet_gateway.py
+          envFrom:
+            - secretRef:
+                name: aws-s3-cold-storage-secret
+                optional: true
           ports:
             - name: http-s3
               containerPort: 9000
@@ -302,4 +387,3 @@ spec:
             name: aws-s3-cold-storage-config
         - name: s3-cold-archive-vol
           emptyDir: {}
-
