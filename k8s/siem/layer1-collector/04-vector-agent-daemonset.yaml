@@ -40,8 +40,8 @@ spec:
           image: timberio/vector:0.42.0-debian
           imagePullPolicy: IfNotPresent
           args:
-            - --config-dir
-            - /etc/vector/
+            - --config
+            - /etc/vector/vector.yaml
           env:
             - name: VECTOR_SELF_NODE_NAME
               valueFrom:
@@ -85,18 +85,6 @@ spec:
               readOnly: true
             - name: vector-data
               mountPath: /var/lib/vector
-            - name: var-log-host
-              mountPath: /var/log/syslog
-              subPath: syslog
-              readOnly: true
-            - name: var-log-host
-              mountPath: /var/log/auth.log
-              subPath: auth.log
-              readOnly: true
-            - name: var-log-host
-              mountPath: /var/log/kern.log
-              subPath: kern.log
-              readOnly: true
             - name: var-log-journal
               mountPath: /var/log/journal
               readOnly: true
@@ -112,9 +100,6 @@ spec:
             - name: var-log-falco
               mountPath: /var/log/falco
               readOnly: true
-            - name: machine-id
-              mountPath: /etc/machine-id
-              readOnly: true
       volumes:
         - name: vector-config
           configMap:
@@ -123,10 +108,6 @@ spec:
           hostPath:
             path: /var/lib/vector-agent
             type: DirectoryOrCreate
-        - name: var-log-host
-          hostPath:
-            path: /var/log
-            type: Directory
         - name: var-log-journal
           hostPath:
             path: /var/log/journal
@@ -147,7 +128,3 @@ spec:
           hostPath:
             path: /var/log/falco
             type: DirectoryOrCreate
-        - name: machine-id
-          hostPath:
-            path: /etc/machine-id
-            type: FileOrCreate

@@ -32,11 +32,6 @@ data:
           - tailscaled.service
           - ssh.service
           - docker.service
-        include_matches:
-          _TRANSPORT:
-            - kernel
-            - systemd
-            - journal
 
       # 1.2 Host Application & Auth Logs (/var/log/syslog, /var/log/auth.log, /var/log/kern.log)
       host_application_logs:
@@ -91,23 +86,34 @@ data:
           - host_system_journal
           - host_application_logs
         source: |
-          .siem_layer = "layer1-collector"
-          .collector = "vector-agent"
-          .node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
-          .tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
-          .provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
-          .nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
-          .transport = "tailscale-mesh"
-          .fast_track = false
-          msg = to_string(.message) ?? ""
+          node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
+          tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
+          provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
+          nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
+          msg = to_string(.message) ?? "System log entry"
+          cat = "INFRASTRUCTURE"
+          ev = "SYSTEM_LOG"
+          sev = "INFO"
           if contains(downcase(msg), "oom-killer") || contains(downcase(msg), "killed process") {
-            .category = "CONTAINER"
-            .eventType = "OOM_KILLED"
-            .severity = "CRITICAL"
-          } else {
-            .category = "INFRASTRUCTURE"
-            .eventType = "SYSTEM_LOG"
-            .severity = "INFO"
+            cat = "CONTAINER"
+            ev = "OOM_KILLED"
+            sev = "CRITICAL"
+          }
+          . = {
+            "severity": sev,
+            "category": cat,
+            "eventType": ev,
+            "source": node_name,
+            "message": msg,
+            "clusterOrSubnet": nat_subnet,
+            "metadata": {
+              "siem_layer": "layer1-collector",
+              "collector": "vector-agent",
+              "tailscale_ip": tailscale_ip,
+              "provider": provider,
+              "transport": "tailscale0",
+              "fast_track": false
+            }
           }
 
       enrich_boundary_logs:
@@ -117,25 +123,36 @@ data:
           - boundary_kyverno_logs
           - boundary_tailscale_logs
         source: |
-          .siem_layer = "layer1-collector"
-          .collector = "vector-agent"
-          .node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
-          .tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
-          .provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
-          .nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
-          .transport = "tailscale-mesh"
-          .category = "SECURITY_VIOLATION"
-          .fast_track = false
+          node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
+          tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
+          provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
+          nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
           file_path = to_string(.file) ?? ""
+          msg = to_string(.message) ?? "Boundary violation detected"
+          ev = "TAILSCALE_CROSS_CLUSTER_ATTEMPT"
+          sev = "WARNING"
           if contains(file_path, "squid") {
-            .eventType = "SQUID_EGRESS_DROP"
-            .severity = "WARNING"
+            ev = "SQUID_EGRESS_DROP"
+            sev = "WARNING"
           } else if contains(file_path, "kyverno") {
-            .eventType = "OPA_KYVERNO_BLOCK"
-            .severity = "CRITICAL"
-          } else {
-            .eventType = "TAILSCALE_CROSS_CLUSTER_ATTEMPT"
-            .severity = "WARNING"
+            ev = "OPA_KYVERNO_BLOCK"
+            sev = "CRITICAL"
+          }
+          . = {
+            "severity": sev,
+            "category": "SECURITY_VIOLATION",
+            "eventType": ev,
+            "source": node_name,
+            "message": msg,
+            "clusterOrSubnet": nat_subnet,
+            "metadata": {
+              "siem_layer": "layer1-collector",
+              "collector": "vector-agent",
+              "tailscale_ip": tailscale_ip,
+              "provider": provider,
+              "transport": "tailscale0",
+              "fast_track": false
+            }
           }
 
       enrich_falco_ebpf_alerts:
@@ -147,41 +164,52 @@ data:
           if is_string(.message) {
             parsed, err = parse_json(to_string!(.message))
             if err == null && is_object(parsed) {
-              . = merge(., parsed)
+              ., _ = merge(., parsed)
             }
           }
-          .siem_layer = "layer1-collector"
-          .collector = "falco-ebpf"
-          .engine = "modern_ebpf"
-          .node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
-          .tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
-          .provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
-          .nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
-          .transport = "tailscale-mesh"
-          .category = "SECURITY_VIOLATION"
+          node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
+          tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
+          provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
+          nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
           prio = upcase(to_string(.priority) ?? "WARNING")
+          sev = "WARNING"
+          fast = false
           if prio == "EMERGENCY" || prio == "ALERT" || prio == "CRITICAL" {
-            .severity = "CRITICAL"
-            .fast_track = true
+            sev = "CRITICAL"
+            fast = true
           } else if prio == "ERROR" {
-            .severity = "ERROR"
-            .fast_track = false
-          } else {
-            .severity = "WARNING"
-            .fast_track = false
+            sev = "ERROR"
+            fast = false
           }
-          rule_name = downcase(to_string(.rule) ?? "")
+          rule_raw = to_string(.rule) ?? "Falco Kernel Rule"
+          rule_name = downcase(rule_raw)
+          ev = "FALCO_EBPF_ALERT"
           if contains(rule_name, "shell") {
-            .eventType = "FALCO_CONTAINER_SHELL_SPAWN"
+            ev = "FALCO_CONTAINER_SHELL_SPAWN"
           } else if contains(rule_name, "sensitive") || contains(rule_name, "file") {
-            .eventType = "FALCO_SENSITIVE_FILE_READ"
+            ev = "FALCO_SENSITIVE_FILE_READ"
           } else if contains(rule_name, "escape") || contains(rule_name, "syscall") {
-            .eventType = "FALCO_CONTAINER_ESCAPE_ATTEMPT"
-          } else {
-            .eventType = "FALCO_EBPF_ALERT"
+            ev = "FALCO_CONTAINER_ESCAPE_ATTEMPT"
           }
-          .source = .node_name
-          .message = to_string(.output) ?? to_string(.message) ?? "Falco eBPF kernel security alert"
+          msg = to_string(.output) ?? to_string(.message) ?? "Falco eBPF kernel security alert"
+          . = {
+            "severity": sev,
+            "category": "SECURITY_VIOLATION",
+            "eventType": ev,
+            "source": node_name,
+            "message": msg,
+            "clusterOrSubnet": nat_subnet,
+            "metadata": {
+              "siem_layer": "layer1-collector",
+              "collector": "falco-ebpf",
+              "engine": "modern_ebpf",
+              "rule": rule_raw,
+              "tailscale_ip": tailscale_ip,
+              "provider": provider,
+              "transport": "tailscale0",
+              "fast_track": fast
+            }
+          }
 
     # ---------------------
     # 3. SINKS (Encrypted Tailscale Transport to Central Hub / Layer 2 Buffer)
@@ -198,8 +226,8 @@ data:
         method: post
         encoding:
           codec: json
-        framing:
-          method: newline_delimited
+        batch:
+          max_events: 1
         request:
           headers:
             X-Collector-Token: "${SIEM_COLLECTOR_TOKEN}"

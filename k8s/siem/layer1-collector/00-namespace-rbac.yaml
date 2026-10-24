@@ -60,3 +60,4 @@ subjects:
   - kind: ServiceAccount
     name: falco-agent-sa
     namespace: siem-system
+

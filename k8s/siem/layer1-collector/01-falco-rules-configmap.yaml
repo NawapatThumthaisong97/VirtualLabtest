@@ -116,3 +116,4 @@ data:
         image=%container.image.repository)
       priority: CRITICAL
       tags: [container, cryptomining, network_recon, mitre_impact, T1496, fast_track, vlab_layer1]
+

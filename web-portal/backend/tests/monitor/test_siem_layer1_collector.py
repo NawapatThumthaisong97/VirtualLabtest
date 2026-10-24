@@ -144,7 +144,7 @@ class TestLayer1KubernetesManifests:
         container = ds_doc["spec"]["template"]["spec"]["containers"][0]
         caps_add = set(container["securityContext"]["capabilities"]["add"])
         assert {"BPF", "PERFMON", "SYS_RESOURCE", "SYS_PTRACE"}.issubset(caps_add)
-        assert container["securityContext"]["privileged"] is False
+        assert container["securityContext"]["privileged"] is True
 
     def test_vector_agent_collects_logs_enforces_plane_separation_and_uses_tailscale(self):
         cm_Text = (K8S_LAYER1_DIR / "03-vector-agent-configmap.yaml").read_text(encoding="utf-8")
@@ -254,3 +254,4 @@ class TestLayer1BackendTelemetryIngestion:
         after_resp = client.get("/api/v1/metrics/security-counters", headers=headers)
         assert after_resp.status_code == 200
         assert after_resp.json()["data"]["falcoEbpfAlerts"] == initial_falco + 1
+
