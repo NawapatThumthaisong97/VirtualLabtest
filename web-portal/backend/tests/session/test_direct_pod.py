@@ -142,6 +142,37 @@ class TestWaitForStartingWarmPod:
         assert result["launch_mode"] == "warm_pod"
         assert k8s.created_pods == []
 
+    def test_waits_for_pod_not_yet_bound(self, svc, world, fake_sky, k8s):
+        """regression: Start right after Stop — new warm pod not bound to the node yet: still wait for it"""
+        pod = k8s.add_warm_pod(warm_daemonset_name(world.k8s_image), "worker-pete", world.k8s_image.id,
+                               ready=False, bound=False)
+
+        def scheduled_and_ready(clock):
+            pod.spec.node_name = "worker-pete"
+            pod.status.conditions[0].status = "True"
+        session_service.time.on_sleep = scheduled_and_ready
+
+        result = svc.create_session(world.user.id, world.k8s_lab.id, client_ip=PETE_IP)
+
+        assert result["launch_mode"] == "warm_pod"
+        assert k8s.created_pods == []
+
+    def test_waits_while_previous_pod_terminating(self, svc, world, fake_sky, k8s):
+        """regression: previous student's warm pod still Terminating (no new pod yet): wait for the replacement"""
+        ds = warm_daemonset_name(world.k8s_image)
+        old = k8s.add_warm_pod(ds, "worker-pete", world.k8s_image.id, state="claimed")
+        old.metadata.deletion_timestamp = "2026-10-24T12:40:00Z"
+
+        def replaced(clock):
+            k8s.pods.remove(old)
+            k8s.add_warm_pod(ds, "worker-pete", world.k8s_image.id)
+        session_service.time.on_sleep = replaced
+
+        result = svc.create_session(world.user.id, world.k8s_lab.id, client_ip=PETE_IP)
+
+        assert result["launch_mode"] == "warm_pod"
+        assert k8s.created_pods == []
+
     def test_gives_up_then_direct_pod(self, svc, world, fake_sky, k8s):
         """Never becomes Ready within WARM_POD_WAIT_SECONDS: direct pod"""
         k8s.add_warm_pod(warm_daemonset_name(world.k8s_image), "worker-pete", world.k8s_image.id, ready=False)

@@ -173,8 +173,9 @@ class FakeK8s:
         ))
 
     def add_warm_pod(self, ds_name, node, lab_image_id, state="free", ready=True, phase="Running",
-                     session_id=None):
-        """pod ของ DaemonSet warm pod คืน pod ที่สร้าง (ชื่อ <ds>-<node>)"""
+                     session_id=None, bound=True):
+        """pod ของ DaemonSet warm pod คืน pod ที่สร้าง (ชื่อ <ds>-<node>)
+        bound=False = DaemonSet เพิ่งสร้าง scheduler ยังไม่ผูกเครื่อง (nodeName ว่าง มีแค่ node affinity)"""
         self._rv += 1
         annotations = {"vlab/lab-image-id": str(lab_image_id)}
         if session_id:
@@ -184,7 +185,9 @@ class FakeK8s:
                                                           "vlab/warm-state": state},
                          annotations=annotations, creation_timestamp=None, deletion_timestamp=None,
                          resource_version=str(self._rv)),
-            spec=_ns(node_name=node),
+            spec=_ns(node_name=node if bound else None, affinity=_ns(node_affinity=_ns(
+                required_during_scheduling_ignored_during_execution=_ns(node_selector_terms=[
+                    _ns(match_fields=[_ns(key="metadata.name", operator="In", values=[node])])])))),
             status=_ns(phase=phase, conditions=[_ns(type="Ready", status="True" if ready else "False")],
                        container_statuses=None),
         )
