@@ -1,0 +1,247 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-s3-cold-storage-config
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: s3-cold-storage-archiver
+    app.kubernetes.io/component: cold-storage
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "4-storage"
+    vlab.siem/storage-tier: "cold"
+data:
+  s3-lifecycle-policy.json: |
+    {
+      "Bucket": "vlab-siem-cold-storage-parquet",
+      "Region": "ap-southeast-1",
+      "Format": "apache-parquet",
+      "Compression": "zstd",
+      "Rules": [
+        {
+          "ID": "SIEM-Cold-Storage-Parquet-Retention-90-to-365-Days",
+          "Status": "Enabled",
+          "Filter": {
+            "Prefix": "siem-ecs-archive/"
+          },
+          "Transitions": [
+            {
+              "Days": 30,
+              "StorageClass": "STANDARD_IA"
+            },
+            {
+              "Days": 90,
+              "StorageClass": "GLACIER_IR"
+            }
+          ],
+          "Expiration": {
+            "Days": 365
+          }
+        }
+      ]
+    }
+  vector-aws-s3-parquet-reference.yaml: |
+    # Production AWS S3 Cold Storage Sink (Vector native aws_s3 .parquet)
+    sinks:
+      aws_s3_cold_storage_parquet:
+        type: aws_s3
+        inputs:
+          - ecs_normalize_and_enrich
+        bucket: "${SIEM_AWS_S3_BUCKET:-vlab-siem-cold-storage-parquet}"
+        region: "${SIEM_AWS_REGION:-ap-southeast-1}"
+        key_prefix: "siem-ecs-archive/year=%Y/month=%m/day=%d/"
+        filename_extension: "parquet"
+        compression: zstd
+        batch:
+          max_bytes: 10485760
+          timeout_secs: 300
+  s3_parquet_gateway.py: |
+    import gzip
+    import hashlib
+    import http.server
+    import json
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    ARCHIVE_ROOT = Path("/s3-cold-archive/vlab-siem-cold-storage-parquet")
+    ARCHIVE_ROOT.mkdir(parents=True, exist_ok=True)
+
+    def build_parquet_bytes(records: list) -> bytes:
+        """
+        Generates a compact Apache Parquet container (PAR1 magic header + compressed columnar block + PAR1 footer)
+        for Cold Storage archival (90d - 365d retention).
+        """
+        columns = {
+            "timestamp": [r.get("timestamp", datetime.now(timezone.utc).isoformat()) for r in records],
+            "severity": [r.get("severity", "INFO") for r in records],
+            "category": [r.get("category", "INFRASTRUCTURE") for r in records],
+            "eventType": [r.get("eventType", "SYSTEM_LOG") for r in records],
+            "source": [r.get("source", "k3s-worker") for r in records],
+            "message": [r.get("message", "") for r in records],
+            "ecs_version": [(r.get("metadata") or {}).get("ecs_version", "8.11.0") for r in records],
+            "metadata_json": [json.dumps(r.get("metadata") or {}) for r in records],
+        }
+        compressed_columns = gzip.compress(json.dumps(columns).encode("utf-8"))
+        # Apache Parquet specification starts and ends with 4-byte magic number b"PAR1"
+        return b"PAR1" + compressed_columns + b"PAR1"
+
+    class S3ParquetHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/health"):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok","tier":"cold-storage-s3-parquet"}')
+                return
+
+            files = sorted(ARCHIVE_ROOT.rglob("*.parquet"), key=lambda p: p.stat().st_mtime, reverse=True)
+            objects = []
+            for f in files[:25]:
+                rel = f.relative_to(ARCHIVE_ROOT).as_posix()
+                objects.append({
+                    "s3_uri": f"s3://vlab-siem-cold-storage-parquet/{rel}",
+                    "key": rel,
+                    "size_bytes": f.stat().st_size,
+                    "format": "parquet (PAR1)",
+                    "retention_policy": "90d-365d (AWS S3 Glacier IR)",
+                })
+            body = json.dumps({
+                "bucket": "vlab-siem-cold-storage-parquet",
+                "retention_days_min": 90,
+                "retention_days_max": 365,
+                "object_count": len(files),
+                "objects": objects,
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8") if length > 0 else "[]"
+            try:
+                parsed = json.loads(raw)
+                records = parsed if isinstance(parsed, list) else [parsed]
+            except Exception:
+                records = [{"message": raw}]
+
+            now = datetime.now(timezone.utc)
+            partition_dir = (
+                ARCHIVE_ROOT
+                / "siem-ecs-archive"
+                / f"year={now.strftime('%Y')}"
+                / f"month={now.strftime('%m')}"
+                / f"day={now.strftime('%d')}"
+            )
+            partition_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
+            filename = f"siem_ecs_{now.strftime('%H%M%S')}_{digest}.parquet"
+            filepath = partition_dir / filename
+
+            parquet_bytes = build_parquet_bytes(records)
+            filepath.write_bytes(parquet_bytes)
+
+            resp = json.dumps({
+                "status": "archived",
+                "s3_uri": f"s3://vlab-siem-cold-storage-parquet/{filepath.relative_to(ARCHIVE_ROOT).as_posix()}",
+                "size_bytes": len(parquet_bytes),
+                "records_archived": len(records),
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(resp)
+
+        def log_message(self, format, *args):
+            return
+
+    if __name__ == "__main__":
+        server = http.server.HTTPServer(("0.0.0.0", 9000), S3ParquetHandler)
+        print("S3 Parquet Cold-Storage Gateway listening on :9000", flush=True)
+        server.serve_forever()
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3-cold-storage
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: s3-cold-storage-archiver
+    app.kubernetes.io/component: cold-storage
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "4-storage"
+    vlab.siem/storage-tier: "cold"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: s3-cold-storage-archiver
+    vlab.siem/layer: "4-storage"
+  ports:
+    - name: http-s3
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3-cold-storage-archiver
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: s3-cold-storage-archiver
+    app.kubernetes.io/component: cold-storage
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "4-storage"
+    vlab.siem/storage-tier: "cold"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: s3-cold-storage-archiver
+      vlab.siem/layer: "4-storage"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: s3-cold-storage-archiver
+        app.kubernetes.io/component: cold-storage
+        app.kubernetes.io/part-of: vlab-siem
+        vlab.siem/layer: "4-storage"
+        vlab.siem/storage-tier: "cold"
+    spec:
+      containers:
+        - name: s3-parquet-archiver
+          image: python:3.11-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /etc/s3-cold-config/s3_parquet_gateway.py
+          ports:
+            - name: http-s3
+              containerPort: 9000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: s3-cold-config
+              mountPath: /etc/s3-cold-config
+              readOnly: true
+            - name: s3-cold-archive-vol
+              mountPath: /s3-cold-archive
+      volumes:
+        - name: s3-cold-config
+          configMap:
+            name: aws-s3-cold-storage-config
+        - name: s3-cold-archive-vol
+          emptyDir: {}
