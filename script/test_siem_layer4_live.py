@@ -78,12 +78,13 @@ def apply_manifests(v1: client.CoreV1Api, apps_v1: client.AppsV1Api):
             except Exception as exc:
                 print(f"  ! Warning applying {kind}/{name}: {exc}")
 
-    # Restart vector-aggregator pod to pick up the new Layer 4 Dual-Tier sinks immediately
-    for p in v1.list_namespaced_pod("siem-system", label_selector="app.kubernetes.io/name=vector-aggregator").items:
-        try:
-            v1.delete_namespaced_pod(p.metadata.name, "siem-system")
-        except Exception:
-            pass
+    # Restart vector-aggregator and s3-cold-storage-archiver pods to pick up ConfigMap updates immediately
+    for selector in ("app.kubernetes.io/name=vector-aggregator", "app.kubernetes.io/name=s3-cold-storage-archiver"):
+        for p in v1.list_namespaced_pod("siem-system", label_selector=selector).items:
+            try:
+                v1.delete_namespaced_pod(p.metadata.name, "siem-system")
+            except Exception:
+                pass
     time.sleep(2)
 
 
@@ -200,6 +201,7 @@ def verify_s3_parquet_cold_storage(v1: client.CoreV1Api, s3_pod: str):
     if info["objects"]:
         latest_obj = info["objects"][0]
         print(f"  ✓ Latest S3 Object : {latest_obj['s3_uri']} ({latest_obj['size_bytes']} bytes, format={latest_obj['format']})")
+    print(f"  ★ Interactive S3 Cold Storage (.parquet) Browser UI: http://{K3S_TAILSCALE_IP}:30900")
 
 
 if __name__ == "__main__":

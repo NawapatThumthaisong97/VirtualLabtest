@@ -96,26 +96,82 @@ data:
 
             files = sorted(ARCHIVE_ROOT.rglob("*.parquet"), key=lambda p: p.stat().st_mtime, reverse=True)
             objects = []
-            for f in files[:25]:
+            latest_preview = None
+            for idx, f in enumerate(files[:25]):
                 rel = f.relative_to(ARCHIVE_ROOT).as_posix()
+                raw_bytes = f.read_bytes()
+                is_par1 = raw_bytes[:4] == b"PAR1" and raw_bytes[-4:] == b"PAR1"
+                if idx == 0 and is_par1:
+                    try:
+                        latest_preview = json.loads(gzip.decompress(raw_bytes[4:-4]).decode("utf-8"))
+                    except Exception:
+                        latest_preview = None
                 objects.append({
                     "s3_uri": f"s3://vlab-siem-cold-storage-parquet/{rel}",
                     "key": rel,
                     "size_bytes": f.stat().st_size,
-                    "format": "parquet (PAR1)",
+                    "format": "parquet (PAR1)" if is_par1 else "parquet",
                     "retention_policy": "90d-365d (AWS S3 Glacier IR)",
                 })
-            body = json.dumps({
-                "bucket": "vlab-siem-cold-storage-parquet",
-                "retention_days_min": 90,
-                "retention_days_max": 365,
-                "object_count": len(files),
-                "objects": objects,
-            }).encode("utf-8")
+
+            accept = self.headers.get("Accept", "")
+            if self.path.startswith("/buckets") or "application/json" in accept:
+                body = json.dumps({
+                    "bucket": "vlab-siem-cold-storage-parquet",
+                    "retention_days_min": 90,
+                    "retention_days_max": 365,
+                    "object_count": len(files),
+                    "objects": objects,
+                    "latest_parquet_columns": latest_preview,
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            rows_html = "".join(
+                f"<tr><td><code>{o['s3_uri']}</code></td><td>{o['size_bytes']} B</td>"
+                f"<td><span class='badge'>{o['format']}</span></td><td>{o['retention_policy']}</td></tr>"
+                for o in objects
+            ) or "<tr><td colspan='4'>No .parquet files archived yet</td></tr>"
+            preview_json = json.dumps(latest_preview, indent=2) if latest_preview else "{}"
+            html = f"""<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>AWS S3 Cold Storage (.parquet) - VirtualLab SIEM Layer 4</title>
+      <style>
+        body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 24px; }}
+        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 20px; margin-bottom: 20px; }}
+        h1 {{ margin-top: 0; color: #38bdf8; font-size: 22px; }}
+        h2 {{ color: #94a3b8; font-size: 16px; margin-top: 0; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
+        th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; font-size: 13px; }}
+        th {{ color: #94a3b8; }}
+        .badge {{ background: #0284c7; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; }}
+        pre {{ background: #020617; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12px; color: #a7f3d0; }}
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>Layer 4 Cold Storage: AWS S3 Bucket (s3://vlab-siem-cold-storage-parquet)</h1>
+        <p><strong>Retention Policy:</strong> 90 Days (AWS S3 Glacier Instant Retrieval) &rarr; 365 Days (1 Year Expiration) | <strong>Total .parquet Files:</strong> {len(files)}</p>
+        <table>
+          <thead><tr><th>S3 Object URI (.parquet Partition)</th><th>Compressed Size</th><th>Header Format</th><th>Lifecycle Policy</th></tr></thead>
+          <tbody>{rows_html}</tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Decoded Columnar Data from Latest .parquet Object (PAR1 ZSTD/GZIP Column Store)</h2>
+        <pre>{preview_json}</pre>
+      </div>
+    </body>
+    </html>"""
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(html.encode("utf-8"))
 
         def do_POST(self):
             length = int(self.headers.get("Content-Length", "0"))
@@ -173,7 +229,7 @@ metadata:
     vlab.siem/layer: "4-storage"
     vlab.siem/storage-tier: "cold"
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app.kubernetes.io/name: s3-cold-storage-archiver
     vlab.siem/layer: "4-storage"
@@ -181,6 +237,7 @@ spec:
     - name: http-s3
       port: 9000
       targetPort: 9000
+      nodePort: 30900
       protocol: TCP
 ---
 apiVersion: apps/v1
@@ -245,3 +302,4 @@ spec:
             name: aws-s3-cold-storage-config
         - name: s3-cold-archive-vol
           emptyDir: {}
+
