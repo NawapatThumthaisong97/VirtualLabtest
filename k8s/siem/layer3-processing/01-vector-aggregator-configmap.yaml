@@ -213,9 +213,38 @@ data:
           }
 
     # ---------------------
-    # 3. SINKS (Deliver Normalized ECS Events to Control Plane / Layer 4 Storage)
+    # 3. SINKS (Deliver Normalized ECS Events to Layer 4 Dual-Tier Storage & Control Plane)
     # ---------------------
     sinks:
+      # Layer 4 Tier 1 (Hot Storage): VictoriaLogs on K3s (7-14 Days Retention, Schema-less, Fast LogsQL)
+      victorialogs_hot_storage:
+        type: http
+        inputs:
+          - ecs_normalize_and_enrich
+        uri: "http://victorialogs.siem-system.svc.cluster.local:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message"
+        method: post
+        encoding:
+          codec: json
+        framing:
+          method: newline_delimited
+        batch:
+          max_events: 10
+          timeout_secs: 1
+
+      # Layer 4 Tier 2 (Cold Storage): AWS S3 .parquet Archiver (90 Days - 1 Year Retention)
+      aws_s3_cold_storage_parquet:
+        type: http
+        inputs:
+          - ecs_normalize_and_enrich
+        uri: "${SIEM_S3_PARQUET_ENDPOINT:-http://s3-cold-storage.siem-system.svc.cluster.local:9000/archive}"
+        method: post
+        encoding:
+          codec: json
+        batch:
+          max_events: 10
+          timeout_secs: 1
+
+      # Control Plane API Sink (Admin Monitor UI & PostgreSQL Summary)
       central_siem_control_plane:
         type: http
         inputs:
