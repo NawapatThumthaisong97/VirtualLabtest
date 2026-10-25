@@ -46,6 +46,7 @@ class KubernetesService:
         # Create API clients
         self.v1 = client.CoreV1Api()
         self.apps_v1 = client.AppsV1Api()
+        self.batch_v1 = client.BatchV1Api()
         
         logger.info("Kubernetes service initialized successfully")
     

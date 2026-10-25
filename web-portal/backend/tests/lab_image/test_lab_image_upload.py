@@ -110,7 +110,7 @@ class TestPresignResult:
         assert image.status is ImageStatus.PENDING
         assert image.uploaded_by == world.owner.id
         assert image.course_id == world.course.id
-        assert (image.repository, image.tag) == ("skypilot/music-lab-test", "lab-01")
+        assert (image.repository, image.tag) == ("vlab/music-lab-test", "lab-01")
         assert image.image_digest is None
         assert image.size_mb == 2048
         assert image.exposed_ports == [8080, 5173, 8443]
@@ -248,6 +248,11 @@ class TestPresignValidation:
             {"repository": "../Evil"},
             {"repository": "UPPER/case"},
             {"repository": ""},
+            # ต้องอยู่ใต้ vlab/ (IAM ของ ECR sync ได้สิทธิ์แค่ repository/vlab/*)
+            {"repository": "skypilot/music-lab"},
+            {"repository": "print-test2077"},
+            {"repository": "vlabx/lab"},
+            {"repository": "vlab/scan-runner"},
             {"tag": "-bad"},
             {"tag": "has space"},
             {"fileSizeBytes": 0},

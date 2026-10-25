@@ -7,10 +7,12 @@ from sqlalchemy.exc import IntegrityError
 from app.adapters.local_storage import local_storage
 from app.exceptions.domain import (
     DuplicateOrderNoError,
+    InvalidLabImageError,
     LabDocNotFoundError,
     LabNotFoundError,
 )
 from app.models.lab import Lab, LabStatus
+from app.models.lab_image import LabImage
 from app.models.lab_progress import ProgressStatus
 from app.repositories.lab_repository import LabRepository
 from app.schemas import LabCreateRequest, LabUpdateRequest, LabResponse
@@ -58,8 +60,21 @@ class LabService:
             )
         return path
 
+    def _ensure_image_in_course(self, image_id: UUID | None, course_id: UUID) -> None:
+        """image ต้องมีอยู่และเป็นของวิชาเดียวกับ lab
+
+        ไม่เช็คไว้ image_id ที่ไม่มีจะชน FK แล้วถูกรายงานผิดเป็น duplicate order_no
+        ส่วน image ของวิชาอื่นจะผูกได้เงียบๆ ทั้งที่อาจารย์วิชานี้ไม่ได้เป็นเจ้าของ
+        """
+        if image_id is None:
+            return
+        image = self.db.get(LabImage, image_id)
+        if image is None or image.course_id != course_id:
+            raise InvalidLabImageError(f"Lab image {image_id} does not belong to this course")
+
     # POST
     def create_lab(self, payload: LabCreateRequest) -> Lab:
+        self._ensure_image_in_course(payload.image_id, payload.course_id)
         lab = Lab(**payload.model_dump())
         try:
             self.lab_repo.save(lab)
@@ -81,6 +96,8 @@ class LabService:
         # run_target เป็น NOT NULL ส่ง null มา = ไม่แก้ (ไม่งั้น commit พังเป็น 500)
         if data.get("run_target", ...) is None:
             data.pop("run_target", None)
+        if "image_id" in data:
+            self._ensure_image_in_course(data["image_id"], lab.course_id)
         for key, value in data.items():
             setattr(lab, key, value)
 

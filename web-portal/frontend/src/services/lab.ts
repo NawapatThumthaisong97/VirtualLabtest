@@ -2,6 +2,8 @@
 import apiClient, { API_URL } from './api';
 
 export type LabStatus = 'draft' | 'published' | 'archived';
+/** kubernetes = เครื่องในแลป, aws = EC2, auto = เลือกตามเครื่องที่กด Start */
+export type RunTarget = 'kubernetes' | 'aws' | 'auto';
 
 export interface Lab {
   id: string;
@@ -13,6 +15,7 @@ export interface Lab {
   imageId: string | null;
   dueAt: string | null;
   status: LabStatus;
+  runTarget: RunTarget;
   createdAt: string;
   updatedAt: string | null;
 }
@@ -26,6 +29,7 @@ export interface CreateLabPayload {
   imageId?: string | null;
   dueAt?: string | null;
   status?: LabStatus;
+  runTarget?: RunTarget;
 }
 
 export interface UpdateLabPayload {
@@ -36,6 +40,7 @@ export interface UpdateLabPayload {
   imageId?: string | null;
   dueAt?: string | null;
   status?: LabStatus;
+  runTarget?: RunTarget;
 }
 
 export interface CourseBrief {
@@ -97,6 +102,8 @@ interface LabApiResponse {
   due_at?: string | null;
   dueAt?: string | null;
   status: LabStatus;
+  run_target?: RunTarget | null;
+  runTarget?: RunTarget | null;
   created_at?: string;
   createdAt?: string;
   updated_at?: string | null;
@@ -113,6 +120,7 @@ const transformToLab = (lab: LabApiResponse): Lab => ({
   imageId: lab.imageId ?? lab.image_id ?? null,
   dueAt: lab.dueAt ?? lab.due_at ?? null,
   status: lab.status,
+  runTarget: lab.runTarget ?? lab.run_target ?? 'kubernetes',
   createdAt: lab.createdAt ?? lab.created_at ?? '',
   updatedAt: lab.updatedAt ?? lab.updated_at ?? null,
 });
@@ -141,6 +149,7 @@ export const labService = {
       image_id: payload.imageId || null,
       due_at: payload.dueAt || null,
       status: payload.status || 'draft',
+      run_target: payload.runTarget || 'kubernetes',
     };
 
     const response = await apiClient.post('/labs', apiPayload);
@@ -156,6 +165,7 @@ export const labService = {
     if (payload.imageId !== undefined) apiPayload.image_id = payload.imageId;
     if (payload.dueAt !== undefined) apiPayload.due_at = payload.dueAt;
     if (payload.status !== undefined) apiPayload.status = payload.status;
+    if (payload.runTarget !== undefined) apiPayload.run_target = payload.runTarget;
 
     const response = await apiClient.patch(`/labs/${labId}`, apiPayload);
     return transformToLab(unwrap<LabApiResponse>(response));

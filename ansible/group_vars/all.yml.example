@@ -48,3 +48,11 @@ skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 # --- web-service (backend) — ยาว >= 32 ตัว สร้างด้วย python3 -c 'import secrets;print(secrets.token_urlsafe(48))'
 vault_backend_secret_key: <BACKEND_SECRET_KEY>
 vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
+
+# --- ecr-sync (เครื่อง registry sync camp registry -> ECR ทุก 2 นาที) ---
+# ecr_sync_registry ต้องตรงกับ ECR_REGISTRY_HOST ของ backend
+# key ของ IAM user แยก (เช่น vlab-ecr-sync) สิทธิ์ตาม policy ใน ansible/roles/ecr-sync/files/iam-policy.json
+ecr_sync_enabled: false
+ecr_sync_registry: <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
+vault_ecr_sync_aws_access_key_id: <ECR_SYNC_ACCESS_KEY_ID>
+vault_ecr_sync_aws_secret_access_key: <ECR_SYNC_SECRET_ACCESS_KEY>

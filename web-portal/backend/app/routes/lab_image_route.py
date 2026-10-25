@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Header, status as http_status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Header, Query, status as http_status
 from sqlalchemy.orm import Session
 
 from app.adapters.r2_adapter import r2_adapter
@@ -9,6 +11,7 @@ from app.middlewares.request_validation import require_non_empty_body
 from app.models.user import User
 from app.repositories.lab_image_repository import LabImageRepository
 from app.schemas.lab_image_schema import (
+    LabImageResponse,
     LabImageUploadRequest,
     LabImageUploadResponse,
     R2UploadWebhookPayload,
@@ -22,6 +25,23 @@ router = APIRouter()
 
 def get_controller(db: Session = Depends(get_db)) -> LabImageController:
     return LabImageController(LabImageService(db, LabImageRepository(db), r2_adapter))
+
+
+@router.get("/lab-image", response_model=ApiResponse[list[LabImageResponse]])
+def list_lab_images(
+    course_id: UUID = Query(..., alias="courseId"),
+    current_user: User = Depends(get_current_user),
+    controller: LabImageController = Depends(get_controller),
+):
+    """lab image ทั้งหมดของวิชา (ใหม่สุดก่อน) พร้อมสถานะการสแกน
+
+    สิทธิ์เดียวกับการอัปโหลด: ผู้สอนวิชานั้น หรือ admin
+    """
+    return {
+        "success": True,
+        "message": "Lab images retrieved",
+        "data": controller.list_course_images(course_id, current_user),
+    }
 
 
 @router.post(
@@ -43,6 +63,21 @@ def create_lab_image_upload(
         "success": True,
         "message": "Upload URL created",
         "data": controller.create_upload(payload, current_user),
+    }
+
+
+@router.delete("/lab-image/{image_id}", response_model=ApiResponse[dict])
+def delete_lab_image(
+    image_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabImageController = Depends(get_controller),
+):
+    """ลบ image (DB + R2 + ECR) และปลดออกจาก lab ที่ใช้อยู่ — ผู้สอนวิชานั้น หรือ admin"""
+    detached = controller.delete_image(image_id, current_user)
+    return {
+        "success": True,
+        "message": "Lab image deleted",
+        "data": {"detachedLabs": detached},
     }
 
 

@@ -16,6 +16,8 @@ class LabResponse(CamelModel):
     order_no: int
     due_at: datetime | None
     status: LabStatus
+    # lab image ที่ผูกไว้ (None = lab แบบอ่านเอกสารอย่างเดียว) หน้าอาจารย์ใช้ตั้งค่า dropdown ตอนแก้ไข
+    image_id: UUID | None = None
     # kubernetes / aws / auto (auto = เลือกตามเครื่องที่กด Start ดู RunTarget)
     run_target: RunTarget | None = None
     # ความคืบหน้าของ "คนที่เรียก API" ไม่ใช่ของ lab — คนละคนเรียกได้คนละค่า
@@ -73,6 +75,8 @@ class LabUpdateRequest(CamelModel):
     due_at: datetime | None = None
     status: LabStatus | None = None
     run_target: RunTarget | None = None
+    # ส่ง null = ถอด image ออกจาก lab, ไม่ส่ง = ไม่แก้
+    image_id: UUID | None = None
 
 
 # Delete don't require schemas implementation

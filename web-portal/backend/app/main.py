@@ -36,6 +36,7 @@ from app.configs import settings, check_db_connection
 from app.configs.db import engine
 from app.services.session_reconciler import run_reconciler
 from app.services.prewarm_scheduler import run_prewarm_scheduler
+from app.services.scan_reconciler import run_scan_reconciler
 from app.models import (
     User,
     Course,
@@ -200,6 +201,17 @@ async def lifespan(app: FastAPI):
     else:
         # บอกไว้ใน log จะได้ไม่งงว่าทำไมไม่มี DaemonSet ขึ้น
         logger.info("Prewarm scheduler disabled (set PREWARM_ENABLED=true to enable)")
+    scan_task = None
+    if (
+        settings.LAB_IMAGE_SCAN_ENABLED
+        and settings.K8S_ENABLED
+        and settings.SCAN_RECONCILE_INTERVAL_SECONDS > 0
+    ):
+        scan_task = asyncio.create_task(
+            run_scan_reconciler(settings.SCAN_RECONCILE_INTERVAL_SECONDS, reconciler_stop)
+        )
+    elif settings.LAB_IMAGE_SCAN_ENABLED:
+        logger.warning("LAB_IMAGE_SCAN_ENABLED is set but K8S_ENABLED is false: scan reconciler not started")
 
     logger.info("Application started successfully!")
 
@@ -209,7 +221,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application...")
     reconciler_stop.set()
     # รอบที่กำลังเรียก SkyPilot / K3s อยู่หยุดกลางทางไม่ได้ (อยู่ใน thread) รอสั้น ๆ แล้วปล่อย
-    for name, task in (("Session reconciler", reconciler_task), ("Prewarm scheduler", prewarm_task)):
+    for name, task in (
+        ("Session reconciler", reconciler_task),
+        ("Prewarm scheduler", prewarm_task),
+        ("Scan reconciler", scan_task),
+    ):
         if task is None:
             continue
         try:

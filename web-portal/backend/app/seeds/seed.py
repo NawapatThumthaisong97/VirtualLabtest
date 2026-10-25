@@ -32,7 +32,7 @@ from app.models.class_slot import ClassSlot
 from app.models.courses import Course
 from app.models.enrollment import Enrollment, RoleInCourse
 from app.models.lab import Lab, LabStatus, RunTarget
-from app.models.lab_image import ImageStatus, LabImage
+from app.models.lab_image import ImageStatus, LabImage, ScanStatus
 from app.models.lab_progress import LabProgress, ProgressStatus
 from app.models.quota import Quota, QuotaPeriod
 from app.models.session import ServiceType, Session as ComputeSession, SessionStatus
@@ -197,6 +197,9 @@ def seed_database(db: Session):
         image_digest="sha256:1f0c9a72",
         size_mb=640,
         status=ImageStatus.APPROVED,
+        # image ที่ build ด้วย Ansible ไม่ได้ผ่าน scan pipeline แต่ถือว่าผ่านแล้ว
+        # กัน approve_image / reconciler มองว่ายังไม่ได้สแกน
+        scan_status=ScanStatus.PASSED,
         cpu_requirement="2+",
         # task.yaml เขียนไว้ 4+ แต่ worker-pete มี RAM ใช้ได้จริง 2.97 GB
         # ถ้าขอ 4+ pod จะค้าง Pending จนหมด provision timeout — ทดสอบมาแล้ว
@@ -226,6 +229,7 @@ def seed_database(db: Session):
         image_digest="sha256:8b45de10",
         size_mb=980,
         status=ImageStatus.APPROVED,
+        scan_status=ScanStatus.PASSED,
         cpu_requirement="2+",
         memory_requirement="4+",
         disk_size=30,
@@ -274,7 +278,9 @@ def seed_database(db: Session):
         archive_etag="d41d8cd98f00b204e9800998ecf8427e",  # ค่าตัวอย่าง
         archive_size_bytes=uploaded_size_bytes,
         archive_uploaded_at=datetime.utcnow() - timedelta(hours=1),
-        description="Uploaded: ไฟล์อยู่บน R2 แล้ว รอ admin approve",
+        # webhook ตั้งให้เมื่อไฟล์ขึ้น R2 รอ scan reconciler เปิด Job
+        scan_status=ScanStatus.QUEUED,
+        description="Uploaded: ไฟล์อยู่บน R2 แล้ว รอคิวสแกน",
     )
 
     db.add_all([se_image, devops_image, draft_image, uploaded_image])

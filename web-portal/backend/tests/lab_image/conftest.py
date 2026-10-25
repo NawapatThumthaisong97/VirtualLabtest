@@ -144,7 +144,7 @@ def upload_body(world):
     def _body(**overrides):
         body = {
             "courseId": str(world.course.id),
-            "repository": "skypilot/music-lab-test",
+            "repository": "vlab/music-lab-test",
             "tag": "lab-01",
             "fileSizeBytes": 2147483648,
             "description": "All-in-one lab: Flask API, Vite client, code-server",

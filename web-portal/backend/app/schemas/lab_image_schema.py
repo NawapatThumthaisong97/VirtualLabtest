@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, StringConstraints, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.configs.settings import settings
-from app.models.lab_image import ImageStatus
+from app.models.lab_image import ImageStatus, ScanStatus
 from app.schemas.base import CamelModel
 
 # ชื่อตาม docker reference: path component ตัวพิมพ์เล็ก คั่นด้วย . _ - และ / ได้
@@ -19,6 +19,12 @@ RepositoryName = Annotated[
         pattern=r"^[a-z0-9]+(?:(?:\.|_|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:\.|_|__|-+)[a-z0-9]+)*)*$",
     ),
 ]
+# lab image ทุกตัวต้องอยู่ใต้ vlab/ เพราะ ECR sync (ansible/roles/ecr-sync) ได้สิทธิ์ IAM แค่ repository/vlab/*
+# ชื่อนอก prefix จะสแกนผ่านแต่ขึ้น ECR ไม่ได้ (lab บน AWS ใช้ไม่ได้) จึงปฏิเสธตั้งแต่ขอ upload
+LAB_IMAGE_REPOSITORY_PREFIX = "vlab/"
+# image ของระบบที่อยู่ใต้ prefix เดียวกัน ห้ามอาจารย์ใช้ชื่อซ้ำ (จะทับ image ที่ scan Job ใช้)
+RESERVED_REPOSITORIES = frozenset({"vlab/scan-runner"})
+
 ImageTag = Annotated[
     str,
     StringConstraints(
@@ -66,6 +72,19 @@ class LabImageUploadRequest(CamelModel):
             )
         return size
 
+    @field_validator("repository")
+    @classmethod
+    def _check_repository_prefix(cls, repository: str) -> str:
+        if not repository.startswith(LAB_IMAGE_REPOSITORY_PREFIX):
+            raise PydanticCustomError(
+                "repository_prefix",
+                "repository must start with '{prefix}'",
+                {"prefix": LAB_IMAGE_REPOSITORY_PREFIX},
+            )
+        if repository in RESERVED_REPOSITORIES:
+            raise PydanticCustomError("repository_reserved", "repository name is reserved")
+        return repository
+
     @field_validator("exposed_ports")
     @classmethod
     def _check_ports(cls, ports: list[int]) -> list[int]:
@@ -88,6 +107,38 @@ class LabImageUploadResponse(CamelModel):
     # client ต้องส่ง header เหล่านี้ตอน PUT ให้ตรงกับที่เซ็นไว้
     headers: dict[str, str]
     expires_at: datetime
+
+
+class LabImageResponse(CamelModel):
+    """แถว lab image สำหรับหน้าอาจารย์ (รายการในแท็บ Lab Image และ dropdown ตอนสร้าง lab)
+
+    ไม่ส่ง archive_key / etag / scan_job_name: เป็นรายละเอียดภายในของ pipeline
+    scan_summary ส่งทั้งก้อน (verdict, reasons, warnings, counts) ให้แสดงเหตุผลที่ไม่ผ่าน
+    """
+
+    id: UUID
+    course_id: UUID
+    repository: str
+    tag: str
+    image_digest: str | None
+    size_mb: int
+    description: str | None
+    cpu_requirement: str
+    memory_requirement: str
+    disk_size: int
+    lifespan_minutes: int
+    exposed_ports: list[int]
+    entrypoint_script: str
+    workdir: str | None
+    env_vars: dict[str, str] | None
+    status: ImageStatus
+    scan_status: ScanStatus
+    scan_attempts: int
+    scan_summary: dict | None
+    archive_uploaded_at: datetime | None
+    scan_started_at: datetime | None
+    scan_finished_at: datetime | None
+    created_at: datetime
 
 
 class R2UploadWebhookPayload(BaseModel):

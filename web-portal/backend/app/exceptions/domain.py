@@ -119,6 +119,11 @@ class LabImageMissingError(ValidationError):
     code = "lab_image_missing"
 
 
+class InvalidLabImageError(ValidationError):
+    """image ที่จะผูกกับ lab ไม่มีอยู่ หรือเป็นของวิชาอื่น"""
+    code = "invalid_lab_image"
+
+
 # ---------- 500 ----------
 class InternalServerError(DomainError):
     """Internal server error"""

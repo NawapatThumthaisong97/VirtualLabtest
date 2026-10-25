@@ -1,0 +1,9 @@
+---
+- name: Restart vlab-ecr-sync timer
+  ansible.builtin.systemd:
+    name: vlab-ecr-sync.timer
+    state: restarted
+    daemon_reload: yes
+  when:
+    - ecr_sync_enabled | bool
+    - not ansible_check_mode

@@ -13,6 +13,24 @@ class ImageStatus(enum.Enum):
     REJECTED = "rejected"
 
 
+class ScanStatus(enum.Enum):
+    """ขั้นของการสแกน image (แยกจาก ImageStatus ที่บอกว่าใช้งานได้หรือยัง)
+
+    NOT_STARTED -> QUEUED (ไฟล์ขึ้น R2) -> RUNNING (มี Job) -> PASSED / FAILED / ERROR
+    RUNNING -> QUEUED ได้เมื่อ retry หรืออัปไฟล์ทับ ดู docs/LAB_IMAGE_SCAN_ARCHITECTURE.md
+    """
+    NOT_STARTED = "not_started"
+    QUEUED = "queued"
+    RUNNING = "running"
+    PASSED = "passed"
+    FAILED = "failed"
+    ERROR = "error"
+
+
+# สถานะที่สแกนจบแล้ว (ได้ผลสุดท้าย) — event อัปโหลดหลังจากนี้ไม่เริ่มสแกนใหม่
+SCAN_FINISHED_STATUSES = (ScanStatus.PASSED, ScanStatus.FAILED, ScanStatus.ERROR)
+
+
 class LabImage(Base):
     __tablename__ = "lab_images"
     
@@ -23,9 +41,10 @@ class LabImage(Base):
     # Image Identification
     repository = Column(String(255), nullable=False)  # "skypilot/music-lab"
     tag = Column(String(100), nullable=False)         # "lab-01"
-    # NULL ได้: ตอนขอ presign ยังไม่มีไฟล์ จึงยังไม่รู้ digest — เติมตอน approve (ดึงจาก registry)
-    # unique ยังใช้ได้ เพราะ Postgres ถือว่า NULL แต่ละตัวไม่ซ้ำกัน (draft หลายแถวพร้อมกันได้)
-    image_digest = Column(String(255), nullable=True, unique=True)
+    # NULL ได้: ตอนขอ presign ยังไม่มีไฟล์ จึงยังไม่รู้ digest — scan reconciler เติมเมื่อ push เข้า registry สำเร็จ
+    # ไม่ unique: tar เนื้อเดียวกันที่อัปโหลดสองชื่อได้ digest เดียวกัน (ปกติของ registry)
+    # ความไม่ซ้ำที่สำคัญคือ (repository, tag) ใน uq_repository_tag
+    image_digest = Column(String(255), nullable=True)
     # ตอน presign ใช้ค่าประมาณจากขนาดที่ client แจ้ง แล้ว webhook / approve ทับด้วยค่าจริง
     size_mb = Column(Integer, nullable=False)
     
@@ -59,6 +78,24 @@ class LabImage(Base):
     archive_etag = Column(String(255), nullable=True)
     archive_size_bytes = Column(BigInteger, nullable=True)
     archive_uploaded_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Scan (เขียนโดย webhook ตอนไฟล์ขึ้น R2 และ scan reconciler เท่านั้น)
+    # scan_attempts: จำนวน Job ที่เปิดไปแล้วสำหรับไฟล์ปัจจุบัน (etag นี้) รีเซ็ตเป็น 0 เมื่อ etag เปลี่ยน
+    # scan_job_name: Job ใน K8s ของความพยายามล่าสุด ใช้จับคู่แถวกับ Job
+    # scan_finished_at: ได้ผลสุดท้ายเมื่อไหร่ ใช้นับ retention ก่อนลบแถวที่ FAILED/ERROR
+    # scan_summary: ผลสรุปจาก termination message ของ Pod (verdict, reasons, warnings, จำนวนช่องโหว่)
+    scan_status = Column(
+        Enum(ScanStatus),
+        default=ScanStatus.NOT_STARTED,
+        server_default=ScanStatus.NOT_STARTED.name,
+        nullable=False,
+        index=True,
+    )
+    scan_attempts = Column(Integer, default=0, server_default="0", nullable=False)
+    scan_job_name = Column(String(63), nullable=True)
+    scan_started_at = Column(DateTime(timezone=True), nullable=True)
+    scan_finished_at = Column(DateTime(timezone=True), nullable=True)
+    scan_summary = Column(JSONB, nullable=True)
     
     # Relationships
     uploader = relationship("User", back_populates="uploaded_images", foreign_keys=[uploaded_by])

@@ -99,6 +99,15 @@ class R2Adapter:
             HttpMethod="PUT",
         )
 
+    def generate_presigned_get_url(self, key: str, expires_in: int) -> str:
+        """presigned URL สำหรับโหลด object 1 ไฟล์ (Pod ของ scan ใช้โหลด tar) — URL นี้คือความลับ ห้าม log"""
+        return self.client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": self.bucket, "Key": key},
+            ExpiresIn=expires_in,
+            HttpMethod="GET",
+        )
+
 
     def delete_object(self, key: str) -> None:
         """ลบ object ออกจาก bucket — key ที่ไม่มีอยู่แล้วถือว่าสำเร็จ (S3/R2 ตอบ 204 เหมือนกัน)

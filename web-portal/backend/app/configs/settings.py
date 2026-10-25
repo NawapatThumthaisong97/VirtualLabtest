@@ -119,9 +119,41 @@ class Settings(BaseSettings):
     AWS_DISK_SIZE: int = 30                    # ไม่ใส่ SkyPilot จะใช้ 256 GB
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
+    # credential ที่ใช้ลบ image บน ECR (ไม่ตั้ง = ใช้ credential chain ของ AWS: env / profile / IAM role)
+    # ต้องมีสิทธิ์ ecr:BatchDeleteImage, ecr:ListImages, ecr:DeleteRepository บน repository/vlab/*
+    AWS_ECR_ACCESS_KEY_ID: Optional[str] = None
+    AWS_ECR_SECRET_ACCESS_KEY: Optional[str] = None
 
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
+
+    # Lab image scan (docs/LAB_IMAGE_SCAN_ARCHITECTURE.md) ปิดไว้เป็นค่าเริ่มต้น
+    # เปิดแล้ว backend จะรัน scan reconciler (ต้องมี K8S_ENABLED ด้วย)
+    LAB_IMAGE_SCAN_ENABLED: bool = False
+    SCAN_NAMESPACE: str = "vlab-scan"
+    # ทุกกี่วินาทีให้ reconciler เก็บผล / เปิด Job ใหม่ / เก็บกวาด (0 = ปิด)
+    SCAN_RECONCILE_INTERVAL_SECONDS: int = 15
+    # Job สแกนที่รันพร้อมกันได้สูงสุด ที่เหลือรอเป็น QUEUED
+    SCAN_MAX_CONCURRENT: int = 2
+    # เปิด Job ได้กี่ครั้งต่อไฟล์หนึ่งไฟล์ ก่อนเป็น ERROR (Job ล้ม / หาย / ERROR ชั่วคราว)
+    SCAN_MAX_ATTEMPTS: int = 2
+    # RUNNING นานกว่านี้โดยที่ Job ยังไม่จบ ถือว่าค้าง (ควร >= activeDeadlineSeconds ของ Job + เผื่อ)
+    SCAN_JOB_DEADLINE_SECONDS: int = 1800
+    # FAILED / ERROR เก็บไว้กี่วันให้อาจารย์ดูเหตุผล ก่อน reject_image (ลบแถว + tar) 0 = ลบในรอบถัดไป
+    SCAN_FAILED_RETENTION_DAYS: int = 7
+    # image ของ runner (docs/SCAN_RUNNER_IMAGE.md) ปกติไม่ต้องตั้ง: ใช้ <DOCKER_REGISTRY_HOST>/vlab/scan-runner:<VERSION>
+    # ที่ role Ansible scan-runner-image push ไว้ (tag นั้น immutable) ตั้งเองได้ถ้าอยากอ้างด้วย digest
+    SCAN_RUNNER_IMAGE: Optional[str] = None
+    SCAN_RUNNER_VERSION: str = "1.0.0"  # ต้องตรงกับ scan_runner_version ใน ansible/roles/scan-runner-image/defaults
+    # อายุ presigned GET ที่ Pod ใช้โหลด tar (ต้อง > เวลารอ schedule + เวลาโหลด)
+    SCAN_DOWNLOAD_URL_TTL_SECONDS: int = 3600
+    # ช่องโหว่ระดับนี้ขึ้นไปที่มีเวอร์ชันแก้แล้ว = FAIL (CRITICAL / HIGH / MEDIUM / LOW)
+    SCAN_FAIL_SEVERITY: str = "CRITICAL"
+    # พื้นที่ /work ของ Pod (tar + Trivy DB) ควรประมาณ 2 เท่าของ tar ใหญ่สุด
+    SCAN_WORK_SIZE_LIMIT: str = "15Gi"
+    # PriorityClass ต่ำ ให้ Job ถูกเบียดก่อน lab ของนักศึกษา (ไม่ตั้ง = ไม่ใส่)
+    # (สร้างโดย k8s/scan-namespace.yaml ที่ Ansible apply ให้ตอนรัน role k3s-server)
+    SCAN_PRIORITY_CLASS: Optional[str] = "vlab-scan"
 
     # Pre-pull image ลงทุก worker ก่อนคาบ (DaemonSet) ปิดไว้เป็นค่าเริ่มต้น ต้องสั่งเปิดเองเท่านั้น
     # เพราะเครื่องในห้องแลปจริงยังไม่รู้ว่าจะเปิดเครื่องตอนไหน (boot อัตโนมัติ / Deep Freeze ล้างดิสก์)
@@ -196,6 +228,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     
+    @property
+    def scan_runner_image(self) -> Optional[str]:
+        """image ที่ Pod สแกนใช้: ค่าที่ตั้งเอง หรือสร้างจาก registry + เวอร์ชัน (None = ยังไม่มี registry)"""
+        if self.SCAN_RUNNER_IMAGE:
+            return self.SCAN_RUNNER_IMAGE
+        if self.DOCKER_REGISTRY_HOST:
+            return f"{self.DOCKER_REGISTRY_HOST}/vlab/scan-runner:{self.SCAN_RUNNER_VERSION}"
+        return None
+
     @property
     def cors_origins(self) -> list:
         """Parse CORS origins from comma-separated string"""

@@ -1,0 +1,84 @@
+# namespace ของ Job สแกน lab image (docs/SCAN_RUNNER_IMAGE.md ข้อ 4)
+# Ansible role k3s-server apply ให้อัตโนมัติ และแทน REGISTRY_IP ด้วย IP ของ camp registry ใน inventory
+# apply เองได้: sed "s/REGISTRY_IP/100.x.x.x/" k8s/scan-namespace.yaml | kubectl apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vlab-scan
+  labels:
+    # Pod ที่รันไฟล์ของผู้ใช้ ห้ามขอสิทธิ์เกินปกติ (K8s บังคับให้เอง)
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# ต่ำกว่า lab ของนักศึกษา (ค่า default = 0) และไม่เบียด Pod อื่นออก
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: vlab-scan
+value: -100
+preemptionPolicy: Never
+globalDefault: false
+description: "Lab image scan jobs: yield to student labs"
+---
+# เพดานรวมของ namespace กัน Job สแกนกินเครื่องแลป (SCAN_MAX_CONCURRENT=2 ใช้ไม่เกินครึ่งหนึ่งของนี้)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: vlab-scan
+  namespace: vlab-scan
+spec:
+  hard:
+    pods: "6"
+    requests.cpu: "4"
+    requests.memory: 6Gi
+    limits.cpu: "8"
+    limits.memory: 12Gi
+---
+# ขาเข้า: ห้ามทั้งหมด
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: vlab-scan
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# ขาออก: DNS, camp registry (:5001 เท่านั้น) และอินเทอร์เน็ตสาธารณะ (R2, Trivy DB)
+# ห้ามเข้าเครือข่ายภายในทุกช่วง จึงแตะ kube API, node อื่น, tailnet และ backend ไม่ได้
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-egress
+  namespace: vlab-scan
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: REGISTRY_IP/32
+      ports:
+        - {protocol: TCP, port: 5001}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - {protocol: TCP, port: 443}

@@ -8,6 +8,7 @@ FakeK8s สำหรับเทส prewarm อยู่ท้ายไฟล์
 ของจริงคืน request_id แล้วต้อง sky.get(...) อีกที ที่นี่จำลองด้วย FakeRequest ที่ถือค่าหรือ
 exception ไว้ให้ get คืน / raise
 """
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as _ns
 
@@ -134,6 +135,12 @@ class FakeK8s:
         self._rv = 0
         self.v1 = self
         self.apps_v1 = self
+        self.batch_v1 = self
+        self.jobs: dict[str, object] = {}       # Job ของ scan: ชื่อ -> object (เทสใส่เองผ่าน add_job)
+        self.deleted_jobs: list[str] = []
+        self.created_jobs: dict[str, dict] = {}  # manifest ที่ create_namespaced_job ได้รับ
+        self.secrets: dict[str, dict] = {}
+        self.secret_error: Exception | None = None  # ตั้งไว้ = create_namespaced_secret raise
 
     def _check(self):
         if self.error is not None:
@@ -190,6 +197,70 @@ class FakeK8s:
     def pod(self, name):
         return next((p for p in self.pods if p.metadata.name == name), None)
 
+    def add_job(self, name, kind="ACTIVE", reason=None, result=None, labels=None):
+        """Job ของ scan + Pod ของมัน kind: ACTIVE / SUCCEEDED / FAILED, result: dict หรือ str (termination message)"""
+        labels = {"vlab/scan": "true", **(labels or {})}
+        conditions = []
+        if kind == "SUCCEEDED":
+            conditions.append(_ns(type="Complete", status="True", reason=None))
+        elif kind == "FAILED":
+            conditions.append(_ns(type="Failed", status="True", reason=reason))
+        self.jobs[name] = _ns(metadata=_ns(name=name, labels=labels), status=_ns(conditions=conditions))
+        if result is not None:
+            message = result if isinstance(result, str) else json.dumps(result)
+            terminated = _ns(exit_code=0, message=message)
+            self.pods.append(_ns(
+                metadata=_ns(name=f"{name}-pod", labels={**labels, "job-name": name}, annotations={},
+                             creation_timestamp=None, deletion_timestamp=None, resource_version="1"),
+                spec=_ns(node_name=None),
+                status=_ns(phase="Succeeded", conditions=[], container_statuses=[
+                    _ns(name="publish", state=_ns(waiting=None, running=None, terminated=terminated)),
+                ]),
+            ))
+
+    # ---- BatchV1Api
+    def list_namespaced_job(self, namespace, label_selector=None, _request_timeout=None):
+        self._check()
+        return _ns(items=[j for j in self.jobs.values() if _match(j.metadata.labels, label_selector)])
+
+    def delete_namespaced_job(self, name, namespace, propagation_policy=None, _request_timeout=None):
+        self._check()
+        self.deleted_jobs.append(name)
+        if self.jobs.pop(name, None) is None:
+            raise ApiException(status=404, reason="NotFound")
+        self.pods = [p for p in self.pods if (p.metadata.labels or {}).get("job-name") != name]
+        self.secrets.pop(name, None)  # ownerReference: ลบ Job แล้ว Secret ถูกลบตาม
+
+    def create_namespaced_job(self, namespace, body, _request_timeout=None):
+        """เก็บ manifest ไว้ใน created_jobs แล้วทำให้ list_namespaced_job เห็นเป็น Job ที่ยังทำงาน"""
+        self._check()
+        name = body["metadata"]["name"]
+        if name in self.jobs:
+            raise ApiException(status=409, reason="AlreadyExists")
+        self.created_jobs[name] = body
+        self.jobs[name] = _ns(metadata=_ns(name=name, labels=body["metadata"]["labels"], uid=f"uid-{name}"),
+                              status=_ns(conditions=[]))
+        return self.jobs[name]
+
+    def read_namespaced_job(self, name, namespace, _request_timeout=None):
+        self._check()
+        if name not in self.jobs:
+            raise ApiException(status=404, reason="NotFound")
+        return self.jobs[name]
+
+    def create_namespaced_secret(self, namespace, body, _request_timeout=None):
+        self._check()
+        if self.secret_error is not None:
+            raise self.secret_error
+        name = body["metadata"]["name"]
+        if name in self.secrets:
+            raise ApiException(status=409, reason="AlreadyExists")
+        self.secrets[name] = body
+
+    def replace_namespaced_secret(self, name, namespace, body, _request_timeout=None):
+        self._check()
+        self.secrets[name] = body
+
     # ---- AppsV1Api
     def create_namespaced_daemon_set(self, namespace, body):
         self._check()
@@ -221,7 +292,7 @@ class FakeK8s:
         return _ns(items=items)
 
     # ---- CoreV1Api
-    def list_namespaced_pod(self, namespace, label_selector=None, field_selector=None):
+    def list_namespaced_pod(self, namespace, label_selector=None, field_selector=None, _request_timeout=None):
         self._check()
         node = field_selector.split("=", 1)[1] if field_selector else None
         return _ns(items=[p for p in self.pods if _match(p.metadata.labels, label_selector)
@@ -351,6 +422,10 @@ class FakeR2:
             {"key": key, "content_type": content_type, "expires_in": expires_in}
         )
         return f"https://fake-r2.test/{key}?X-Amz-Expires={expires_in}&X-Amz-Signature=fake"
+
+    def generate_presigned_get_url(self, key: str, expires_in: int) -> str:
+        self.presigned.append({"key": key, "method": "GET", "expires_in": expires_in})
+        return f"https://fake-r2.test/{key}?X-Amz-Expires={expires_in}&X-Amz-Signature=get"
 
     def delete_object(self, key: str) -> None:
         if self.fail_delete:

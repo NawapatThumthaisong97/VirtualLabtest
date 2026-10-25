@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.adapters.ecr_adapter import EcrAdapter, ecr_adapter
 from app.adapters.r2_adapter import ARCHIVE_IF_NONE_MATCH, R2Adapter
 from app.configs.settings import settings
 from app.exceptions.domain import (
@@ -27,7 +28,7 @@ from app.exceptions.domain import (
 )
 from app.models.courses import Course
 from app.models.enrollment import RoleInCourse
-from app.models.lab_image import ImageStatus, LabImage
+from app.models.lab_image import SCAN_FINISHED_STATUSES, ImageStatus, LabImage, ScanStatus
 from app.models.user import User
 from app.repositories.lab_image_repository import LabImageRepository
 from app.repositories.rbac_repository import RBACRepository
@@ -87,7 +88,9 @@ class LabImageService:
         lab_image_repository: LabImageRepository,
         r2: R2Adapter,
         rbac_service: RBACService | None = None,
+        ecr: EcrAdapter | None = None,
     ):
+        self.ecr = ecr or ecr_adapter
         self.db = db
         self.lab_image_repository = lab_image_repository
         self.r2 = r2
@@ -148,6 +151,41 @@ class LabImageService:
                 f"Image {payload.repository}:{payload.tag} already exists"
             )
         return existing
+
+    def list_course_images(self, course_id: UUID, user: User) -> list[LabImage]:
+        """image ทั้งหมดของวิชา ใหม่สุดก่อน (สิทธิ์เดียวกับอัปโหลด: ผู้สอนวิชานั้น หรือ admin)"""
+        self._ensure_can_upload(user, course_id)
+        return self.lab_image_repository.find_by_course(course_id)
+
+    def delete_image(self, image_id: UUID, user: User) -> int:
+        """ลบ image ทั้งแถว DB + ไฟล์ R2 + image บน ECR (ผู้สอนวิชานั้น หรือ admin) คืนจำนวน lab ที่ถูกปลด
+
+        ลำดับ: ปลดการอ้างอิง/ลบแถว (ยังไม่ commit) -> ลบ ECR -> ลบ R2 -> commit
+        ลบฝั่ง cloud ไม่สำเร็จ -> rollback แถวยังอยู่ กดลบซ้ำได้ (ลบซ้ำไม่ error)
+        """
+        image = self.lab_image_repository.find_by_id(image_id, for_update=True)
+        if image is None:
+            raise LabImageNotFoundError(f"Lab image {image_id} not found")
+        self._ensure_can_upload(user, image.course_id)
+
+        if self.lab_image_repository.has_class_slots(image.id):
+            raise ConflictError("ลบไม่ได้: image นี้ถูกใช้ในคาบเรียน (class slot) อยู่")
+
+        repository, tag, archive_key = image.repository, image.tag, image.archive_key
+        try:
+            detached = self.lab_image_repository.detach_references(image.id)
+            self.lab_image_repository.delete(image)
+            self.ecr.delete_image(repository, tag)
+            if archive_key:
+                self.r2.delete_object(archive_key)
+            self.db.commit()
+        except IntegrityError as error:
+            self.db.rollback()
+            raise ConflictError(f"Lab image {image_id} is still referenced and cannot be deleted") from error
+        except Exception:
+            self.db.rollback()
+            raise
+        return detached
 
     def create_upload(
         self, payload: LabImageUploadRequest, user: User
@@ -235,12 +273,25 @@ class LabImageService:
             # ไม่ใช่ไฟล์ที่ระบบออก presign ให้ ตอบ 2xx ให้ Worker ack ไม่ต้อง retry
             return R2UploadWebhookResponse(updated=False, object_key=payload.object_key)
 
+        new_etag = payload.etag.strip('"') if payload.etag is not None else image.archive_etag
+        is_new_file = image.archive_uploaded_at is None or new_etag != image.archive_etag
         if payload.etag is not None:
-            image.archive_etag = payload.etag.strip('"')
+            image.archive_etag = new_etag
         if payload.size is not None:
             image.archive_size_bytes = payload.size
             image.size_mb = math.ceil(payload.size / MIB)
         image.archive_uploaded_at = payload.event_time or datetime.now(timezone.utc)
+
+        # เข้าคิวสแกน (scan reconciler เป็นคนเปิด Job) ไม่เรียก K8s ที่นี่ webhook จึงไม่ล้มตาม cluster
+        # - event ซ้ำ (etag เดิม) ไม่รีเซ็ต กัน Job ที่รันอยู่ถูกนับใหม่
+        # - ได้ผลสแกนไปแล้ว / ไม่ใช่ PENDING: ไม่เริ่มใหม่ (ไฟล์ที่ push ไปคือไฟล์ที่ถูกสแกน)
+        if (
+            is_new_file
+            and image.status is ImageStatus.PENDING
+            and image.scan_status not in SCAN_FINISHED_STATUSES
+        ):
+            image.scan_status = ScanStatus.QUEUED
+            image.scan_attempts = 0
         self.db.commit()
 
         return R2UploadWebhookResponse(
