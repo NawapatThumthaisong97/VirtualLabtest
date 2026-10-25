@@ -249,30 +249,39 @@ def soft_delete_course(
 ):
     """
     ลบ course (soft delete หรือ hard delete ขึ้นอยู่กับเงื่อนไข)
-    - ถ้าไม่มี student enroll และไม่มี lab -> hard delete
-    - ถ้ามี student enroll หรือมี lab -> ห้ามลบ (409 Conflict)
+    - ไม่มี enrollment / lab / lab image / class schedule / class slot -> hard delete
+    - มีอย่างใดอย่างหนึ่ง -> ห้ามลบ (409 Conflict) พร้อมจำนวนที่ติดอยู่
     """
     from app.exceptions.domain import ConflictError
+    from app.models.class_schedule import ClassSchedule
+    from app.models.class_slot import ClassSlot
     from app.models.enrollment import Enrollment
     from app.models.lab import Lab
-    from sqlalchemy import select, exists
-    
-    # ตรวจสอบว่ามี enrollment หรือ lab หรือไม่
-    has_enrollments = db.execute(
-        select(exists().where(Enrollment.course_id == course_id))
-    ).scalar()
-    
-    has_labs = db.execute(
-        select(exists().where(Lab.course_id == course_id))
-    ).scalar()
-    
-    if has_enrollments or has_labs:
+    from app.models.lab_image import LabImage
+    from sqlalchemy import func, select
+
+    # ทุกตารางข้างล่างอ้าง courses.id อยู่ ลบวิชาก่อนเคลียร์ = ชน FK หรือข้อมูลหาย จึงบล็อกเป็น 409 พร้อมบอกว่าติดอะไร
+    checks = {
+        "enrolled students": Enrollment,
+        "labs": Lab,
+        "lab images": LabImage,
+        "class schedules": ClassSchedule,
+        "class slots": ClassSlot,
+    }
+    blockers = []
+    for label, model in checks.items():
+        count = db.execute(
+            select(func.count()).select_from(model).where(model.course_id == course_id)
+        ).scalar_one()
+        if count:
+            blockers.append(f"{count} {label}")
+
+    if blockers:
         raise ConflictError(
-            "Cannot delete course with enrolled students or existing labs. "
-            "Please remove all enrollments and labs before deleting."
+            f"Cannot delete course: it still has {', '.join(blockers)}. "
+            "Remove them before deleting the course."
         )
-    
-    # ถ้าไม่มี enrollment และไม่มี lab -> hard delete เลย
+
     controller.hard_delete_course(course_id)
 
 
