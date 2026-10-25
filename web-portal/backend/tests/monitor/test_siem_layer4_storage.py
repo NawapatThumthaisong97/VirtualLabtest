@@ -3,10 +3,15 @@ Automated verification tests for SIEM Layer 4: Storage & Retention (Dual-Tier)
 - Tier 1 (Hot Storage): VictoriaLogs on K3s (7-14 days retention, Schema-less, low RAM, fast LogsQL search)
 - Tier 2 (Cold Storage): AWS S3 .parquet Archival (90 days - 1 year retention, compressed .parquet format)
 - Dual-Tier fan-out from Layer 3 Vector Aggregator
+- Live CI Verification (when SIEM_CI_LIVE=1): ingests & queries real VictoriaLogs (:9428) and S3 .parquet Gateway (:9000)
 """
 
 import json
+import os
+import urllib.parse
+import urllib.request
 from pathlib import Path
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -103,3 +108,75 @@ class TestLayer4DualTierStorageManifests:
         cold_sink = sinks["aws_s3_cold_storage_parquet"]
         assert "s3-cold-storage.siem-system.svc.cluster.local:9000" in cold_sink["uri"]
         assert "ecs_normalize_and_enrich" in cold_sink["inputs"]
+
+    @pytest.mark.skipif(os.getenv("SIEM_CI_LIVE") != "1", reason="Runs against live VictoriaLogs & S3 Parquet containers in CI")
+    def test_live_ci_victorialogs_and_s3_parquet_cold_storage(self):
+        """Verifies real VictoriaLogs ingestion/LogsQL search (:9428) and real S3 .parquet PAR1 archive (:9000)."""
+        ecs_events = [
+            {
+                "severity": "CRITICAL",
+                "category": "SECURITY_VIOLATION",
+                "eventType": "FALCO_EBPF_ALERT",
+                "source": "k3s-worker-ci",
+                "message": "Unauthorized read of /etc/shadow by container process",
+                "metadata": {"ecs_version": "8.11.0", "siem_layer": "layer4-ci"},
+            },
+            {
+                "severity": "CRITICAL",
+                "category": "SECURITY_VIOLATION",
+                "eventType": "SQUID_EGRESS_DROP",
+                "source": "k3s-worker-ci",
+                "message": "Blocked outbound C2 traffic to 198.51.100.24 (c2-botnet.darknet.io) T1071",
+                "metadata": {"ecs_version": "8.11.0", "siem_layer": "layer4-ci"},
+            },
+            {
+                "severity": "CRITICAL",
+                "category": "SECURITY_VIOLATION",
+                "eventType": "CRYPTOMINING_DETECTED",
+                "source": "aws-skypilot-ci",
+                "message": "Blocked stratum+tcp connection to malicious-mining.org (203.0.113.66)",
+                "metadata": {"ecs_version": "8.11.0", "siem_layer": "layer4-ci"},
+            },
+            {
+                "severity": "CRITICAL",
+                "category": "SECURITY_VIOLATION",
+                "eventType": "OPA_KYVERNO_BLOCK",
+                "source": "k3s-worker-ci",
+                "message": "KYVERNO_POLICY_BLOCK pod attempted privileged=true container launch",
+                "metadata": {"ecs_version": "8.11.0", "siem_layer": "layer4-ci"},
+            },
+        ]
+
+        # 1. Insert JSON lines into real VictoriaLogs Hot Storage (:9428)
+        vlogs_insert = "http://127.0.0.1:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message"
+        ndjson_body = ("\n".join(json.dumps(e) for e in ecs_events) + "\n").encode("utf-8")
+        req = urllib.request.Request(vlogs_insert, data=ndjson_body, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as res:
+            assert res.status in (200, 204)
+
+        # Query back via LogsQL
+        q_data = urllib.parse.urlencode({"query": 'category:"SECURITY_VIOLATION" AND "/etc/shadow"', "limit": "10"}).encode("utf-8")
+        q_req = urllib.request.Request("http://127.0.0.1:9428/select/logsql/query", data=q_data, method="POST")
+        with urllib.request.urlopen(q_req, timeout=5) as q_res:
+            lines = [json.loads(line) for line in q_res.read().decode("utf-8").splitlines() if line.strip()]
+        assert len(lines) >= 1
+        assert "/etc/shadow" in lines[0].get("_msg", "")
+
+        # 2. Archive to real S3 Cold Storage .parquet Gateway (:9000)
+        s3_req = urllib.request.Request(
+            "http://127.0.0.1:9000/ingest",
+            data=json.dumps(ecs_events).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(s3_req, timeout=5) as s3_res:
+            s3_out = json.loads(s3_res.read().decode("utf-8"))
+        assert s3_out["status"] == "archived"
+        assert s3_out["s3_key"].endswith(".parquet")
+
+        # Verify PAR1 magic bytes and columnar preview via /buckets API
+        with urllib.request.urlopen("http://127.0.0.1:9000/buckets", timeout=5) as b_res:
+            b_info = json.loads(b_res.read().decode("utf-8"))
+        assert b_info["object_count"] >= 1
+        assert b_info["objects"][0]["format"] == "parquet (PAR1)"
+        assert "ecs_version" in b_info["latest_parquet_columns"]
