@@ -139,7 +139,7 @@ spec:
             - name: GF_USERS_DEFAULT_THEME
               value: "dark"
             - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
-              value: "/var/lib/grafana/dashboards/vlab-siem-command-center.json"
+              value: "/var/lib/grafana/dashboards/vlab-siem-visual-analytics.json"
           ports:
             - name: http-grafana
               containerPort: 3000

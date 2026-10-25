@@ -29,7 +29,6 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
-          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -56,7 +55,6 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
-          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -83,7 +81,6 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
-          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -110,7 +107,6 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
-          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -137,7 +133,6 @@ data:
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
-          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },
@@ -160,11 +155,10 @@ data:
         },
         {
           "id": 6,
-          "title": "Total 5-Layer SIEM Events",
+          "title": "Active Hybrid Lab Sessions",
           "type": "stat",
           "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
           "datasource": { "type": "postgres", "uid": "siem-postgres-ds" },
-          "options": { "colorMode": "background", "graphMode": "area" },
           "fieldConfig": {
             "defaults": {
               "color": { "mode": "thresholds" },

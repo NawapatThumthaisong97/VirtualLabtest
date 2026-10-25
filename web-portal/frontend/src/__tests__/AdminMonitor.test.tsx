@@ -22,7 +22,7 @@ const mockStudentUser: CurrentUser = {
   role: 'student',
 };
 
-describe('Full-Screen Grafana 5-Layer SIEM Command Center UI', () => {
+describe('Full-Screen Grafana SIEM Dashboard UI', () => {
   it('enforces Admin-only route protection and blocks Student with Access Restricted', () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
       user: mockStudentUser,
@@ -86,7 +86,7 @@ describe('Full-Screen Grafana 5-Layer SIEM Command Center UI', () => {
     });
   });
 
-  it('renders Full-Screen Grafana 5-Layer SIEM iframe and Layer 1-5 architecture badges', () => {
+  it('defaults to Threat Analytics & Charts first and switches to SIEM Command Center on tab click', () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
       user: mockAdminUser,
       isLoading: false,
@@ -107,19 +107,18 @@ describe('Full-Screen Grafana 5-Layer SIEM Command Center UI', () => {
         </Routes>
       </MemoryRouter>
     );
-
-    expect(screen.getByText('L1: Vector + Falco eBPF')).toBeDefined();
-    expect(screen.getByText('L2: NATS JetStream + KV')).toBeDefined();
-    expect(screen.getByText('L3: ECS + GeoIP + Threat Intel')).toBeDefined();
-    expect(screen.getByText('L4: VictoriaLogs + AWS S3 (.parquet)')).toBeDefined();
-    expect(screen.getByText('L5: Grafana + Sigma + Fast-Track')).toBeDefined();
 
     const iframe = screen.getByTestId('grafana-siem-fullscreen-iframe') as HTMLIFrameElement;
-    expect(iframe).toBeDefined();
-    expect(iframe.src).toContain('/d/vlab-siem-5layer');
+    expect(iframe.src).toContain('/d/vlab-siem-analytics');
+
+    const commandBtn = screen.getByRole('button', { name: /SIEM Command Center/i });
+    fireEvent.click(commandBtn);
+
+    const updatedIframe = screen.getByTestId('grafana-siem-fullscreen-iframe') as HTMLIFrameElement;
+    expect(updatedIframe.src).toContain('/d/vlab-siem-5layer');
   });
 
-  it('provides direct launch links to VictoriaLogs (LogsQL), AWS S3 (.parquet), and Grafana Full Tab', () => {
+  it('provides direct launch links to VictoriaLogs, S3 Cold Storage, and Open in Grafana', () => {
     vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
       user: mockAdminUser,
       isLoading: false,
@@ -141,12 +140,8 @@ describe('Full-Screen Grafana 5-Layer SIEM Command Center UI', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText('VictoriaLogs (LogsQL)')).toBeDefined();
-    expect(screen.getByText('AWS S3 (.parquet)')).toBeDefined();
-    expect(screen.getByText('Open Grafana Tab')).toBeDefined();
-
-    const refreshBtn = screen.getByRole('button', { name: /Refresh SIEM/i });
-    fireEvent.click(refreshBtn);
-    expect(screen.getByTestId('grafana-siem-fullscreen-iframe')).toBeDefined();
+    expect(screen.getByText('VictoriaLogs')).toBeDefined();
+    expect(screen.getByText('S3 Cold Storage')).toBeDefined();
+    expect(screen.getByText('Open in Grafana')).toBeDefined();
   });
 });
