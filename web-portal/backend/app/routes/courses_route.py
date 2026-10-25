@@ -25,6 +25,7 @@ from app.schemas.course_schema import (
     CourseDetailResponse,
     CourseResponse,
     CourseUpdateRequest,
+    EnrolledStudentResponse,
 )
 from app.services.courses_service import CourseService
 from app.controllers.course_controller import CourseController
@@ -373,3 +374,41 @@ def delete_announcement(
     """ลบ announcement (Hard Delete) - ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin"""
     # RBAC + Policy เช็คสิทธิ์แล้ว, service เช็ค ownership ว่า announcement เป็นของ course_id นี้จริง
     controller.delete_announcement(course_id=course_id, announcement_id=announcement_id)
+
+
+@router.get("/{course_id}/students", response_model=list[EnrolledStudentResponse])
+def get_course_students(
+    course_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: User = Depends(verify_permission("courses:read:self", context_policy=course_policy)),
+):
+    """รายชื่อนักศึกษา (student / ta) ที่ลงทะเบียนวิชานี้ — เฉพาะ instructor ของวิชาหรือ admin"""
+    from sqlalchemy import select
+
+    from app.exceptions.domain import ForbiddenError
+    from app.models.enrollment import Enrollment, RoleInCourse
+
+    if current_user.role is UserRole.STUDENT:
+        raise ForbiddenError("Only instructors can view the student list")
+
+    rows = db.execute(
+        select(User, Enrollment)
+        .join(Enrollment, Enrollment.user_id == User.id)
+        .where(
+            Enrollment.course_id == course_id,
+            Enrollment.role_in_course.in_([RoleInCourse.STUDENT, RoleInCourse.TA]),
+        )
+        .order_by(User.student_id.asc().nulls_last(), User.name.asc())
+    ).all()
+    return [
+        EnrolledStudentResponse(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            student_id=user.student_id,
+            role_in_course=enrollment.role_in_course.value,
+            enrolled_at=enrollment.enrolled_at,
+        )
+        for user, enrollment in rows
+    ]
