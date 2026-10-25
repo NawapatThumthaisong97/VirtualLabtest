@@ -43,33 +43,33 @@ export default function AdminMonitorPage() {
       : 'http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1';
 
   return (
-    <div className="flex h-[calc(100vh-56px)] w-full flex-col bg-[#f7f9fc] overflow-hidden">
-      {/* Top Toolbar matching InstructorPage design language */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-6 py-3 shrink-0">
+    <div className="flex h-[calc(100vh-56px)] w-full flex-col bg-[#111217] text-white overflow-hidden">
+      {/* Unified Dark Toolbar blending seamlessly with Navigation (#0B0B0B) and Grafana (#111217) */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 bg-[#111217] px-6 py-2.5 shrink-0">
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <div className="flex items-center gap-1.5 text-xs text-white/45">
               <span>Admin workspace</span>
               <ChevronRight size={13} />
-              <span className="font-semibold text-slate-700">SIEM Monitoring</span>
-              <span className="ml-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+              <span className="font-medium text-white/75">SIEM Monitoring</span>
+              <span className="ml-1 rounded border border-white/15 bg-white/[0.04] px-1.5 py-0.5 text-[11px] font-medium text-white/65">
                 [🔒 READ-ONLY MODE]
               </span>
             </div>
-            <h1 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-900">
+            <h1 className="mt-0.5 text-base font-semibold tracking-tight text-white">
               Admin Monitor & SIEM Dashboard
             </h1>
           </div>
 
-          {/* Tab Navigation matching InstructorPage */}
-          <div className="flex gap-1 rounded-xl border border-slate-200 bg-[#f7f9fc] p-1">
+          {/* Unified Dark Tab Navigation */}
+          <div className="flex gap-1 rounded-lg border border-white/10 bg-[#0B0B0B] p-1">
             <button
               type="button"
               onClick={() => setActiveDashboard('analytics')}
-              className={`inline-flex h-8 items-center gap-2 rounded-lg px-3.5 text-xs font-semibold transition cursor-pointer ${
+              className={`inline-flex h-8 items-center gap-2 rounded-md px-3.5 text-xs font-medium transition cursor-pointer ${
                 activeDashboard === 'analytics'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                  ? 'bg-white/15 text-white shadow-sm'
+                  : 'text-white/55 hover:bg-white/[0.05] hover:text-white/90'
               }`}
             >
               <BarChart3 size={14} />
@@ -79,10 +79,10 @@ export default function AdminMonitorPage() {
             <button
               type="button"
               onClick={() => setActiveDashboard('command')}
-              className={`inline-flex h-8 items-center gap-2 rounded-lg px-3.5 text-xs font-semibold transition cursor-pointer ${
+              className={`inline-flex h-8 items-center gap-2 rounded-md px-3.5 text-xs font-medium transition cursor-pointer ${
                 activeDashboard === 'command'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                  ? 'bg-white/15 text-white shadow-sm'
+                  : 'text-white/55 hover:bg-white/[0.05] hover:text-white/90'
               }`}
             >
               <LayoutDashboard size={14} />
@@ -91,12 +91,12 @@ export default function AdminMonitorPage() {
           </div>
         </div>
 
-        {/* Clean Action Links */}
+        {/* Clean Dark Action Links */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             type="button"
             onClick={handleReloadGrafana}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 font-medium text-white/80 hover:bg-white/10 hover:text-white transition cursor-pointer"
           >
             <RefreshCw size={13} />
             <span>Refresh</span>
@@ -106,27 +106,27 @@ export default function AdminMonitorPage() {
             href={VICTORIALOGS_UI_URL}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-medium text-slate-700 hover:bg-slate-50 transition"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 font-medium text-white/80 hover:bg-white/10 hover:text-white transition"
           >
             <span>VictoriaLogs</span>
-            <ExternalLink size={12} className="text-slate-400" />
+            <ExternalLink size={12} className="text-white/40" />
           </a>
 
           <a
             href={S3_EXPLORER_URL}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 font-medium text-slate-700 hover:bg-slate-50 transition"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 font-medium text-white/80 hover:bg-white/10 hover:text-white transition"
           >
             <span>S3 Cold Storage</span>
-            <ExternalLink size={12} className="text-slate-400" />
+            <ExternalLink size={12} className="text-white/40" />
           </a>
 
           <a
             href={currentFullTabUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 font-semibold text-white hover:bg-blue-700 transition"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/20 bg-white/15 px-3.5 font-medium text-white hover:bg-white/25 transition"
           >
             <span>Open in Grafana</span>
             <ExternalLink size={12} />
