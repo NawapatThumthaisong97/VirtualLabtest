@@ -9,6 +9,7 @@ Automated verification tests for SIEM Layer 5: Detection & Visualization
 import json
 import os
 import subprocess
+import time
 import urllib.request
 from pathlib import Path
 import pytest
@@ -135,24 +136,27 @@ class TestLayer5DetectionAndVisualizationManifests:
         assert ft_out["sub_second"] is True
         assert ft_out["latency_ms"] < 500
 
-        # Force flush VictoriaLogs so Sigma LogsQL engine immediately sees the Fast-Track event
-        urllib.request.urlopen("http://127.0.0.1:9428/internal/force_flush", timeout=5).read()
-
         # 2. Execute Sigma Rules -> LogsQL Detection Engine against live VictoriaLogs (:9428)
         env = os.environ.copy()
         env["VICTORIALOGS_QUERY_URL"] = "http://127.0.0.1:9428/select/logsql/query"
         env["SIEM_CENTRAL_TAILSCALE_ENDPOINT"] = "http://127.0.0.1:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message"
-        proc = subprocess.run(
-            ["python3", "/etc/sigma-rules/sigma_logsql_engine.py"],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        sigma_out = json.loads(proc.stdout.strip().splitlines()[-1])
+        total_matches = 0
+        sigma_out = {}
+        for _ in range(15):
+            proc = subprocess.run(
+                ["python3", "/etc/sigma-rules/sigma_logsql_engine.py"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            sigma_out = json.loads(proc.stdout.strip().splitlines()[-1])
+            total_matches = sum(r["matches_found"] for r in sigma_out.get("results", []))
+            if total_matches >= 1:
+                break
+            time.sleep(0.4)
         assert sigma_out["sigma_scan_status"] == "completed"
         assert sigma_out["rules_evaluated"] == 4
-        total_matches = sum(r["matches_found"] for r in sigma_out["results"])
         assert total_matches >= 1
 
         # 3. Verify Real Grafana 11.2.0 (:3000) provisioned both SIEM Dashboards
