@@ -9,9 +9,15 @@ Verifies:
 4. Bootstrap Job provisions persistent file-backed Streams (SIEM_TELEMETRY, SIEM_FAST_TRACK) and
    NATS Key-Value Store bucket (SIEM_ALERT_STATE) for alert deduplication/state tracking
 5. Layer 1 Vector Agent ConfigMap is wired to publish telemetry into Layer 2 NATS JetStream (nats_jetstream_buffer)
+6. Live CI Verification (when SIEM_CI_LIVE=1): connects to real NATS JetStream container (:4222/:8222)
 """
 
+import json
+import os
+import socket
+import urllib.request
 from pathlib import Path
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -107,3 +113,24 @@ class TestLayer2NatsJetStreamManifests:
         assert "nats-jetstream.siem-system.svc.cluster.local:4222" in nats_sink["url"]
         assert nats_sink["subject"] == "siem.logs.telemetry"
 
+    @pytest.mark.skipif(os.getenv("SIEM_CI_LIVE") != "1", reason="Runs against live NATS JetStream container in CI")
+    def test_live_ci_nats_jetstream_streams_and_kv_store(self):
+        """Verifies real NATS JetStream container (:4222/:8222), persistent file streams, and KV store."""
+        payload = json.dumps({"eventType": "CI_BURST_TEST", "severity": "CRITICAL", "message": "Real CI burst"}).encode("utf-8")
+        with socket.create_connection(("127.0.0.1", 4222), timeout=5) as sock:
+            sock.recv(1024)
+            sock.sendall(b"CONNECT {\"verbose\":false}\r\n")
+            sock.sendall(f"PUB siem.logs.telemetry {len(payload)}\r\n".encode("utf-8") + payload + b"\r\nPING\r\n")
+            sock.recv(1024)
+
+        with urllib.request.urlopen("http://127.0.0.1:8222/jsz?streams=true", timeout=5) as res:
+            jsz = json.loads(res.read().decode("utf-8"))
+        streams = {
+            s["name"]: s
+            for acc in jsz.get("account_details", [])
+            for s in acc.get("stream_detail", [])
+        }
+        assert "SIEM_TELEMETRY" in streams
+        assert "SIEM_FAST_TRACK" in streams
+        assert "KV_SIEM_ALERT_STATE" in streams
+        assert streams["SIEM_TELEMETRY"]["state"]["messages"] >= 1
