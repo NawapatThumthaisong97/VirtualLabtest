@@ -8,6 +8,7 @@ Automated verification tests for SIEM Layer 4: Storage & Retention (Dual-Tier)
 
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -154,14 +155,16 @@ class TestLayer4DualTierStorageManifests:
         with urllib.request.urlopen(req, timeout=5) as res:
             assert res.status in (200, 204)
 
-        # Force flush in-memory block so LogsQL immediately sees newly ingested rows
-        urllib.request.urlopen("http://127.0.0.1:9428/internal/force_flush", timeout=5).read()
-
-        # Query back via LogsQL
+        # Query back via LogsQL (poll briefly while VictoriaLogs flushes its in-memory block)
+        lines = []
         q_data = urllib.parse.urlencode({"query": 'category:"SECURITY_VIOLATION" AND "/etc/shadow"', "limit": "10"}).encode("utf-8")
-        q_req = urllib.request.Request("http://127.0.0.1:9428/select/logsql/query", data=q_data, method="POST")
-        with urllib.request.urlopen(q_req, timeout=5) as q_res:
-            lines = [json.loads(line) for line in q_res.read().decode("utf-8").splitlines() if line.strip()]
+        for _ in range(15):
+            q_req = urllib.request.Request("http://127.0.0.1:9428/select/logsql/query", data=q_data, method="POST")
+            with urllib.request.urlopen(q_req, timeout=5) as q_res:
+                lines = [json.loads(line) for line in q_res.read().decode("utf-8").splitlines() if line.strip()]
+            if lines:
+                break
+            time.sleep(0.4)
         assert len(lines) >= 1
         assert "/etc/shadow" in lines[0].get("_msg", "")
 
