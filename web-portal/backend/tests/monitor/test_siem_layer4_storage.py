@@ -178,7 +178,7 @@ class TestLayer4DualTierStorageManifests:
         with urllib.request.urlopen(s3_req, timeout=5) as s3_res:
             s3_out = json.loads(s3_res.read().decode("utf-8"))
         assert s3_out["status"] == "archived"
-        assert s3_out["s3_key"].endswith(".parquet")
+        assert s3_out["s3_uri"].endswith(".parquet")
 
         # Verify PAR1 magic bytes and columnar preview via /buckets API
         with urllib.request.urlopen("http://127.0.0.1:9000/buckets", timeout=5) as b_res:
