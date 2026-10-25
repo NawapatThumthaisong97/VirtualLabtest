@@ -135,6 +135,9 @@ class TestLayer5DetectionAndVisualizationManifests:
         assert ft_out["sub_second"] is True
         assert ft_out["latency_ms"] < 500
 
+        # Force flush VictoriaLogs so Sigma LogsQL engine immediately sees the Fast-Track event
+        urllib.request.urlopen("http://127.0.0.1:9428/internal/force_flush", timeout=5).read()
+
         # 2. Execute Sigma Rules -> LogsQL Detection Engine against live VictoriaLogs (:9428)
         env = os.environ.copy()
         env["VICTORIALOGS_QUERY_URL"] = "http://127.0.0.1:9428/select/logsql/query"
