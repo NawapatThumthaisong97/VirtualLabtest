@@ -217,7 +217,8 @@ jobs:
           cm = yaml.safe_load(pathlib.Path("k8s/siem/layer1-collector/03-vector-agent-configmap.yaml").read_text())
           pathlib.Path("/tmp/siem-ci/vector-agent.yaml").write_text(cm["data"]["vector.yaml"])
           '
-            docker run --rm -v /tmp/siem-ci:/etc/vector timberio/vector:0.42.0-debian \
+            docker run --rm -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
+              -v /tmp/siem-ci:/etc/vector timberio/vector:0.42.0-debian \
               validate --no-environment /etc/vector/vector-agent.yaml
           fi
 
@@ -260,7 +261,8 @@ jobs:
           cm = yaml.safe_load(pathlib.Path("k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml").read_text())
           pathlib.Path("/tmp/siem-ci/vector-aggregator.yaml").write_text(cm["data"]["vector-aggregator.yaml"])
           '
-            docker run --rm -v /tmp/siem-ci:/etc/vector-aggregator timberio/vector:0.42.0-debian \
+            docker run --rm -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
+              -v /tmp/siem-ci:/etc/vector-aggregator timberio/vector:0.42.0-debian \
               validate --no-environment /etc/vector-aggregator/vector-aggregator.yaml
           fi
 
