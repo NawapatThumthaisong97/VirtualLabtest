@@ -154,6 +154,9 @@ class TestLayer4DualTierStorageManifests:
         with urllib.request.urlopen(req, timeout=5) as res:
             assert res.status in (200, 204)
 
+        # Force flush in-memory block so LogsQL immediately sees newly ingested rows
+        urllib.request.urlopen("http://127.0.0.1:9428/internal/force_flush", timeout=5).read()
+
         # Query back via LogsQL
         q_data = urllib.parse.urlencode({"query": 'category:"SECURITY_VIOLATION" AND "/etc/shadow"', "limit": "10"}).encode("utf-8")
         q_req = urllib.request.Request("http://127.0.0.1:9428/select/logsql/query", data=q_data, method="POST")
