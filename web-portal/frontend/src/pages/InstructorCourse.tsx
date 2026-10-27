@@ -15,6 +15,7 @@ import { courseService } from '../services/course';
 import { labService } from '../services/lab';
 import type { LabStatus, LabSummary } from '../services/lab';
 import { apiErrorMessage, isImageReady, labImageService } from '../services/labImage';
+import { courseDocumentService, documentRows } from '../services/courseDocument';
 import CoursePageHeader from '../components/CoursePageHeader';
 import ScanStatusBadge from '../components/instructor/ScanStatusBadge';
 import CreateLabModal from '../components/lab-builder/CreateLabModal';
@@ -77,6 +78,7 @@ export default function InstructorCoursePage() {
     queryClient.invalidateQueries({ queryKey: ['course-detail', courseId] });
     queryClient.invalidateQueries({ queryKey: ['course-labs', courseId] });
     queryClient.invalidateQueries({ queryKey: ['lab-images', courseId] });
+    queryClient.invalidateQueries({ queryKey: ['course-documents', courseId] });
   };
 
   const publish = useMutation({
@@ -84,9 +86,15 @@ export default function InstructorCoursePage() {
     onSuccess: refresh,
   });
 
+  const { data: courseDocs = [] } = useQuery({
+    queryKey: ['course-documents', courseId],
+    queryFn: () => courseDocumentService.list(courseId),
+    enabled: Boolean(courseId),
+  });
+
   const documents = useMemo(
-    () => labs.filter((lab) => Boolean(lab.docUrl)).sort((a, b) => a.orderNo - b.orderNo),
-    [labs]
+    () => documentRows(courseId, courseDocs, labs, labService.docUrl),
+    [courseId, courseDocs, labs]
   );
 
   if (isPending || labsPending) {
@@ -109,7 +117,7 @@ export default function InstructorCoursePage() {
 
       <main className="mx-auto my-6 w-full max-w-[1250px] px-6 pb-14">
         <div className="mb-6 grid grid-cols-1 gap-6 md:grid-cols-[1.2fr_1fr]">
-          {/* Documents — เอกสารผูกกับ lab (doc_url) */}
+          {/* Documents — เอกสารรวมของวิชา + เอกสารของแต่ละ lab (doc_url) */}
           <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-5">
               <h2 className="m-0 text-lg font-bold text-gray-800">Documents</h2>
@@ -117,20 +125,20 @@ export default function InstructorCoursePage() {
             </div>
             <ul className="m-0 max-h-[280px] list-none overflow-y-auto p-0 px-5">
               {documents.length > 0 ? (
-                documents.map((lab) => (
+                documents.map((doc) => (
                   <li
-                    key={lab.id}
+                    key={doc.id}
                     className="flex min-h-[46px] items-center justify-between gap-4 border-b border-gray-100 py-3 last:border-b-0"
                   >
                     <a
-                      href={labService.docUrl(lab.id)}
+                      href={doc.href}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[0.96rem] font-medium text-blue-700 no-underline hover:text-blue-900"
                     >
-                      {lab.title}
+                      {doc.title}
                     </a>
-                    <span className="whitespace-nowrap text-[0.81rem] text-gray-500">Lab {lab.orderNo}</span>
+                    <span className="whitespace-nowrap text-[0.81rem] text-gray-500">{doc.tag}</span>
                   </li>
                 ))
               ) : (
@@ -277,7 +285,7 @@ export default function InstructorCoursePage() {
       </main>
 
       <CreateLabModal open={modal === 'lab'} onClose={() => setModal(null)} onCreated={refresh} courseId={course.id} courseCode={course.code} />
-      <DocumentModal open={modal === 'document'} onClose={() => setModal(null)} onUploaded={refresh} labs={sortedLabs} />
+      <DocumentModal open={modal === 'document'} onClose={() => setModal(null)} onUploaded={refresh} labs={sortedLabs} courseId={course.id} />
       <AnnouncementModal open={modal === 'announcement'} onClose={() => setModal(null)} onPosted={refresh} courseId={course.id} />
     </div>
   );

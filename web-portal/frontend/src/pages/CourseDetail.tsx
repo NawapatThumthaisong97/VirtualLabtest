@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
 import type { LabSummary, ProgressStatus } from '../services/lab';
+import { courseDocumentService, documentRows } from '../services/courseDocument';
+import type { DocumentRow } from '../services/courseDocument';
 import CoursePageHeader from '../components/CoursePageHeader';
 
 type LabTab = 'all' | 'incomplete' | 'complete';
@@ -44,16 +46,16 @@ export default function CourseDetailPage() {
     enabled: Boolean(courseId),
   });
 
+  // เอกสารรวมของวิชา (ไม่ผูก lab) + เอกสารของแต่ละ lab — ถ้าดึงเอกสารวิชาไม่ได้ยังแสดงของ lab ได้
+  const { data: courseDocs = [] } = useQuery({
+    queryKey: ['course-documents', courseId],
+    queryFn: () => courseDocumentService.list(courseId),
+    enabled: Boolean(courseId),
+  });
+
   const documents = useMemo(
-    () =>
-      labs
-        .filter((lab: LabSummary) => Boolean(lab.docUrl))
-        .map((lab: LabSummary) => ({
-          id: lab.id,
-          title: lab.title,
-          href: labService.docUrl(lab.id),
-        })),
-    [labs]
+    () => documentRows(courseId, courseDocs, labs, labService.docUrl),
+    [courseId, courseDocs, labs]
   );
 
   if (isPending || labsPending) {
@@ -100,7 +102,7 @@ export default function CourseDetailPage() {
             </h2>
             <ul className="list-none p-0 m-0 px-5 max-h-[280px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100">
               {documents.length > 0 ? (
-                documents.map((doc: { id: string; title: string; href: string }) => (
+                documents.map((doc: DocumentRow) => (
                   <li
                     key={doc.id}
                     className="flex justify-between items-center gap-4 min-h-[46px] py-3 border-b border-gray-100 last:border-b-0"
@@ -114,7 +116,7 @@ export default function CourseDetailPage() {
                       {doc.title}
                     </a>
                     <span className="text-gray-500 text-[0.81rem] whitespace-nowrap font-normal">
-                      {course.code}
+                      {doc.tag}
                     </span>
                   </li>
                 ))
