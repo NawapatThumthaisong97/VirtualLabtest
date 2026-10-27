@@ -156,7 +156,7 @@ export default function LabDetailPage() {
         inner={{
           width: 'calc(min(1200px, 100%) - 64px)',
           margin: '0 auto',
-          padding: '12px 0',
+          padding: '8px 0',
           flexWrap: 'wrap',
           rowGap: 12,
         }}
@@ -173,7 +173,7 @@ export default function LabDetailPage() {
             type="button"
             onClick={handleCloseLab}
             disabled={isClosing}
-            className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[17px] font-light text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
+            className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[15px] font-light text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
           >
             {isClosing ? 'กำลังปิด...' : 'ปิด lab'}
           </button>
@@ -182,7 +182,7 @@ export default function LabDetailPage() {
             type="button"
             onClick={handleStartLab}
             disabled={isLaunching}
-            className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[17px] font-normal text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
+            className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[15px] font-normal text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
           >
             {isLaunching ? 'กำลังเตรียม...' : 'Start Lab work'}
           </button>

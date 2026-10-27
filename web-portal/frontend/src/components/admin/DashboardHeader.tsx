@@ -26,11 +26,11 @@ const button = (enabled: boolean, active: boolean) =>
     background: 'none',
     border: 0,
     borderBottom: `2px solid ${active ? '#fff' : 'transparent'}`,
-    padding: '6px 2px',
+    padding: '4px 2px',
     color: '#fff',
     opacity: enabled || active ? 1 : 0.55,
     fontFamily: 'inherit',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: active ? 400 : 300,
     cursor: enabled ? 'pointer' : 'default',
     whiteSpace: 'nowrap',
@@ -65,14 +65,14 @@ export default function DashboardHeader({
           display: 'flex',
           alignItems: 'center',
           padding: '0 32px',
-          gap: 40,
-          minHeight: 82,
+          gap: 32,
+          minHeight: 60,
           ...inner,
         }}
       >
-        <h1 style={{ flex: 1, margin: 0, fontSize: 28, fontWeight: 200, letterSpacing: -0.2 }}>{title}</h1>
+        <h1 style={{ flex: 1, margin: 0, fontSize: 22, fontWeight: 200, letterSpacing: -0.2 }}>{title}</h1>
 
-        <nav style={{ display: 'flex', alignItems: 'center', gap: 40 }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
           {features.map((f) => {
             const active = Boolean(f.active);
             const enabled = !active && Boolean(f.target || f.to);
