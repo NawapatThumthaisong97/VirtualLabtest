@@ -91,7 +91,7 @@ class LabService:
         if image is None or image.status != ImageStatus.APPROVED:
             raise LabImageNotReadyError("Lab image has not passed the security scan yet")
 
-    def _ensure_can_manage(self, user: User, course_id: UUID) -> None:
+    def ensure_can_manage(self, user: User, course_id: UUID) -> None:
         """admin ทุกวิชา / instructor ต้องเป็นผู้สร้างหรือ enroll เป็นผู้สอนวิชานี้ (เทียบ id ไม่ใช้ชื่อ)"""
         repo = RBACRepository(self.db)
         course = repo.find_active_course(course_id)
@@ -160,7 +160,7 @@ class LabService:
         อัปไฟล์ใหม่ซ้ำ = แทนของเดิม (doc_url มีได้ไฟล์เดียว)
         """
         lab = self.get_lab_by_id(lab_id)
-        self._ensure_can_manage(user, lab.course_id)
+        self.ensure_can_manage(user, lab.course_id)
 
         safe_filename = Path(filename or "").name
         if not safe_filename.lower().endswith(".pdf"):

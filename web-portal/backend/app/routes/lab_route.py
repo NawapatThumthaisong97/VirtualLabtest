@@ -83,11 +83,11 @@ def create_lab(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller)
 ):
-    """สร้าง lab ใหม่ (ต้อง login)"""
+    """สร้าง lab ใหม่ (ผู้สอนวิชานั้น / admin)"""
     return {
         "success": True,
         "message": "Lab created successfully",
-        "data": controller.create_lab(payload),
+        "data": controller.create_lab(payload, current_user),
     }
 
 
@@ -102,11 +102,11 @@ def update_lab(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller),
 ):
-    """อัปเดต lab (ต้อง login)"""
+    """อัปเดต lab (ผู้สอนวิชานั้น / admin)"""
     return {
         "success": True,
         "message": "Lab updated successfully",
-        "data": controller.update_lab(lab_id, payload),
+        "data": controller.update_lab(lab_id, payload, current_user),
     }
 
 
@@ -131,5 +131,5 @@ def delete_lab(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller)
 ):
-    """ลบ lab (ต้อง login)"""
-    controller.delete_lab(lab_id)
+    """ลบ lab (ผู้สอนวิชานั้น / admin)"""
+    controller.delete_lab(lab_id, current_user)

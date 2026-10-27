@@ -33,11 +33,14 @@ class LabController:
     def get_lab_doc_path(self, lab_id: UUID) -> Path:
         return self.service.get_lab_doc_path(lab_id)
 
-    def create_lab(self, payload: LabCreateRequest) -> LabResponse:
+    # สร้าง / แก้ / ลบ lab ได้เฉพาะผู้สอนวิชานั้นหรือ admin (เดิมแค่ login ก็ทำได้ นักศึกษาแก้ lab ได้)
+    def create_lab(self, payload: LabCreateRequest, user) -> LabResponse:
+        self.service.ensure_can_manage(user, payload.course_id)
         lab = self.service.create_lab(payload)
         return LabResponse.model_validate(lab)
 
-    def update_lab(self, lab_id: UUID, payload: LabUpdateRequest) -> LabResponse:
+    def update_lab(self, lab_id: UUID, payload: LabUpdateRequest, user) -> LabResponse:
+        self.service.ensure_can_manage(user, self.service.get_lab_by_id(lab_id).course_id)
         lab = self.service.update_lab(lab_id, payload)
         return LabResponse.model_validate(lab)
 
@@ -45,5 +48,6 @@ class LabController:
         lab = self.service.save_lab_doc(lab_id, user, filename, source)
         return LabResponse.model_validate(lab)
 
-    def delete_lab(self, lab_id: UUID) -> None:
+    def delete_lab(self, lab_id: UUID, user) -> None:
+        self.service.ensure_can_manage(user, self.service.get_lab_by_id(lab_id).course_id)
         return self.service.delete_lab(lab_id)

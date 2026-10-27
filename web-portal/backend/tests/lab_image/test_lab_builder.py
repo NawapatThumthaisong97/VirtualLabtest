@@ -135,3 +135,39 @@ def test_doc_must_be_pdf(client, world, auth, create_lab):
         headers=auth(world.owner),
     )
     assert response.status_code == 400
+
+
+# ---------- สิทธิ์สร้าง / แก้ / ลบ lab (เดิมแค่ login ก็ทำได้) ----------
+
+@pytest.mark.parametrize("who", ["student", "outsider"])
+def test_non_staff_cannot_create_lab(client, world, auth, who):
+    response = client.post(
+        "/api/labs", json={"courseId": str(world.course.id), "title": "sneaky"}, headers=auth(getattr(world, who))
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("who", ["student", "outsider"])
+def test_non_staff_cannot_edit_or_delete_lab(client, world, auth, create_lab, who):
+    lab = create_lab()
+    user = getattr(world, who)
+    edit = client.patch(f"/api/labs/{lab['id']}", json={"title": "hacked"}, headers=auth(user))
+    delete = client.delete(f"/api/labs/{lab['id']}", headers=auth(user))
+    assert (edit.status_code, delete.status_code) == (403, 403)
+    still = client.get(f"/api/labs/{lab['id']}", headers=auth(world.owner))
+    assert still.json()["data"]["title"] == lab["title"]
+
+
+@pytest.mark.parametrize("who", ["co_instructor", "admin"])
+def test_other_course_staff_can_manage_lab(client, world, auth, create_lab, who):
+    lab = create_lab()
+    user = getattr(world, who)
+    assert client.patch(f"/api/labs/{lab['id']}", json={"title": "renamed"}, headers=auth(user)).status_code == 200
+    assert client.delete(f"/api/labs/{lab['id']}", headers=auth(user)).status_code == 204
+
+
+def test_create_lab_in_deleted_course_is_404(client, world, auth):
+    response = client.post(
+        "/api/labs", json={"courseId": str(world.deleted_course.id), "title": "x"}, headers=auth(world.owner)
+    )
+    assert response.status_code == 404
