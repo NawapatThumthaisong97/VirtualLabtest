@@ -1,6 +1,6 @@
 """Allow draft lab_images before upload: nullable image_digest, unique archive_key.
-Revision ID: 20261023_02
-Revises: 20261023_01
+Revision ID: 20261025_01
+Revises: 20261024_02
 Create Date: 2026-10-23
 
 Flow อัปโหลด image (.tar) ขึ้น R2:
@@ -15,8 +15,8 @@ Flow อัปโหลด image (.tar) ขึ้น R2:
 """
 from alembic import op
 
-revision = "20261023_02"
-down_revision = "20261023_01"
+revision = "20261025_01"
+down_revision = "20261024_02"
 branch_labels = None
 depends_on = None
 

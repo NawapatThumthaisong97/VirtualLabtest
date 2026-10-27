@@ -37,6 +37,11 @@ def verify_log_ingest_permission(
     x_collector_token: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
+    """ส่ง log เข้าได้เฉพาะ token ของ user role admin
+
+    เดิมยอมรับ SECRET_KEY ตรง ๆ เป็น token (คนที่รู้ key ของเซิร์ฟเวอร์ยิงได้โดยไม่มี user) และยอมให้
+    request จาก localhost ผ่านโดยไม่ต้องมี token เลย — ปิดทั้งสองทาง (2026-10-24)
+    """
     token = None
     if credentials is not None:
         token = credentials.credentials
@@ -44,26 +49,17 @@ def verify_log_ingest_permission(
         token = x_collector_token
     elif settings.ACCESS_TOKEN_COOKIE_NAME in request.cookies:
         token = request.cookies[settings.ACCESS_TOKEN_COOKIE_NAME]
+    if not token:
+        raise InvalidTokenError("ต้องแนบ Authorization: Bearer <token> สำหรับ Ingestion")
 
-    if token:
-        if token == settings.SECRET_KEY:
-            return True
-        from app.services.auth_service import AuthService
-        from app.repositories.user_repository import UserRepository
-        from app.exceptions.domain import ForbiddenError
-
-        svc = AuthService(db, UserRepository(db))
-        user = svc.get_user_from_token(token)
-        role_val = user.role.value if hasattr(user.role, "value") else str(user.role)
-        if role_val.lower() == "admin":
-            return True
+    from app.services.auth_service import AuthService
+    from app.repositories.user_repository import UserRepository
+    from app.exceptions.domain import ForbiddenError
+    user = AuthService(db, UserRepository(db)).get_user_from_token(token)
+    role_val = user.role.value if hasattr(user.role, "value") else str(user.role)
+    if role_val.lower() != "admin":
         raise ForbiddenError("ไม่มีสิทธิ์ดำเนินการนี้")
-
-    client_host = request.client.host if request.client else ""
-    if client_host in ("127.0.0.1", "localhost", "::1"):
-        return True
-
-    raise InvalidTokenError("ต้องแนบ Authorization: Bearer <token> สำหรับ Ingestion")
+    return True
 
 
 def get_monitor_controller(db: Session = Depends(get_db)) -> MonitorController:

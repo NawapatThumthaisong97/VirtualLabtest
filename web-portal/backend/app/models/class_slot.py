@@ -1,4 +1,4 @@
-from sqlalchemy import (Column, Integer, Text, DateTime, ForeignKey, Enum, CheckConstraint, Index,
+from sqlalchemy import (Column, Integer, String, Text, DateTime, ForeignKey, Enum, CheckConstraint, Index,
                         DDL, event, text)
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID, ExcludeConstraint
@@ -42,6 +42,7 @@ class ClassSlot(Base):
     starts_at = Column(DateTime(timezone=True), nullable=False)   # UTC
     ends_at = Column(DateTime(timezone=True), nullable=False)
     expected_seats = Column(Integer, nullable=False)
+    room = Column(String(64), nullable=True)            # ห้องแลป — ห้องเดียวกันเวลาทับกันไม่ได้ (ex_class_slots_room_overlap)
     # enum ตัวเดียวกับ labs.run_target (type runtarget ใน Postgres)
     run_target = Column(Enum(RunTarget), default=RunTarget.KUBERNETES,
                         server_default=RunTarget.KUBERNETES.name, nullable=False)
@@ -72,6 +73,14 @@ class ClassSlot(Base):
             name="ex_class_slots_no_overlap",
             using="gist",
             where=text("deleted_at IS NULL AND status <> 'CANCELLED'"),
+        ),
+        # ห้องเดียวกันเวลาทับกันไม่ได้ (จองห้อง PR 6) slot ที่ไม่ผูกห้องไม่นับ
+        ExcludeConstraint(
+            ("room", "="),
+            (text("tstzrange(starts_at, ends_at)"), "&&"),
+            name="ex_class_slots_room_overlap",
+            using="gist",
+            where=text("room IS NOT NULL AND deleted_at IS NULL AND status <> 'CANCELLED'"),
         ),
     )
 

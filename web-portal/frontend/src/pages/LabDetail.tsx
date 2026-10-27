@@ -16,6 +16,7 @@ import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import LabLoader from '../components/LabLoader.tsx';
+import DashboardHeader from '../components/admin/DashboardHeader';
 import { labService } from '../services/lab';
 import { sessionService } from '../services/session';
 import type { LabSession } from '../services/session';
@@ -145,47 +146,48 @@ export default function LabDetailPage() {
   // centre itself in whatever space is left under the sub-header.
   return (
     <div className="flex min-h-[calc(100vh-3.5rem)] flex-col bg-white font-sans text-[#2C2C2A]">
-      {/* Sub-header: course title + tabs + primary action */}
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[#E5E3DC] bg-white px-6 py-4">
-        <h2 className="text-xl font-bold">
-          {lab.course.code} : {lab.course.name}
-        </h2>
-
-        <div className="flex items-center gap-7">
-          <nav className="flex items-center gap-[22px] text-[15px]">
-            <span className="border-b-2 border-[#185FA5] pb-1.5 font-semibold text-[#2C2C2A]">
-              Instruction
-            </span>
-            <span className="border-b-2 border-transparent pb-1.5 text-[#6B6A66]">
-              Dashboard
-            </span>
-          </nav>
-
-          {/* ช่องเดียว สามสถานะ — ยังไม่เปิด / กำลังเตรียม / เปิดอยู่
-              ตอนกำลังเตรียมใช้ disabled ไม่ใช่ปุ่ม "ยกเลิก" เพราะกดยกเลิกได้แค่
-              ฝั่งหน้าจอ ส่วน pod ที่ SkyPilot สั่งสร้างไปแล้วยังเดินหน้าต่ออยู่ดี
-              ปุ่มที่ทำให้เข้าใจผิดแบบนั้นแย่กว่าปุ่มที่กดไม่ได้ */}
-          {session ? (
-            <button
-              type="button"
-              onClick={handleCloseLab}
-              disabled={isClosing}
-              className="cursor-pointer rounded-lg border border-[#E5E3DC] bg-white px-5 py-2.5 text-sm font-medium text-[#2C2C2A] transition hover:border-[#C9C7C0] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isClosing ? 'กำลังปิด...' : 'ปิด lab'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleStartLab}
-              disabled={isLaunching}
-              className="cursor-pointer rounded-lg bg-[#185FA5] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0C447C] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isLaunching ? 'กำลังเตรียม...' : 'Start Lab work'}
-            </button>
-          )}
-        </div>
-      </div>
+      {/* แถบฟ้าแบบหน้าอื่น — กว้างเท่าคอลัมน์เนื้อหา (max 1200 ลบ px-8) ชื่อวิชาเลยตรงกับหัวข้อ lab */}
+      <DashboardHeader
+        title={`${lab.course.code} : ${lab.course.name}`}
+        features={[
+          { label: 'Instruction', active: true },
+          { label: 'Dashboard', note: 'เร็ว ๆ นี้' },
+        ]}
+        inner={{
+          width: 'calc(min(1200px, 100%) - 64px)',
+          margin: '0 auto',
+          padding: '12px 0',
+          flexWrap: 'wrap',
+          rowGap: 12,
+        }}
+      >
+        {/* ช่องเดียว สามสถานะ — ยังไม่เปิด / กำลังเตรียม / เปิดอยู่
+            ตอนกำลังเตรียมใช้ disabled ไม่ใช่ปุ่ม "ยกเลิก" เพราะกดยกเลิกได้แค่
+            ฝั่งหน้าจอ ส่วน pod ที่ SkyPilot สั่งสร้างไปแล้วยังเดินหน้าต่ออยู่ดี
+            ปุ่มที่ทำให้เข้าใจผิดแบบนั้นแย่กว่าปุ่มที่กดไม่ได้
+            หน้าตาเป็นแท็บเหมือน Instruction / Dashboard (ขาวเต็มเท่าแท็บที่เปิดอยู่ แต่ไม่มีเส้นใต้)
+            คั่นจากแท็บด้วยเส้นตั้ง ให้รู้ว่าเป็นคำสั่ง ไม่ใช่หน้า */}
+        <span aria-hidden="true" className="h-6 w-px bg-white/60" />
+        {session ? (
+          <button
+            type="button"
+            onClick={handleCloseLab}
+            disabled={isClosing}
+            className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[17px] font-light text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
+          >
+            {isClosing ? 'กำลังปิด...' : 'ปิด lab'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleStartLab}
+            disabled={isLaunching}
+            className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[17px] font-normal text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
+          >
+            {isLaunching ? 'กำลังเตรียม...' : 'Start Lab work'}
+          </button>
+        )}
+      </DashboardHeader>
 
       {isLaunching ? (
         // heavier bottom padding lifts the block above true centre, where a

@@ -37,6 +37,7 @@ from app.configs.db import engine
 from app.services.session_reconciler import run_reconciler
 from app.services.prewarm_scheduler import run_prewarm_scheduler
 from app.services.scan_reconciler import run_scan_reconciler
+from app.services.health_service import run_health_checker
 from app.models import (
     User,
     Course,
@@ -213,6 +214,12 @@ async def lifespan(app: FastAPI):
     elif settings.LAB_IMAGE_SCAN_ENABLED:
         logger.warning("LAB_IMAGE_SCAN_ENABLED is set but K8S_ENABLED is false: scan reconciler not started")
 
+    health_task = None
+    if settings.HEALTH_CHECK_INTERVAL_SECONDS > 0:
+        health_task = asyncio.create_task(
+            run_health_checker(settings.HEALTH_CHECK_INTERVAL_SECONDS, reconciler_stop)
+        )
+
     logger.info("Application started successfully!")
 
     yield  # Server กำลังทำงาน
@@ -225,6 +232,7 @@ async def lifespan(app: FastAPI):
         ("Session reconciler", reconciler_task),
         ("Prewarm scheduler", prewarm_task),
         ("Scan reconciler", scan_task),
+        ("Health checker", health_task),
     ):
         if task is None:
             continue

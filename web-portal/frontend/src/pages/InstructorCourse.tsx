@@ -8,7 +8,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { courseService } from '../services/course';
-import CoursePageHeader from '../components/CoursePageHeader';
+import DashboardHeader from '../components/admin/DashboardHeader';
 
 export default function InstructorCoursePage() {
   const { courseId = '' } = useParams<{ courseId: string }>();
@@ -32,7 +32,12 @@ export default function InstructorCoursePage() {
 
   return (
     <div className="min-h-screen w-full bg-gray-50">
-      <CoursePageHeader title={`${course.code} : ${course.name}`} />
+      {/* แถบฟ้าแบบหน้า course ของนักศึกษา — กว้างเท่าเนื้อหาใน <main> + padding 20px เท่าหัวการ์ด */}
+      <DashboardHeader
+        title={`${course.code} : ${course.name}`}
+        features={[]}
+        inner={{ width: 'calc(min(1250px, 100%) - 48px)', margin: '0 auto', padding: '0 20px' }}
+      />
 
       <main className="mx-auto my-6 w-full max-w-[1250px] px-6 pb-14">
         <section className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-12 text-center text-gray-500">

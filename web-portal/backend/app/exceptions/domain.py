@@ -70,6 +70,11 @@ class QuotaExceededError(ConflictError):
     code = "quota_exceeded"
 
 
+class CloudBurstDisabledError(ConflictError):
+    """admin ปิด burst ขึ้น AWS (PATCH /admin/cloud/controls) เช่นเกิน budget"""
+    code = "cloud_burst_disabled"
+
+
 # ---------- 401 ----------
 class UnauthorizedError(DomainError):
     """ยังไม่ได้ล็อกอิน หรือ token ใช้ไม่ได้"""

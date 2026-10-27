@@ -57,6 +57,7 @@ def generate_slots(db: Session, schedule: ClassSchedule) -> list[ClassSlot]:
             starts_at=starts_at,
             ends_at=_to_utc(day, schedule.end_time),
             expected_seats=schedule.expected_seats,
+            room=schedule.room,
             created_by=schedule.created_by,
         ))
 

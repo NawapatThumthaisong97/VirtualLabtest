@@ -117,6 +117,32 @@ class Settings(BaseSettings):
     AWS_LAB_AMI: Optional[str] = None          # AMI bake เช่น vlab-bake-0.12.3.post1-r2
     AWS_INSTANCE_TYPE: str = "m7i-flex.large"  # บัญชี free plan สร้างได้แค่บางชนิด
     AWS_DISK_SIZE: int = 30                    # ไม่ใส่ SkyPilot จะใช้ 256 GB
+    # หน้า admin billing: ค่า EC2 ต่อชั่วโมงของ AWS_INSTANCE_TYPE (on-demand) + ดิสก์ — ใช้ประมาณค่าใช้จ่าย
+    # m7i-flex.large ap-southeast-1 = $0.1197 (catalog ของ SkyPilot ~/.sky/catalogs/v8/aws/vms.csv 2026-10-23)
+    # + gp3 30 GB × $0.096/GB-เดือน ÷ 730 ชม. ≈ $0.0039 → เปลี่ยน instance type ต้องแก้ค่านี้ด้วย
+    AWS_HOURLY_PRICE_USD: float = 0.1236
+    # budget AWS ต่อเดือน (USD) และเกณฑ์เตือน (%)
+    AWS_MONTHLY_BUDGET_USD: float = 200.0
+    AWS_BUDGET_ALERT_PCT: int = 80
+    # ยอดจริงจาก Cost Explorer (วันละครั้ง ครั้งละ $0.01) แทนค่าประมาณของวันที่ผ่านไปแล้ว — ปิดไว้เป็นค่าเริ่มต้น
+    # (เทส / dev ไม่ยิง AWS) prod เปิดผ่าน ansible บัญชีรวม → นับเฉพาะ resource ที่มี tag นี้
+    AWS_COST_EXPLORER_ENABLED: bool = False
+    AWS_COST_TAG_KEY: str = "skypilot-user"
+    AWS_COST_TAG_VALUE: str = "vlab-backend"
+    AWS_COST_LOOKBACK_DAYS: int = 62
+
+    # เมลแจ้งผลจองห้อง (หน้า /admin/scheduler) — Gmail: บัญชีที่เปิด 2FA + App Password, smtp.gmail.com:587 STARTTLS
+    # ไม่ตั้ง SMTP_USER = ไม่ส่ง (mail_status = skipped) — เปลี่ยนบัญชีผู้ส่งแก้แค่ค่าพวกนี้ใน group_vars/all.yml
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    MAIL_FROM_NAME: str = "Virtual Lab Team"
+    # ช่วงเทส: ส่งทุกฉบับไปที่อยู่นี้แทนผู้รับจริง (บอกผู้รับจริงในเนื้อเมล) — prod ปล่อยว่าง
+    MAIL_REDIRECT_TO: Optional[str] = None
+    # ส่งได้เฉพาะผู้รับในรายการ (คั่นด้วย , : เมลเต็ม หรือ @โดเมน) — ว่าง = ไม่ส่งให้ใครเลยนอกจาก MAIL_REDIRECT_TO
+    # "*" = ทุกคน (ใช้เมื่อบัญชีอาจารย์ใน DB เป็นของจริงทั้งหมดแล้ว — seed มีเมล @dome.tu.ac.th สมมติที่อาจเป็นของคนจริง)
+    MAIL_ALLOWED_RECIPIENTS: str = ""
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
     # credential ที่ใช้ลบ image บน ECR (ไม่ตั้ง = ใช้ credential chain ของ AWS: env / profile / IAM role)
@@ -154,6 +180,12 @@ class Settings(BaseSettings):
     # PriorityClass ต่ำ ให้ Job ถูกเบียดก่อน lab ของนักศึกษา (ไม่ตั้ง = ไม่ใส่)
     # (สร้างโดย k8s/scan-namespace.yaml ที่ Ansible apply ให้ตอนรัน role k3s-server)
     SCAN_PRIORITY_CLASS: Optional[str] = "vlab-scan"
+    # หน้า admin การ์ด System status: ตรวจ backend / k8s / registry / SkyPilot / AWS ทุกกี่วินาที (0 = ปิด)
+    HEALTH_CHECK_INTERVAL_SECONDS: int = 300
+    # เก็บผลตรวจย้อนหลังกี่วัน (job ลบของเก่าทุกรอบ ตารางไม่บวม)
+    HEALTH_CHECK_RETENTION_DAYS: int = 7
+    # ตอบช้ากว่านี้ (ms) = degraded
+    HEALTH_CHECK_SLOW_MS: int = 2000
 
     # Pre-pull image ลงทุก worker ก่อนคาบ (DaemonSet) ปิดไว้เป็นค่าเริ่มต้น ต้องสั่งเปิดเองเท่านั้น
     # เพราะเครื่องในห้องแลปจริงยังไม่รู้ว่าจะเปิดเครื่องตอนไหน (boot อัตโนมัติ / Deep Freeze ล้างดิสก์)

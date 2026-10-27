@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
 import type { LabSummary, ProgressStatus } from '../services/lab';
-import CoursePageHeader from '../components/CoursePageHeader';
+import DashboardHeader from '../components/admin/DashboardHeader';
 
 type LabTab = 'all' | 'incomplete' | 'complete';
 
@@ -88,7 +88,13 @@ export default function CourseDetailPage() {
 
   return (
     <div className="w-full min-h-screen bg-gray-50">
-      <CoursePageHeader title={`${course.code} : ${course.name}`} />
+      {/* กว้างเท่าเนื้อหาใน <main> (max 1250 ลบ px-6) + padding 20px เท่าหัวการ์ด
+          ชื่อวิชาเลยตรงระนาบเดียวกับคำว่า Documents */}
+      <DashboardHeader
+        title={`${course.code} : ${course.name}`}
+        features={[]}
+        inner={{ width: 'calc(min(1250px, 100%) - 48px)', margin: '0 auto', padding: '0 20px' }}
+      />
 
       <main className="w-full max-w-[1250px] mx-auto px-6 my-6 pb-14">
         {/* Documents & Announcements Row */}
@@ -168,16 +174,16 @@ export default function CourseDetailPage() {
 
           <div className="flex">
             {/* Tab Sidebar */}
-            <div className="flex flex-col w-[200px] py-4 border-r border-gray-200 bg-white min-h-[300px] overflow-y-auto">
+            <div className="flex flex-col w-[240px] shrink-0 border-r border-gray-200 bg-white min-h-[300px] overflow-y-auto">
               {TABS.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setTab(item.id)}
-                  className={`appearance-none border-none bg-transparent text-left px-4 py-3 text-[0.87rem] font-medium cursor-pointer transition-all border-l-3 ${
+                  className={`appearance-none border-0 border-b border-b-gray-200 border-l-[6px] text-left pl-[26px] pr-4 py-3 text-[0.95rem] font-normal text-gray-900 cursor-pointer transition-colors ${
                     tab === item.id
-                      ? 'bg-blue-50 text-blue-700 font-semibold border-l-blue-600'
-                      : 'text-gray-600 hover:bg-gray-50 hover:text-blue-700 border-l-transparent'
+                      ? 'bg-[#F2F2F2] border-l-[#039AD9]'
+                      : 'bg-white hover:bg-gray-50 border-l-transparent'
                   }`}
                 >
                   {item.label}

@@ -15,6 +15,9 @@ import SSOCallbackPage from '../pages/SSOCallback.tsx';
 import InstructorPage from '../pages/Instructor.tsx';
 import InstructorCoursePage from '../pages/InstructorCourse.tsx';
 import AdminMonitorPage from '../pages/AdminMonitor.tsx';
+import AdminDashboardPage from '../pages/AdminDashboard.tsx';
+import ClassSchedulePage from '../pages/ClassSchedule.tsx';
+import LogExplorerPage from '../pages/LogExplorerPage.tsx';
 
 export const router = createBrowserRouter([
   // Public auth pages: no navbar, no footer
@@ -85,6 +88,19 @@ export const router = createBrowserRouter([
       {
         element: <ProtectedRoute allowedRoles={['admin']} />,
         children: [
+          // Admin dashboard: layout ของตัวเอง (Design system) ไม่ใช้ navbar / footer ของหน้านักศึกษา
+          {
+            path: '/admin',
+            element: <AdminDashboardPage />,
+          },
+          {
+            path: '/admin/scheduler',
+            element: <ClassSchedulePage />,
+          },
+          {
+            path: '/admin/logs',
+            element: <LogExplorerPage />,
+          },
           {
             element: <RootLayout />,
             children: [

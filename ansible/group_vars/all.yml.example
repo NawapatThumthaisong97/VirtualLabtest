@@ -56,3 +56,11 @@ ecr_sync_enabled: false
 ecr_sync_registry: <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
 vault_ecr_sync_aws_access_key_id: <ECR_SYNC_ACCESS_KEY_ID>
 vault_ecr_sync_aws_secret_access_key: <ECR_SYNC_SECRET_ACCESS_KEY>
+# --- เมลแจ้งผลจองห้อง (Gmail) — บัญชีที่เปิด 2-Step Verification แล้วสร้าง App Password ที่ myaccount.google.com/apppasswords
+# ไม่ใส่ vault_smtp_user = ไม่ส่งเมล (ระบบจองยังใช้ได้) / mail_redirect_to = ช่วงเทส ส่งทุกฉบับไปที่อยู่นี้แทนอาจารย์จริง
+vault_smtp_user: <GMAIL_ADDRESS>
+vault_smtp_password: <GMAIL_APP_PASSWORD_16_CHARS>
+mail_redirect_to: <TEST_INBOX_OR_EMPTY>
+# ส่งได้เฉพาะในรายการ (เมลเต็ม / @โดเมน คั่นด้วย ,) — ว่าง = ไม่ส่งให้ใครนอกจาก mail_redirect_to
+# ใส่ "*" ได้ก็ต่อเมื่อบัญชีอาจารย์ใน DB เป็นของจริงทั้งหมด (seed มีเมล @dome.tu.ac.th สมมติ)
+mail_allowed_recipients: ""
