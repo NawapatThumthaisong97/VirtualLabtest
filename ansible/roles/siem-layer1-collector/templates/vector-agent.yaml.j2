@@ -1,0 +1,125 @@
+# Managed by Ansible (siem-layer1-collector)
+# Vector Edge Collector Configuration (K3s Worker Node & AWS EC2/SkyPilot AMI)
+# Plane Separation Guarantee: NEVER mounts or reads student pod stdout logs
+data_dir: "/var/lib/vector"
+
+sources:
+  host_system_journal:
+    type: journald
+    current_boot_only: true
+    include_units:
+      - k3s.service
+      - k3s-agent.service
+      - docker.service
+      - tailscaled.service
+      - ssh.service
+    include_matches:
+      _TRANSPORT:
+        - kernel
+        - systemd
+        - journal
+
+  host_application_logs:
+    type: file
+    include:
+      - /var/log/syslog
+      - /var/log/auth.log
+      - /var/log/kern.log
+    read_from: end
+    ignore_older_secs: 3600
+
+  boundary_squid_logs:
+    type: file
+    include:
+      - "{{ squid_access_log_path }}"
+    read_from: end
+
+  boundary_kyverno_logs:
+    type: file
+    include:
+      - "{{ kyverno_log_path }}"
+    read_from: end
+
+  boundary_tailscale_logs:
+    type: file
+    include:
+      - "{{ tailscale_log_path }}"
+    read_from: end
+
+  falco_ebpf_http:
+    type: http_server
+    address: "127.0.0.1:{{ falco_local_webhook_port }}"
+    path: "/falco"
+    decoding:
+      codec: json
+
+  falco_ebpf_file:
+    type: file
+    include:
+      - "{{ falco_alert_log_path }}"
+    read_from: end
+
+transforms:
+  enrich_edge_telemetry:
+    type: remap
+    inputs:
+      - host_system_journal
+      - host_application_logs
+      - boundary_squid_logs
+      - boundary_kyverno_logs
+      - boundary_tailscale_logs
+      - falco_ebpf_http
+      - falco_ebpf_file
+    source: |
+      .siem_layer = "layer1-collector"
+      .node_name = get_hostname() ?? "{{ inventory_hostname }}"
+      .provider = "{{ vlab_provider }}"
+      .clusterOrSubnet = "{{ vlab_nat_subnet }}"
+      .transport = "{{ tailscale_interface }}"
+      if exists(.rule) || exists(.output) {
+        .collector = "falco-ebpf"
+        .engine = "{{ falco_engine_kind }}"
+        .category = "SECURITY_VIOLATION"
+        prio = upcase(to_string(.priority) ?? "WARNING")
+        if prio == "CRITICAL" || prio == "ALERT" || prio == "EMERGENCY" {
+          .severity = "CRITICAL"
+          .fast_track = true
+        } else {
+          .severity = "WARNING"
+          .fast_track = false
+        }
+        rule_name = downcase(to_string(.rule) ?? "")
+        if contains(rule_name, "shell") {
+          .eventType = "FALCO_CONTAINER_SHELL_SPAWN"
+        } else if contains(rule_name, "sensitive") || contains(rule_name, "file") {
+          .eventType = "FALCO_SENSITIVE_FILE_READ"
+        } else if contains(rule_name, "escape") || contains(rule_name, "syscall") {
+          .eventType = "FALCO_CONTAINER_ESCAPE_ATTEMPT"
+        } else {
+          .eventType = "FALCO_EBPF_ALERT"
+        }
+        .message = to_string(.output) ?? to_string(.message) ?? "Falco eBPF alert"
+      } else {
+        .collector = "vector-agent"
+        .fast_track = false
+      }
+      .source = .node_name
+
+sinks:
+  tailscale_central_hub:
+    type: http
+    inputs:
+      - enrich_edge_telemetry
+    uri: "http://{{ siem_central_tailscale_ip }}:{{ siem_central_http_port }}{{ siem_central_http_path }}"
+    method: post
+    encoding:
+      codec: json
+    request:
+      headers:
+        X-Collector-Token: "{{ siem_collector_token }}"
+        X-SIEM-Layer: "layer1-collector"
+        X-Transport-Network: "{{ tailscale_interface }}"
+    buffer:
+      type: disk
+      max_size: 536870912
+      when_full: drop_newest

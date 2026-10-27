@@ -74,7 +74,9 @@
   ansible.builtin.systemd:
     name: k3s-agent
     state: restarted
-  when: registries_yaml.changed or k3s_resolv.changed or k3s_config.changed
+  when:
+    - registries_yaml.changed or k3s_resolv.changed or k3s_config.changed
+    - inventory_hostname not in groups['master']
   ignore_errors: true # ครั้งแรกสุด service ยังไม่มี ก็ข้ามไป (agent จะอ่านไฟล์นี้ตอนติดตั้งเองอยู่แล้ว)
 
 - name: Install K3s agent
@@ -88,6 +90,7 @@
       --flannel-iface {{ flannel_iface }}
   args:
     creates: /usr/local/bin/k3s-agent
+  when: inventory_hostname not in groups['master']
 
 #เช็กว่า host status ขึ้น ready หรือยัง
 - name: Check current Ready status of this node in the cluster
@@ -117,3 +120,14 @@
   delay: 10
   register: node_ready
   until: node_ready.rc == 0
+
+
+- name: Apply room label to worker node (vlab_room)
+  ansible.builtin.shell: |
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    NODE_NAME=$(k3s kubectl get nodes -o wide --no-headers | awk -v ip="{{ ansible_host }}" '$6==ip {print $1}')
+    [ -n "$NODE_NAME" ] && k3s kubectl label node "$NODE_NAME" vlab_room="{{ vlab_room }}" --overwrite
+  delegate_to: "{{ groups['master'][0] }}"
+  vars:
+    ansible_become: false
+  when: vlab_room is defined

@@ -62,7 +62,13 @@ def resolve_run_target(client_node: Optional[tuple[str, str]]) -> RunTarget:
 
     client_node = ผลของ _client_node (None = ไม่ใช่เครื่องแลป หรือเช็กไม่ได้) ไม่ดู labs.run_target แล้ว
     """
-    return RunTarget.KUBERNETES if client_node is not None else RunTarget.AWS
+    if client_node is not None:
+        return RunTarget.KUBERNETES
+    target = getattr(settings, "DEFAULT_RUN_TARGET", "aws")
+    try:
+        return RunTarget(target.lower())
+    except ValueError:
+        return RunTarget.AWS
 
 
 def _is_pod_session(session) -> bool:
@@ -143,7 +149,7 @@ class SessionService:
         pin_node: บังคับ pod ลงเครื่องที่กด Start และติด label vlab/lab ให้ NetworkPolicy
         vlab-lab-isolation ปิดขาเข้าจากเครื่องอื่น (kubernetes.pod_config เป็น override ที่ task ตั้งได้)
         """
-        docker_registry_host = os.getenv("DOCKER_REGISTRY_HOST", "100.127.74.48:5001")
+        docker_registry_host = os.getenv("DOCKER_REGISTRY_HOST") or settings.DOCKER_REGISTRY_HOST or "100.127.74.48:5001"
         resources_req = lab_image.get_skypilot_resources()
 
         resources: dict[str, Any] = {

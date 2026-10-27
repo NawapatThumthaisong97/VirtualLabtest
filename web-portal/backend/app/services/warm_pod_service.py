@@ -255,8 +255,10 @@ class WarmPodService:
         """
         if not ip:
             return None
-        for node in self.v1.list_node().items:
-            if CONTROL_PLANE_LABEL in (node.metadata.labels or {}):
+        items = self.v1.list_node().items
+        has_separate_workers = any(CONTROL_PLANE_LABEL not in (n.metadata.labels or {}) for n in items)
+        for node in items:
+            if has_separate_workers and CONTROL_PLANE_LABEL in (node.metadata.labels or {}):
                 continue
             status = node.status
             ready = any(c.type == "Ready" and c.status == "True" for c in (status.conditions or []))
@@ -265,6 +267,15 @@ class WarmPodService:
             for addr in status.addresses or []:
                 if addr.type == "InternalIP" and addr.address == ip:
                     return node.metadata.name, addr.address
+        if getattr(settings, "DEV_DEFAULT_NODE", None):
+            for node in items:
+                if node.metadata.name == settings.DEV_DEFAULT_NODE:
+                    status = node.status
+                    ready = any(c.type == "Ready" and c.status == "True" for c in (status.conditions or []))
+                    if ready:
+                        for addr in status.addresses or []:
+                            if addr.type == "InternalIP":
+                                return node.metadata.name, addr.address
         return None
 
     def find_free_pod(self, node: str, lab_image_id) -> Optional[Any]:

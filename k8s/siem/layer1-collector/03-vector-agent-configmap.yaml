@@ -1,0 +1,239 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-agent-config
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: vector-agent
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "1-collector"
+data:
+  vector.yaml: |
+    # =========================================================================
+    # Layer 1: Vector Edge Collector Configuration (K3s Worker DaemonSet)
+    # - Collects Host System Logs, Application Logs, Boundary Logs & Falco eBPF
+    # - Strictly enforces Plane Separation (NEVER mounts student pod stdout)
+    # - Transports all telemetry exclusively over Tailscale encrypted mesh
+    # =========================================================================
+    data_dir: "/var/lib/vector"
+
+    # ---------------------
+    # 1. SOURCES (Collectors)
+    # ---------------------
+    sources:
+      # 1.1 System & Kernel Logs (systemd journal: OOM-killer, sshd, k3s, tailscaled)
+      host_system_journal:
+        type: journald
+        current_boot_only: true
+        include_units:
+          - k3s.service
+          - k3s-agent.service
+          - tailscaled.service
+          - ssh.service
+          - docker.service
+
+      # 1.2 Host Application & Auth Logs (/var/log/syslog, /var/log/auth.log, /var/log/kern.log)
+      host_application_logs:
+        type: file
+        include:
+          - /var/log/syslog
+          - /var/log/auth.log
+          - /var/log/kern.log
+        read_from: end
+        ignore_older_secs: 3600
+
+      # 1.3 Security Boundary Enforcement Logs (Squid, Kyverno, Tailscale ACL)
+      boundary_squid_logs:
+        type: file
+        include:
+          - /var/log/squid/access.log
+        read_from: end
+
+      boundary_kyverno_logs:
+        type: file
+        include:
+          - /var/log/kyverno/audit.log
+        read_from: end
+
+      boundary_tailscale_logs:
+        type: file
+        include:
+          - /var/log/tailscale/acl.log
+        read_from: end
+
+      # 1.4 Falco eBPF Kernel Security Alerts (Local Loopback HTTP + File Tail Fallback)
+      falco_ebpf_http:
+        type: http_server
+        address: "127.0.0.1:8687"
+        path: "/falco"
+        decoding:
+          codec: json
+
+      falco_ebpf_file:
+        type: file
+        include:
+          - /var/log/falco/falco-alerts.json
+        read_from: end
+
+    # ---------------------
+    # 2. TRANSFORMS (Edge Tagging & Fast-Track Classification via VRL)
+    # ---------------------
+    transforms:
+      enrich_system_and_app_logs:
+        type: remap
+        inputs:
+          - host_system_journal
+          - host_application_logs
+        source: |
+          node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
+          tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
+          provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
+          nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
+          msg = to_string(.message) ?? "System log entry"
+          cat = "INFRASTRUCTURE"
+          ev = "SYSTEM_LOG"
+          sev = "INFO"
+          if contains(downcase(msg), "oom-killer") || contains(downcase(msg), "killed process") {
+            cat = "CONTAINER"
+            ev = "OOM_KILLED"
+            sev = "CRITICAL"
+          }
+          . = {
+            "severity": sev,
+            "category": cat,
+            "eventType": ev,
+            "source": node_name,
+            "message": msg,
+            "clusterOrSubnet": nat_subnet,
+            "metadata": {
+              "siem_layer": "layer1-collector",
+              "collector": "vector-agent",
+              "tailscale_ip": tailscale_ip,
+              "provider": provider,
+              "transport": "tailscale0",
+              "fast_track": false
+            }
+          }
+
+      enrich_boundary_logs:
+        type: remap
+        inputs:
+          - boundary_squid_logs
+          - boundary_kyverno_logs
+          - boundary_tailscale_logs
+        source: |
+          node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
+          tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
+          provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
+          nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
+          file_path = to_string(.file) ?? ""
+          msg = to_string(.message) ?? "Boundary violation detected"
+          ev = "TAILSCALE_CROSS_CLUSTER_ATTEMPT"
+          sev = "WARNING"
+          if contains(file_path, "squid") {
+            ev = "SQUID_EGRESS_DROP"
+            sev = "WARNING"
+          } else if contains(file_path, "kyverno") {
+            ev = "OPA_KYVERNO_BLOCK"
+            sev = "CRITICAL"
+          }
+          . = {
+            "severity": sev,
+            "category": "SECURITY_VIOLATION",
+            "eventType": ev,
+            "source": node_name,
+            "message": msg,
+            "clusterOrSubnet": nat_subnet,
+            "metadata": {
+              "siem_layer": "layer1-collector",
+              "collector": "vector-agent",
+              "tailscale_ip": tailscale_ip,
+              "provider": provider,
+              "transport": "tailscale0",
+              "fast_track": false
+            }
+          }
+
+      enrich_falco_ebpf_alerts:
+        type: remap
+        inputs:
+          - falco_ebpf_http
+          - falco_ebpf_file
+        source: |
+          if is_string(.message) {
+            parsed, err = parse_json(to_string!(.message))
+            if err == null && is_object(parsed) {
+              ., _ = merge(., parsed)
+            }
+          }
+          node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
+          tailscale_ip = get_env_var("NODE_TAILSCALE_IP") ?? "100.64.0.1"
+          provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
+          nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
+          prio = upcase(to_string(.priority) ?? "WARNING")
+          sev = "WARNING"
+          fast = false
+          if prio == "EMERGENCY" || prio == "ALERT" || prio == "CRITICAL" {
+            sev = "CRITICAL"
+            fast = true
+          } else if prio == "ERROR" {
+            sev = "ERROR"
+            fast = false
+          }
+          rule_raw = to_string(.rule) ?? "Falco Kernel Rule"
+          rule_name = downcase(rule_raw)
+          ev = "FALCO_EBPF_ALERT"
+          if contains(rule_name, "shell") {
+            ev = "FALCO_CONTAINER_SHELL_SPAWN"
+          } else if contains(rule_name, "sensitive") || contains(rule_name, "file") {
+            ev = "FALCO_SENSITIVE_FILE_READ"
+          } else if contains(rule_name, "escape") || contains(rule_name, "syscall") {
+            ev = "FALCO_CONTAINER_ESCAPE_ATTEMPT"
+          }
+          msg = to_string(.output) ?? to_string(.message) ?? "Falco eBPF kernel security alert"
+          . = {
+            "severity": sev,
+            "category": "SECURITY_VIOLATION",
+            "eventType": ev,
+            "source": node_name,
+            "message": msg,
+            "clusterOrSubnet": nat_subnet,
+            "metadata": {
+              "siem_layer": "layer1-collector",
+              "collector": "falco-ebpf",
+              "engine": "modern_ebpf",
+              "rule": rule_raw,
+              "tailscale_ip": tailscale_ip,
+              "provider": provider,
+              "transport": "tailscale0",
+              "fast_track": fast
+            }
+          }
+
+    # ---------------------
+    # 3. SINKS (Encrypted Tailscale Transport to Central Hub / Layer 2 Buffer)
+    # ---------------------
+    sinks:
+      # 3.1 Central SIEM Hub over Tailscale VPN (100.64.0.0/10 internal overlay network)
+      tailscale_central_hub:
+        type: http
+        inputs:
+          - enrich_system_and_app_logs
+          - enrich_boundary_logs
+          - enrich_falco_ebpf_alerts
+        uri: "${SIEM_CENTRAL_TAILSCALE_ENDPOINT:-http://100.86.87.27:8000/api/v1/logs}"
+        method: post
+        encoding:
+          codec: json
+        batch:
+          max_events: 1
+        request:
+          headers:
+            X-Collector-Token: "${SIEM_COLLECTOR_TOKEN}"
+            X-SIEM-Layer: "layer1-collector"
+            X-Transport-Network: "tailscale0"
+        buffer:
+          type: disk
+          max_size: 536870912
+          when_full: drop_newest
