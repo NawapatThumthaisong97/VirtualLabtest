@@ -41,5 +41,9 @@ class LabController:
         lab = self.service.update_lab(lab_id, payload)
         return LabResponse.model_validate(lab)
 
+    def save_lab_doc(self, lab_id: UUID, user, filename: str, source) -> LabResponse:
+        lab = self.service.save_lab_doc(lab_id, user, filename, source)
+        return LabResponse.model_validate(lab)
+
     def delete_lab(self, lab_id: UUID) -> None:
         return self.service.delete_lab(lab_id)

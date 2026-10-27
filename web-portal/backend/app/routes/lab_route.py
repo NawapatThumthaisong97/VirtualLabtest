@@ -1,7 +1,7 @@
 import mimetypes
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status as http_status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status as http_status
 from fastapi.responses import FileResponse
 from app.middlewares.request_validation import require_non_empty_body
 from sqlalchemy.orm import Session
@@ -107,6 +107,21 @@ def update_lab(
         "success": True,
         "message": "Lab updated successfully",
         "data": controller.update_lab(lab_id, payload),
+    }
+
+
+@router.post("/{lab_id}/doc", response_model=ApiResponse[LabResponse])
+def upload_lab_doc(
+    lab_id: UUID,
+    document: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller),
+):
+    """อัปโหลดเอกสาร PDF ของ lab (ผู้สอนวิชานั้น หรือ admin) — แทนไฟล์เดิมถ้ามี"""
+    return {
+        "success": True,
+        "message": "Lab document uploaded successfully",
+        "data": controller.save_lab_doc(lab_id, current_user, document.filename or "", document),
     }
 
 
