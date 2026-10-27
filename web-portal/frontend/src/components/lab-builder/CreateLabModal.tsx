@@ -116,8 +116,8 @@ export default function CreateLabModal({ open, onClose, onCreated, courseId, cou
   };
 
   return (
-    <GradientModal open={open} onClose={busy ? () => {} : onClose} icon="/lab-builder/lab-container.png" iconWidth={46} title="Virtual Lab Builder" maxWidth={1000}>
-      <div style={{ padding: '28px 74px 48px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 118, fontSize: 13 }}>
+    <GradientModal open={open} onClose={busy ? () => {} : onClose} icon="/lab-builder/lab-container.png" iconWidth={50} title="Virtual Lab Builder" maxWidth={1120}>
+      <div style={{ padding: '32px 74px 52px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 96, fontSize: 14 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <label style={label}>
             <span style={{ paddingLeft: 6 }}>Lab name</span>
@@ -126,7 +126,7 @@ export default function CreateLabModal({ open, onClose, onCreated, courseId, cou
 
           <div style={label}>
             <span style={{ paddingLeft: 6 }}>Description</span>
-            <IllustratedTextarea value={form.description} onChange={(v) => set('description', v)} image="/lab-builder/lab-draw.png" imageWidth={70} hint="Discover something new..." height={126} hintSize={10} />
+            <IllustratedTextarea value={form.description} onChange={(v) => set('description', v)} image="/lab-builder/lab-draw.png" imageWidth={104} hint="Discover something new..." height={180} hintSize={12} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16, marginTop: 6 }}>
@@ -143,8 +143,8 @@ export default function CreateLabModal({ open, onClose, onCreated, courseId, cou
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span>Lab image</span>
-          <FileDrop file={form.image} onFile={(f) => set('image', f)} accept=".tar" image="/lab-builder/lab-port.png" imageWidth={128} imageHeight={84} hint="Placing Tar File for image builder" />
-          <p style={{ margin: '14px 0 0 4px', fontSize: 9, lineHeight: 1.45 }}>
+          <FileDrop file={form.image} onFile={(f) => set('image', f)} accept=".tar" image="/lab-builder/lab-port.png" imageWidth={210} imageHeight={138} hint="Placing Tar File for image builder" height={230} />
+          <p style={{ margin: '14px 0 0 4px', fontSize: 11, lineHeight: 1.5 }}>
             Please note that : Lab will take 1 hour to build up and organize , we'll send back status via email after anything is completed.
             The lab stays as a draft until the image passes the security scan, then publish it from Lab reviewing.
           </p>
