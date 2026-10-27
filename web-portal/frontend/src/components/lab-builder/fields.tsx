@@ -25,11 +25,12 @@ export function IconInput({ icon, value, onChange, placeholder }: { icon: ReactN
   );
 }
 
-/** Textarea that shows an illustration + hint while empty. */
+/** Textarea that shows an illustration + hint while empty — หายไปทันทีที่กดเข้าไปพิมพ์ */
 export function IllustratedTextarea({ value, onChange, image, imageWidth, hint, height = 246, hintSize = 13 }: { value: string; onChange: (v: string) => void; image: string; imageWidth: number; hint: string; height?: number; hintSize?: number }) {
+  const [focused, setFocused] = useState(false);
   return (
-    <div style={{ position: 'relative', height, border: `1px solid ${colors.inputBorder}`, borderRadius: 8, overflow: 'hidden' }}>
-      {!value && (
+    <div style={{ position: 'relative', height, border: `1px solid ${focused ? colors.primary : colors.inputBorder}`, borderRadius: 8, overflow: 'hidden' }}>
+      {!value && !focused && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, pointerEvents: 'none' }}>
           <img src={image} alt="" style={{ width: imageWidth, height: 'auto' }} />
           <span style={{ fontSize: hintSize, color: colors.text }}>{hint}</span>
@@ -39,6 +40,8 @@ export function IllustratedTextarea({ value, onChange, image, imageWidth, hint, 
         aria-label={hint}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, outline: 'none', resize: 'none', padding: '14px 16px', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.5, color: colors.text, background: 'transparent' }}
       />
     </div>
@@ -72,7 +75,7 @@ export function FileDrop({ file, onFile, accept, image, imageWidth, imageHeight,
         style={{ height, border: `1px solid ${dragging ? colors.primary : colors.inputBorder}`, borderRadius: 8, background: dragging ? '#F2FAFE' : '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer' }}
       >
         <img src={image} alt="" style={{ width: imageWidth, height: imageHeight ?? 'auto', objectFit: 'cover' }} />
-        <span style={{ fontSize: 10 }}>{file?.name ?? hint}</span>
+        <span style={{ fontSize: 12 }}>{file?.name ?? hint}</span>
       </div>
       <input ref={ref} type="file" accept={accept} hidden onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
     </>

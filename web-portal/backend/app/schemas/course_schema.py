@@ -69,3 +69,12 @@ class CourseUpdateRequest(CamelModel):
     background_key: BackgroundKey | None = None
     icon_key: IconKey | None = None
     announcement_ids: list[UUID] | None = Field(None, min_length=1)
+
+
+class CourseDocumentResponse(CamelModel):
+    """เอกสารของวิชา (ไม่ผูก lab) — ดาวน์โหลดที่ GET /courses/{course_id}/documents/{id}/file"""
+    id: UUID
+    title: str
+    size_bytes: int
+    created_at: datetime | None = None
+    uploader_name: str | None = None

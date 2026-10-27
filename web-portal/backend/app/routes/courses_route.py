@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import (
+    Form,
     APIRouter,
     Depends,
     File,
@@ -18,6 +19,7 @@ from app.models.user import User, UserRole
 from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
 from app.schemas.course_schema import (
+    CourseDocumentResponse,
     AnnouncementResponse,
     AnnouncementCreateRequest,
     AnnouncementUpdateRequest,
@@ -28,6 +30,7 @@ from app.schemas.course_schema import (
     EnrolledStudentResponse,
 )
 from app.services.courses_service import CourseService
+from app.services.course_document_service import CourseDocumentService
 from app.controllers.course_controller import CourseController
 from app.middlewares.request_validation import require_non_empty_body
 from app.adapters.local_storage import local_storage
@@ -421,3 +424,78 @@ def get_course_students(
         )
         for user, enrollment in rows
     ]
+
+
+# ---------- เอกสารของวิชา (ไม่ผูก lab) ----------
+
+def get_course_document_service(db: Session = Depends(get_db)) -> CourseDocumentService:
+    return CourseDocumentService(db)
+
+
+def course_document_response(doc) -> CourseDocumentResponse:
+    return CourseDocumentResponse(
+        id=doc.id,
+        title=doc.title,
+        size_bytes=doc.size_bytes,
+        created_at=doc.created_at,
+        uploader_name=doc.uploader.name if doc.uploader else None,
+    )
+
+
+@router.get(
+    "/{course_id}/documents",
+    response_model=list[CourseDocumentResponse],
+    dependencies=[Depends(verify_permission("courses:read:self", context_policy=course_policy))],
+)
+def list_course_documents(
+    course_id: UUID,
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    """เอกสารของวิชา (นักศึกษาที่ลงเรียน / ผู้สอน / admin)"""
+    return [course_document_response(doc) for doc in service.list(course_id)]
+
+
+@router.post(
+    "/{course_id}/documents",
+    response_model=CourseDocumentResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_permission("courses:update:course", context_policy=course_policy))],
+)
+def upload_course_document(
+    course_id: UUID,
+    title: str = Form(""),
+    document: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    """อัปโหลด PDF เป็นเอกสารของวิชา (ผู้สอนวิชานี้ / admin) ไม่ใส่ title = ใช้ชื่อไฟล์"""
+    doc = service.upload(course_id, current_user, title, document.filename or "", document)
+    return course_document_response(doc)
+
+
+@router.get(
+    "/{course_id}/documents/{document_id}/file",
+    dependencies=[Depends(verify_permission("courses:read:self", context_policy=course_policy))],
+)
+def get_course_document_file(
+    course_id: UUID,
+    document_id: UUID,
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    doc, path = service.file_path(course_id, document_id)
+    # ชื่อไฟล์ตอนดาวน์โหลด = ชื่อเอกสาร (ตัดอักขระที่ใส่ใน header ไม่ได้)
+    safe = "".join(ch for ch in doc.title if ch.isascii() and ch not in '"\\\r\n') or "document"
+    return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{safe}.pdf"'})
+
+
+@router.delete(
+    "/{course_id}/documents/{document_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_permission("courses:update:course", context_policy=course_policy))],
+)
+def delete_course_document(
+    course_id: UUID,
+    document_id: UUID,
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    service.delete(course_id, document_id)

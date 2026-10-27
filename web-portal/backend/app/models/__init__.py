@@ -13,6 +13,7 @@ from .usage_record import UsageRecord
 from .quota import Quota, QuotaPeriod
 from .quota_reservation import QuotaReservation
 from .announcement import Announcement
+from .course_document import CourseDocument
 from .rbac import Permission, Role, RolePermission, UserRoleAssignment
 from .class_schedule import ClassSchedule
 from .class_slot import ClassSlot, ClassSlotStatus
@@ -47,6 +48,7 @@ __all__ = [
     "QuotaPeriod",
     "QuotaReservation",
     "Announcement",
+    "CourseDocument",
     "Role",
     "Permission",
     "UserRole",
