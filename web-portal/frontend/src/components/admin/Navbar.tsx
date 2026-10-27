@@ -40,26 +40,43 @@ export default function Navbar() {
       </nav>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>{user?.email}</span>
+        {/* แบบเดียวกับ Navigation ของนักศึกษา / อาจารย์: รูปโปรไฟล์ + ชื่อ ไม่มีกรอบ — กดแล้ว logout เหมือนเดิม */}
         <button
           onClick={onLogout}
           title="Logout"
           style={{
-            width: 36,
-            height: 36,
-            borderRadius: '50%',
-            border: '1px solid rgba(255,255,255,0.35)',
+            border: 0,
             background: 'none',
+            padding: 0,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
+            gap: 8,
             cursor: 'pointer',
+            color: 'rgba(255,255,255,0.9)',
+            fontFamily: 'inherit',
+            fontSize: 13,
+            fontWeight: 500,
           }}
         >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="2">
-            <circle cx="12" cy="8" r="4" />
-            <path d="M4 20c0-4 3.5-6 8-6s8 2 8 6" />
-          </svg>
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 20c0-4 3.5-6 8-6s8 2 8 6" />
+            </svg>
+          </span>
+          <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.name || user?.email}
+          </span>
         </button>
       </div>
     </div>
