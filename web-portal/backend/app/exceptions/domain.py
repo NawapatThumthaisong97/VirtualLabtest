@@ -129,6 +129,11 @@ class InvalidLabImageError(ValidationError):
     code = "invalid_lab_image"
 
 
+class LabImageNotReadyError(ValidationError):
+    """publish lab ที่ image ยังสแกนไม่ผ่าน (นักศึกษาจะเปิด lab ไม่ได้)"""
+    code = "lab_image_not_ready"
+
+
 # ---------- 500 ----------
 class InternalServerError(DomainError):
     """Internal server error"""

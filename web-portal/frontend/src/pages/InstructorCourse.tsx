@@ -5,15 +5,23 @@
  * หน้าวิชาฝั่งอาจารย์ที่กดมาจาก Instructor Console — โครงเดียวกับหน้า course ของนักศึกษา
  * (Documents / Announcement / ตาราง lab) ต่างกันที่มีปุ่มเพิ่มของแต่ละการ์ด
  * และตาราง lab ไม่มี Start/Stop กดแถวแล้วค่อยกางคำอธิบาย
- * ปุ่มเพิ่มตอนนี้ยังพาไปหน้า /instructor เดิม (ฟอร์มจริงอยู่ที่นั่น) จนกว่าจะ redesign ฟอร์ม
+ * ปุ่มเพิ่มเปิด modal ของ Pete (components/lab-builder) lab ใหม่เป็น draft เสมอ
+ * กด Publish ที่แถวของ lab หลัง image สแกนผ่าน (backend กันไว้อีกชั้น)
  */
 import { Fragment, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
 import type { LabStatus, LabSummary } from '../services/lab';
+import { apiErrorMessage, isImageReady, labImageService } from '../services/labImage';
 import DashboardHeader from '../components/admin/DashboardHeader';
+import ScanStatusBadge from '../components/instructor/ScanStatusBadge';
+import CreateLabModal from '../components/lab-builder/CreateLabModal';
+import DocumentModal from '../components/lab-builder/DocumentModal';
+import AnnouncementModal from '../components/lab-builder/AnnouncementModal';
+
+type ModalKind = 'lab' | 'document' | 'announcement' | null;
 
 type LabTab = 'all' | 'reviewing';
 
@@ -29,7 +37,8 @@ const STATUS_CLASS: Record<LabStatus, string> = {
   archived: 'bg-gray-100 text-gray-600',
 };
 
-const addLink = 'text-[0.92rem] font-medium text-blue-600 no-underline hover:underline';
+const addButton =
+  'cursor-pointer border-0 bg-transparent p-0 text-[0.92rem] font-medium text-blue-600 hover:underline';
 
 function formatDue(dueAt: string | null) {
   return dueAt ? new Date(dueAt).toLocaleDateString('en-GB') : '-';
@@ -39,6 +48,8 @@ export default function InstructorCoursePage() {
   const { courseId = '' } = useParams<{ courseId: string }>();
   const [tab, setTab] = useState<LabTab>('all');
   const [openLabId, setOpenLabId] = useState<string | null>(null);
+  const [modal, setModal] = useState<ModalKind>(null);
+  const queryClient = useQueryClient();
 
   const { data: course, isPending, isError } = useQuery({
     queryKey: ['course-detail', courseId],
@@ -50,6 +61,27 @@ export default function InstructorCoursePage() {
     queryKey: ['course-labs', courseId],
     queryFn: () => labService.listByCourse(courseId),
     enabled: Boolean(courseId),
+  });
+
+  // สถานะสแกนของ image ที่ผูกกับ lab — รีเฟรชทุก 10 วิ ระหว่างที่ยังมีตัวที่สแกนไม่จบ
+  const { data: images = [] } = useQuery({
+    queryKey: ['lab-images', courseId],
+    queryFn: () => labImageService.listByCourse(courseId),
+    enabled: Boolean(courseId),
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((image) => image.status === 'pending') ? 10_000 : false,
+  });
+  const imageById = useMemo(() => new Map(images.map((image) => [image.id, image])), [images]);
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['course-detail', courseId] });
+    queryClient.invalidateQueries({ queryKey: ['course-labs', courseId] });
+    queryClient.invalidateQueries({ queryKey: ['lab-images', courseId] });
+  };
+
+  const publish = useMutation({
+    mutationFn: (labId: string) => labService.update(labId, { status: 'published' }),
+    onSuccess: refresh,
   });
 
   const documents = useMemo(
@@ -68,9 +100,8 @@ export default function InstructorCoursePage() {
     );
   }
 
-  const labRows = labs
-    .filter((lab) => tab === 'all' || lab.status === 'draft')
-    .sort((a, b) => a.orderNo - b.orderNo);
+  const sortedLabs = [...labs].sort((a, b) => a.orderNo - b.orderNo);
+  const labRows = sortedLabs.filter((lab) => tab === 'all' || lab.status === 'draft');
 
   return (
     <div className="min-h-screen w-full bg-gray-50">
@@ -91,7 +122,7 @@ export default function InstructorCoursePage() {
           <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-5">
               <h2 className="m-0 text-lg font-bold text-gray-800">Documents</h2>
-              <Link to="/instructor" className={addLink}>Add new document +</Link>
+              <button type="button" onClick={() => setModal('document')} className={addButton}>Add new document +</button>
             </div>
             <ul className="m-0 max-h-[280px] list-none overflow-y-auto p-0 px-5">
               {documents.length > 0 ? (
@@ -120,7 +151,7 @@ export default function InstructorCoursePage() {
           <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-5">
               <h2 className="m-0 text-lg font-bold text-gray-800">Announcement</h2>
-              <Link to="/instructor" className={addLink}>new post +</Link>
+              <button type="button" onClick={() => setModal('announcement')} className={addButton}>new post +</button>
             </div>
             <div className="max-h-[280px] overflow-y-auto px-5">
               {course.announcements.length > 0 ? (
@@ -143,7 +174,7 @@ export default function InstructorCoursePage() {
         <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-5">
             <h2 className="m-0 text-lg font-bold text-gray-800">Lab Image</h2>
-            <Link to="/instructor" className={`inline-flex items-center gap-2 ${addLink}`}>
+            <button type="button" onClick={() => setModal('lab')} className={`inline-flex items-center gap-2 ${addButton}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="text-gray-700">
                 <rect x="3" y="3" width="7" height="7" />
                 <rect x="14" y="3" width="7" height="7" />
@@ -151,7 +182,7 @@ export default function InstructorCoursePage() {
                 <path d="M17.5 14v7M14 17.5h7" />
               </svg>
               create new image
-            </Link>
+            </button>
           </div>
 
           <div className="flex">
@@ -205,15 +236,34 @@ export default function InstructorCoursePage() {
                             <tr>
                               <td colSpan={3} className="border-b border-gray-200 px-8 py-4">
                                 <div className="flex items-end justify-between gap-6">
-                                  <p className="m-0 text-[0.8rem] leading-relaxed text-gray-500">
-                                    Brief : {lab.description || 'ยังไม่มีคำอธิบายสำหรับ lab นี้'}
-                                  </p>
-                                  <Link
-                                    to={`/labs/${lab.id}`}
-                                    className="shrink-0 bg-blue-600 px-6 py-1.5 text-[0.8rem] text-white no-underline hover:bg-blue-700"
-                                  >
-                                    Instruction
-                                  </Link>
+                                  <div className="flex flex-col gap-2">
+                                    <p className="m-0 text-[0.8rem] leading-relaxed text-gray-500">
+                                      Brief : {lab.description || 'ยังไม่มีคำอธิบายสำหรับ lab นี้'}
+                                    </p>
+                                    <LabImageLine image={lab.imageId ? imageById.get(lab.imageId) : undefined} hasImage={Boolean(lab.imageId)} />
+                                    {publish.isError && publish.variables === lab.id && (
+                                      <p className="m-0 text-[0.78rem] text-red-600">{apiErrorMessage(publish.error)}</p>
+                                    )}
+                                  </div>
+                                  <div className="flex shrink-0 gap-2">
+                                    {lab.status === 'draft' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => publish.mutate(lab.id)}
+                                        disabled={!canPublish(lab, imageById) || (publish.isPending && publish.variables === lab.id)}
+                                        title={canPublish(lab, imageById) ? undefined : 'image ต้องสแกนผ่านก่อน'}
+                                        className="cursor-pointer border border-blue-600 bg-white px-5 py-1.5 text-[0.8rem] text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        Publish
+                                      </button>
+                                    )}
+                                    <Link
+                                      to={`/labs/${lab.id}`}
+                                      className="bg-blue-600 px-6 py-1.5 text-[0.8rem] text-white no-underline hover:bg-blue-700"
+                                    >
+                                      Instruction
+                                    </Link>
+                                  </div>
                                 </div>
                               </td>
                             </tr>
@@ -234,6 +284,30 @@ export default function InstructorCoursePage() {
           </div>
         </section>
       </main>
+
+      <CreateLabModal open={modal === 'lab'} onClose={() => setModal(null)} onCreated={refresh} courseId={course.id} courseCode={course.code} />
+      <DocumentModal open={modal === 'document'} onClose={() => setModal(null)} onUploaded={refresh} labs={sortedLabs} />
+      <AnnouncementModal open={modal === 'announcement'} onClose={() => setModal(null)} onPosted={refresh} courseId={course.id} />
+    </div>
+  );
+}
+
+type ImageMap = Map<string, Parameters<typeof isImageReady>[0]>;
+
+/** publish ได้: lab อ่านอย่างเดียว (ไม่มี image) หรือ image สแกนผ่านแล้ว */
+function canPublish(lab: LabSummary, imageById: ImageMap) {
+  if (!lab.imageId) return true;
+  const image = imageById.get(lab.imageId);
+  return Boolean(image && isImageReady(image));
+}
+
+function LabImageLine({ image, hasImage }: { image?: Parameters<typeof isImageReady>[0]; hasImage: boolean }) {
+  if (!hasImage) return <p className="m-0 text-[0.78rem] text-gray-400">ไม่มี image (lab อ่านอย่างเดียว)</p>;
+  if (!image) return <p className="m-0 text-[0.78rem] text-gray-400">กำลังโหลดสถานะ image...</p>;
+  return (
+    <div className="flex items-center gap-2 text-[0.78rem] text-gray-600">
+      <span className="font-mono">{image.repository}:{image.tag}</span>
+      <ScanStatusBadge image={image} />
     </div>
   );
 }

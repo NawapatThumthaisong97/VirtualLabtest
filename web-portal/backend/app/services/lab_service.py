@@ -6,15 +6,22 @@ from sqlalchemy.exc import IntegrityError
 
 from app.adapters.local_storage import local_storage
 from app.exceptions.domain import (
+    CourseNotFoundError,
     DuplicateOrderNoError,
+    ForbiddenError,
     InvalidLabImageError,
     LabDocNotFoundError,
+    LabImageNotReadyError,
     LabNotFoundError,
+    ValidationError,
 )
+from app.models.enrollment import RoleInCourse
 from app.models.lab import Lab, LabStatus
-from app.models.lab_image import LabImage
+from app.models.lab_image import ImageStatus, LabImage
 from app.models.lab_progress import ProgressStatus
+from app.models.user import User, UserRole
 from app.repositories.lab_repository import LabRepository
+from app.repositories.rbac_repository import RBACRepository
 from app.schemas import LabCreateRequest, LabUpdateRequest, LabResponse
 
 
@@ -72,10 +79,38 @@ class LabService:
         if image is None or image.course_id != course_id:
             raise InvalidLabImageError(f"Lab image {image_id} does not belong to this course")
 
+    def _ensure_publishable(self, lab: Lab) -> None:
+        """publish ได้เมื่อไม่มี image (lab อ่านอย่างเดียว) หรือ image สแกนผ่านแล้ว (APPROVED)
+
+        ฟอร์มอาจารย์ผูก image ตั้งแต่ตอนอัปโหลด .tar (ยังสแกนไม่จบ) เลยต้องกันตรงนี้
+        ไม่งั้น publish แล้วนักศึกษากด Start ได้ทั้งที่ image ยังไม่มีใน registry
+        """
+        if lab.status != LabStatus.PUBLISHED or lab.image_id is None:
+            return
+        image = self.db.get(LabImage, lab.image_id)
+        if image is None or image.status != ImageStatus.APPROVED:
+            raise LabImageNotReadyError("Lab image has not passed the security scan yet")
+
+    def _ensure_can_manage(self, user: User, course_id: UUID) -> None:
+        """admin ทุกวิชา / instructor ต้องเป็นผู้สร้างหรือ enroll เป็นผู้สอนวิชานี้ (เทียบ id ไม่ใช้ชื่อ)"""
+        repo = RBACRepository(self.db)
+        course = repo.find_active_course(course_id)
+        if course is None:
+            raise CourseNotFoundError(f"Course {course_id} not found")
+        if user.role == UserRole.ADMIN:
+            return
+        if course.created_by == user.id or repo.is_enrolled(user.id, course_id, RoleInCourse.INSTRUCTOR):
+            return
+        raise ForbiddenError("ไม่ได้เป็นผู้สอนของวิชานี้")
+
     # POST
     def create_lab(self, payload: LabCreateRequest) -> Lab:
         self._ensure_image_in_course(payload.image_id, payload.course_id)
-        lab = Lab(**payload.model_dump())
+        data = payload.model_dump()
+        if data["order_no"] is None:
+            data["order_no"] = self.lab_repo.next_order_no(payload.course_id)
+        lab = Lab(**data)
+        self._ensure_publishable(lab)
         try:
             self.lab_repo.save(lab)
             self.db.commit()
@@ -100,6 +135,12 @@ class LabService:
             self._ensure_image_in_course(data["image_id"], lab.course_id)
         for key, value in data.items():
             setattr(lab, key, value)
+        # เช็กหลัง setattr: ครอบทั้ง publish ตอนนี้ และเปลี่ยน image ของ lab ที่ publish อยู่แล้ว
+        try:
+            self._ensure_publishable(lab)
+        except LabImageNotReadyError:
+            self.db.rollback()
+            raise
 
         try:
             self.db.commit()
@@ -108,6 +149,35 @@ class LabService:
             raise DuplicateOrderNoError(
                 f"order_no {lab.order_no} already exists in course {lab.course_id}"
             ) from e
+        return lab
+
+    DOC_MAX_BYTES = 50 * 1024 * 1024
+
+    def save_lab_doc(self, lab_id: UUID, user: User, filename: str, source) -> Lab:
+        """บันทึกเอกสาร PDF ของ lab ลง local storage แล้วชี้ doc_url ไปที่ไฟล์นั้น
+
+        key มี lab_id อยู่แล้ว ไฟล์ชื่อเดียวกันของคนละ lab จึงไม่ทับกัน
+        อัปไฟล์ใหม่ซ้ำ = แทนของเดิม (doc_url มีได้ไฟล์เดียว)
+        """
+        lab = self.get_lab_by_id(lab_id)
+        self._ensure_can_manage(user, lab.course_id)
+
+        safe_filename = Path(filename or "").name
+        if not safe_filename.lower().endswith(".pdf"):
+            raise ValidationError("Only PDF documents are supported")
+
+        source.file.seek(0, 2)
+        size = source.file.tell()
+        source.file.seek(0)
+        if size == 0:
+            raise ValidationError("Document is empty")
+        if size > self.DOC_MAX_BYTES:
+            raise ValidationError("Document is larger than 50 MB")
+
+        key = f"labs/{lab.id}/{safe_filename}"
+        local_storage.save(key, source.file)
+        lab.doc_url = key
+        self.db.commit()
         return lab
 
     # DELETE
