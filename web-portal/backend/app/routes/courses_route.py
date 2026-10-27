@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import (
+    Form,
     APIRouter,
     Depends,
     File,
@@ -18,6 +19,7 @@ from app.models.user import User, UserRole
 from app.repositories.courses_repositories import CourseRepository
 from app.repositories.annoucement_repositories import AnnouncementRepository
 from app.schemas.course_schema import (
+    CourseDocumentResponse,
     AnnouncementResponse,
     AnnouncementCreateRequest,
     AnnouncementUpdateRequest,
@@ -25,8 +27,10 @@ from app.schemas.course_schema import (
     CourseDetailResponse,
     CourseResponse,
     CourseUpdateRequest,
+    EnrolledStudentResponse,
 )
 from app.services.courses_service import CourseService
+from app.services.course_document_service import CourseDocumentService
 from app.controllers.course_controller import CourseController
 from app.middlewares.request_validation import require_non_empty_body
 from app.adapters.local_storage import local_storage
@@ -248,30 +252,39 @@ def soft_delete_course(
 ):
     """
     ลบ course (soft delete หรือ hard delete ขึ้นอยู่กับเงื่อนไข)
-    - ถ้าไม่มี student enroll และไม่มี lab -> hard delete
-    - ถ้ามี student enroll หรือมี lab -> ห้ามลบ (409 Conflict)
+    - ไม่มี enrollment / lab / lab image / class schedule / class slot -> hard delete
+    - มีอย่างใดอย่างหนึ่ง -> ห้ามลบ (409 Conflict) พร้อมจำนวนที่ติดอยู่
     """
     from app.exceptions.domain import ConflictError
+    from app.models.class_schedule import ClassSchedule
+    from app.models.class_slot import ClassSlot
     from app.models.enrollment import Enrollment
     from app.models.lab import Lab
-    from sqlalchemy import select, exists
-    
-    # ตรวจสอบว่ามี enrollment หรือ lab หรือไม่
-    has_enrollments = db.execute(
-        select(exists().where(Enrollment.course_id == course_id))
-    ).scalar()
-    
-    has_labs = db.execute(
-        select(exists().where(Lab.course_id == course_id))
-    ).scalar()
-    
-    if has_enrollments or has_labs:
+    from app.models.lab_image import LabImage
+    from sqlalchemy import func, select
+
+    # ทุกตารางข้างล่างอ้าง courses.id อยู่ ลบวิชาก่อนเคลียร์ = ชน FK หรือข้อมูลหาย จึงบล็อกเป็น 409 พร้อมบอกว่าติดอะไร
+    checks = {
+        "enrolled students": Enrollment,
+        "labs": Lab,
+        "lab images": LabImage,
+        "class schedules": ClassSchedule,
+        "class slots": ClassSlot,
+    }
+    blockers = []
+    for label, model in checks.items():
+        count = db.execute(
+            select(func.count()).select_from(model).where(model.course_id == course_id)
+        ).scalar_one()
+        if count:
+            blockers.append(f"{count} {label}")
+
+    if blockers:
         raise ConflictError(
-            "Cannot delete course with enrolled students or existing labs. "
-            "Please remove all enrollments and labs before deleting."
+            f"Cannot delete course: it still has {', '.join(blockers)}. "
+            "Remove them before deleting the course."
         )
-    
-    # ถ้าไม่มี enrollment และไม่มี lab -> hard delete เลย
+
     controller.hard_delete_course(course_id)
 
 
@@ -373,3 +386,116 @@ def delete_announcement(
     """ลบ announcement (Hard Delete) - ต้องเป็น Instructor ที่สอนวิชานี้ หรือ Admin"""
     # RBAC + Policy เช็คสิทธิ์แล้ว, service เช็ค ownership ว่า announcement เป็นของ course_id นี้จริง
     controller.delete_announcement(course_id=course_id, announcement_id=announcement_id)
+
+
+@router.get("/{course_id}/students", response_model=list[EnrolledStudentResponse])
+def get_course_students(
+    course_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: User = Depends(verify_permission("courses:read:self", context_policy=course_policy)),
+):
+    """รายชื่อนักศึกษา (student / ta) ที่ลงทะเบียนวิชานี้ — เฉพาะ instructor ของวิชาหรือ admin"""
+    from sqlalchemy import select
+
+    from app.exceptions.domain import ForbiddenError
+    from app.models.enrollment import Enrollment, RoleInCourse
+
+    if current_user.role is UserRole.STUDENT:
+        raise ForbiddenError("Only instructors can view the student list")
+
+    rows = db.execute(
+        select(User, Enrollment)
+        .join(Enrollment, Enrollment.user_id == User.id)
+        .where(
+            Enrollment.course_id == course_id,
+            Enrollment.role_in_course.in_([RoleInCourse.STUDENT, RoleInCourse.TA]),
+        )
+        .order_by(User.student_id.asc().nulls_last(), User.name.asc())
+    ).all()
+    return [
+        EnrolledStudentResponse(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            student_id=user.student_id,
+            role_in_course=enrollment.role_in_course.value,
+            enrolled_at=enrollment.enrolled_at,
+        )
+        for user, enrollment in rows
+    ]
+
+
+# ---------- เอกสารของวิชา (ไม่ผูก lab) ----------
+
+def get_course_document_service(db: Session = Depends(get_db)) -> CourseDocumentService:
+    return CourseDocumentService(db)
+
+
+def course_document_response(doc) -> CourseDocumentResponse:
+    return CourseDocumentResponse(
+        id=doc.id,
+        title=doc.title,
+        size_bytes=doc.size_bytes,
+        created_at=doc.created_at,
+        uploader_name=doc.uploader.name if doc.uploader else None,
+    )
+
+
+@router.get(
+    "/{course_id}/documents",
+    response_model=list[CourseDocumentResponse],
+    dependencies=[Depends(verify_permission("courses:read:self", context_policy=course_policy))],
+)
+def list_course_documents(
+    course_id: UUID,
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    """เอกสารของวิชา (นักศึกษาที่ลงเรียน / ผู้สอน / admin)"""
+    return [course_document_response(doc) for doc in service.list(course_id)]
+
+
+@router.post(
+    "/{course_id}/documents",
+    response_model=CourseDocumentResponse,
+    status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_permission("courses:update:course", context_policy=course_policy))],
+)
+def upload_course_document(
+    course_id: UUID,
+    title: str = Form(""),
+    document: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    """อัปโหลด PDF เป็นเอกสารของวิชา (ผู้สอนวิชานี้ / admin) ไม่ใส่ title = ใช้ชื่อไฟล์"""
+    doc = service.upload(course_id, current_user, title, document.filename or "", document)
+    return course_document_response(doc)
+
+
+@router.get(
+    "/{course_id}/documents/{document_id}/file",
+    dependencies=[Depends(verify_permission("courses:read:self", context_policy=course_policy))],
+)
+def get_course_document_file(
+    course_id: UUID,
+    document_id: UUID,
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    doc, path = service.file_path(course_id, document_id)
+    # ชื่อไฟล์ตอนดาวน์โหลด = ชื่อเอกสาร (ตัดอักขระที่ใส่ใน header ไม่ได้)
+    safe = "".join(ch for ch in doc.title if ch.isascii() and ch not in '"\\\r\n') or "document"
+    return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{safe}.pdf"'})
+
+
+@router.delete(
+    "/{course_id}/documents/{document_id}",
+    status_code=http_status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_permission("courses:update:course", context_policy=course_policy))],
+)
+def delete_course_document(
+    course_id: UUID,
+    document_id: UUID,
+    service: CourseDocumentService = Depends(get_course_document_service),
+):
+    service.delete(course_id, document_id)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { homeFor } from '../utils/homePath';
 
 export default function SSOCallbackPage() {
   const [searchParams] = useSearchParams();
@@ -31,9 +32,9 @@ export default function SSOCallbackPage() {
       try {
         setStatusMessage('Exchanging authorization credentials…');
         const callbackUri = `${window.location.origin}/auth/callback`;
-        await handleSsoCallback(code, callbackUri);
+        const loggedIn = await handleSsoCallback(code, callbackUri);
         setStatusMessage('Sign-in successful! Redirecting…');
-        navigate('/', { replace: true });
+        navigate(homeFor(loggedIn.role), { replace: true });
       } catch (err: unknown) {
         let msg = 'University SSO authentication failed.';
         if (typeof err === 'object' && err !== null && 'response' in err) {

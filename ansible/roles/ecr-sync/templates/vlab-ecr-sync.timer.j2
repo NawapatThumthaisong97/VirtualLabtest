@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Sync camp registry images to ECR periodically
+
+[Timer]
+OnBootSec=2min
+OnActiveSec=30s
+# นับจากรอบก่อน "จบ" รอบที่ copy นานจึงไม่ซ้อนกัน
+OnUnitInactiveSec={{ ecr_sync_interval }}
+RandomizedDelaySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -70,6 +70,11 @@ class QuotaExceededError(ConflictError):
     code = "quota_exceeded"
 
 
+class CloudBurstDisabledError(ConflictError):
+    """admin ปิด burst ขึ้น AWS (PATCH /admin/cloud/controls) เช่นเกิน budget"""
+    code = "cloud_burst_disabled"
+
+
 # ---------- 401 ----------
 class UnauthorizedError(DomainError):
     """ยังไม่ได้ล็อกอิน หรือ token ใช้ไม่ได้"""
@@ -117,6 +122,16 @@ class InvalidSessionStateError(ValidationError):
 
 class LabImageMissingError(ValidationError):
     code = "lab_image_missing"
+
+
+class InvalidLabImageError(ValidationError):
+    """image ที่จะผูกกับ lab ไม่มีอยู่ หรือเป็นของวิชาอื่น"""
+    code = "invalid_lab_image"
+
+
+class LabImageNotReadyError(ValidationError):
+    """publish lab ที่ image ยังสแกนไม่ผ่าน (นักศึกษาจะเปิด lab ไม่ได้)"""
+    code = "lab_image_not_ready"
 
 
 # ---------- 500 ----------

@@ -64,6 +64,8 @@ tailscale.key
 *.json
 !package.json
 !package-lock.json
+# trust policy ของ skopeo ใน scanner image (ไม่ใช่ credential) — ไม่มีไฟล์นี้ role scan-runner-image build ไม่ได้
+!scan-runner/policy.json
 !tsconfig.json
 !tsconfig.*.json
 !.eslintrc.json

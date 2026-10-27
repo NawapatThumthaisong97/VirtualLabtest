@@ -4,36 +4,6 @@
 	color: #20201e;
 }
 
-.header {
-	width: 100%;
-	border-bottom: 1px solid #deddd8;
-	background: rgb(255 253 253 / 96%);
-	box-shadow: 0 3px 7px rgb(40 43 48 / 13%);
-}
-
-.headerInner {
-	display: flex;
-	width: min(100%, 1200px);
-	height: 3.55rem;
-	margin: 0 auto;
-	align-items: center;
-	gap: 0.55rem;
-	padding: 0 1.5rem;
-}
-
-.headerLogo {
-	width: 1.95rem;
-	height: 1.95rem;
-	object-fit: contain;
-}
-
-.header h1 {
-	margin: 0;
-	font-size: 1.25rem;
-	font-weight: 700;
-	line-height: 1;
-}
-
 .content {
 	padding: 2.75rem clamp(1.25rem, 5vw, 4rem) 5rem;
 }

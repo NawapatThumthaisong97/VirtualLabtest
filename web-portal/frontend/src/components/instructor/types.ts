@@ -1,4 +1,4 @@
-export type Tab = 'overview' | 'announcement' | 'labs' | 'students'
+export type Tab = 'overview' | 'announcement' | 'labs' | 'labImages' | 'students'
 
 export type Announcement = { 
   id: string

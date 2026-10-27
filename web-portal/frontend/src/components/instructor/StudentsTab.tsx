@@ -1,85 +1,127 @@
-import { ChevronDown, MoreHorizontal, Search, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Search, Users } from 'lucide-react'
 import Card from './Card'
 import SectionHeader from './SectionHeader'
-import { iconButton, secondary } from './styles'
+import { coursesService, type EnrolledStudent } from '../../services/courses'
+import { useToast } from '../../hooks/useToast'
 
-const students = [
-  ['AM', 'Anya Mehta', 'anya.m@vlab.ac.th', '66100421', '01', '12 Aug 2026', 'Active'], 
-  ['KC', 'Krit Chaiyasit', 'krit.c@vlab.ac.th', '66100436', '01', '12 Aug 2026', 'Active'], 
-  ['PL', 'Pimchanok Lertchai', 'pimchanok.l@vlab.ac.th', '66100502', '02', '13 Aug 2026', 'Active'], 
-  ['NR', 'Napat Rattanakul', 'napat.r@vlab.ac.th', '66100527', '02', '14 Aug 2026', 'At risk'], 
-  ['TS', 'Tara Somboon', 'tara.s@vlab.ac.th', '66100611', '02', '18 Aug 2026', 'Invited']
-]
+interface StudentsTabProps {
+  courseId: string
+}
 
-export default function StudentsTab() {
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || '?'
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+
+export default function StudentsTab({ courseId }: StudentsTabProps) {
+  const [students, setStudents] = useState<EnrolledStudent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState('')
+  const toast = useToast()
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    coursesService
+      .getStudents(courseId)
+      .then((data) => !cancelled && setStudents(data))
+      .catch((error) => {
+        console.error('Failed to fetch students:', error)
+        if (!cancelled) {
+          setStudents([])
+          toast.error('Failed to load students', error?.response?.data?.detail ?? 'Please try again.')
+        }
+      })
+      .finally(() => !cancelled && setLoading(false))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return students
+    return students.filter((s) =>
+      [s.name, s.email, s.studentId ?? ''].some((value) => value.toLowerCase().includes(q)),
+    )
+  }, [students, query])
+
   return (
     <Card>
-      <SectionHeader 
-        icon={Users} 
-        title="Enrolled students" 
-        description="48 students across 2 sections"
+      <SectionHeader
+        icon={Users}
+        title="Enrolled students"
+        description={`${students.length} ${students.length === 1 ? 'student' : 'students'} in this course`}
       />
-      
+
       <div className="mt-5 flex flex-wrap gap-3">
         <label className="relative min-w-56 flex-1">
-          <Search className="absolute left-3 top-3 text-slate-400" size={16} />
-          <input 
-            className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" 
-            placeholder="Search name, ID, or email" 
+          <span className="sr-only">Search students</span>
+          <Search className="absolute left-3 top-3 text-slate-400" size={16} aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            placeholder="Search name, ID, or email"
           />
         </label>
-        <button className={secondary}>
-          All sections <ChevronDown size={15} />
-        </button>
       </div>
-      
-      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
-        <table className="w-full min-w-[700px] text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Student</th>
-              <th>Student ID</th>
-              <th>Section</th>
-              <th>Enrolled</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {students.map((student) => (
-              <tr key={student[3]} className="border-t border-slate-200 hover:bg-slate-50">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex size-8 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
-                      {student[0]}
-                    </span>
-                    <div>
-                      <p className="font-semibold text-slate-700">{student[1]}</p>
-                      <p className="text-[11px] text-slate-400">{student[2]}</p>
-                    </div>
-                  </div>
-                </td>
-                <td>{student[3]}</td>
-                <td>{student[4]}</td>
-                <td>{student[5]}</td>
-                <td>
-                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
-                    {student[6]}
-                  </span>
-                </td>
-                <td>
-                  <button 
-                    className={iconButton} 
-                    aria-label={`More actions for ${student[1]}`}
-                  >
-                    <MoreHorizontal size={15} />
-                  </button>
-                </td>
+
+      {loading ? (
+        <div className="mt-5 py-12 text-center text-sm text-slate-400">Loading students...</div>
+      ) : filtered.length === 0 ? (
+        <div className="mt-5 rounded-xl border border-dashed border-slate-300 py-12 text-center">
+          <Users className="mx-auto text-slate-300" size={32} aria-hidden />
+          <p className="mt-3 text-sm font-semibold text-slate-600">
+            {students.length === 0 ? 'No students enrolled yet' : 'No students match your search'}
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full min-w-[600px] text-left text-xs">
+            <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3">Student</th>
+                <th>Student ID</th>
+                <th>Role</th>
+                <th>Enrolled</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map((student) => (
+                <tr key={student.id} className="border-t border-slate-200 hover:bg-slate-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-8 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700">
+                        {initials(student.name)}
+                      </span>
+                      <div>
+                        <p className="font-semibold text-slate-700">{student.name}</p>
+                        <p className="text-[11px] text-slate-400">{student.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{student.studentId ?? '—'}</td>
+                  <td>
+                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase text-emerald-700">
+                      {student.roleInCourse}
+                    </span>
+                  </td>
+                  <td>{formatDate(student.enrolledAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   )
 }

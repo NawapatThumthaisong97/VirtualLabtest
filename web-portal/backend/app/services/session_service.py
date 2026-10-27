@@ -18,6 +18,8 @@ from app.services.warm_pod_service import (DIRECT_POD_PREFIX, LAB_LABEL, WARM_PO
                                            warm_endpoints)
 
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
+from app.models.class_slot import ClassSlot, ClassSlotStatus
+from app.services import admin_billing_service, admin_log_service
 from app.models.user import User
 from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
@@ -34,6 +36,7 @@ from app.exceptions.domain import (
     SessionAlreadyExistsError,
     ClusterOperationError,
     ForbiddenError,
+    CloudBurstDisabledError,
 )
 from app.utils.logger import logger
 
@@ -365,6 +368,11 @@ class SessionService:
                 return self._launch_direct_pod(user_id, lab, lab_image, node)
             # LAB_MACHINE_LAUNCH=skypilot: ทางเดิม SkyPilot in-cluster pin เครื่องนั้น (ข้างล่าง)
 
+        if run_target == RunTarget.AWS and not admin_billing_service.is_burst_enabled(self.db):
+            raise CloudBurstDisabledError(
+                "ปิดการเปิด lab บน AWS ชั่วคราว (admin ปิด burst เช่นใช้เกิน budget) — ใช้เครื่องในห้องแลปแทน"
+            )
+
         cluster_name = self._cluster_name(lab_image)
         is_cloud = run_target == RunTarget.AWS
         pin_node = node[0] if node is not None and settings.LAB_ISOLATION_ENABLED else None
@@ -397,6 +405,8 @@ class SessionService:
             started_at=datetime.utcnow(),
             is_remote=False,
             is_cloud=is_cloud,
+
+            class_slot_id=self._current_slot_id(lab),
         )
         self.db.add(new_session)
         self.db.commit()
@@ -447,6 +457,25 @@ class SessionService:
             "started_at": new_session.started_at,
             "expires_at": new_session.expires_at,
         }
+
+    def _current_slot_id(self, lab: Lab) -> Optional[UUID]:
+        """คาบของวิชานี้ที่กำลังเรียนอยู่ตอนนี้ (หน้า admin ใช้บอกว่าห้องไหนใช้โดยคาบอะไร) ไม่มี = None
+
+        วิชาเดียวกันเวลาทับกันไม่ได้ (ex_class_slots_no_overlap) จึงมีอย่างมากคาบเดียว
+        """
+        now = datetime.now(timezone.utc)
+        slot = (
+            self.db.query(ClassSlot.id)
+            .filter(
+                ClassSlot.course_id == lab.course_id,
+                ClassSlot.starts_at <= now,
+                ClassSlot.ends_at > now,
+                ClassSlot.status != ClassSlotStatus.CANCELLED,
+                ClassSlot.deleted_at.is_(None),
+            )
+            .first()
+        )
+        return slot.id if slot else None
 
     def _client_node(self, client_ip: Optional[str], always: bool = False) -> Optional[tuple[str, str]]:
         """(ชื่อ node, IP) ถ้า IP ของ request ตรงกับ InternalIP ของ worker ที่ Ready (= นั่งเครื่องนั้นจริง)
@@ -508,6 +537,7 @@ class SessionService:
             expires_at=now + timedelta(minutes=lab_image.lifespan_minutes or 60),
             is_remote=False,
             is_cloud=False,
+            class_slot_id=self._current_slot_id(lab),
         )
         try:
             self.db.add(session)
@@ -582,6 +612,7 @@ class SessionService:
             started_at=datetime.utcnow(),
             is_remote=False,
             is_cloud=False,
+            class_slot_id=self._current_slot_id(lab),
         )
         self.db.add(session)
         self.db.commit()
@@ -681,6 +712,9 @@ class SessionService:
         session.status = status
         session.ended_at = datetime.utcnow()
         session.end_reason = reason
+        # ชั่วโมงที่ใช้ + ค่า AWS ประมาณ (หน้า admin billing) commit พร้อมสถานะ
+        admin_billing_service.record_usage(self.db, session)
+        admin_log_service.log_session_end(self.db, session, reason)
         self.db.commit()
 
     def _gone_reason(self, session: SessionModel) -> SessionEndReason:

@@ -81,7 +81,23 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: Optional[str] = None
     R2_SECRET_ACCESS_KEY: Optional[str] = None
     R2_BUCKET_NAME: Optional[str] = None
+    # ไม่ตั้ง = https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com
     R2_ENDPOINT_URL: Optional[str] = None
+    # อายุ presigned PUT URL ของไฟล์ lab image (.tar) — R2 รับได้ 1 วินาทีถึง 7 วัน
+    R2_PRESIGN_EXPIRES_SECONDS: int = Field(default=3600, ge=60, le=604800)
+    # ต้องตรงกับ webhook_secret ใน terraform/cloudflare/r2-event-pipeline (Worker ส่งมาใน header Webhook-Secret)
+    # ไม่ตั้ง = webhook ปฏิเสธทุก request
+    R2_WEBHOOK_SECRET: Optional[str] = None
+    # presigned URL เป็น PUT ครั้งเดียว R2 รับได้สูงสุด 5 GiB - 5 MiB ต่อ request (ใหญ่กว่านี้ต้อง multipart)
+    LAB_IMAGE_MAX_ARCHIVE_BYTES: int = 5 * 1024**3 - 5 * 1024**2
+
+    @property
+    def r2_endpoint_url(self) -> Optional[str]:
+        if self.R2_ENDPOINT_URL:
+            return self.R2_ENDPOINT_URL
+        if self.R2_ACCOUNT_ID:
+            return f"https://{self.R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+        return None
     
     # Redis (Optional)
     REDIS_URL: Optional[str] = "redis://localhost:6379/0"
@@ -101,11 +117,75 @@ class Settings(BaseSettings):
     AWS_LAB_AMI: Optional[str] = None          # AMI bake เช่น vlab-bake-0.12.3.post1-r2
     AWS_INSTANCE_TYPE: str = "m7i-flex.large"  # บัญชี free plan สร้างได้แค่บางชนิด
     AWS_DISK_SIZE: int = 30                    # ไม่ใส่ SkyPilot จะใช้ 256 GB
+    # หน้า admin billing: ค่า EC2 ต่อชั่วโมงของ AWS_INSTANCE_TYPE (on-demand) + ดิสก์ — ใช้ประมาณค่าใช้จ่าย
+    # m7i-flex.large ap-southeast-1 = $0.1197 (catalog ของ SkyPilot ~/.sky/catalogs/v8/aws/vms.csv 2026-10-23)
+    # + gp3 30 GB × $0.096/GB-เดือน ÷ 730 ชม. ≈ $0.0039 → เปลี่ยน instance type ต้องแก้ค่านี้ด้วย
+    AWS_HOURLY_PRICE_USD: float = 0.1236
+    # budget AWS ต่อเดือน (USD) และเกณฑ์เตือน (%)
+    AWS_MONTHLY_BUDGET_USD: float = 200.0
+    AWS_BUDGET_ALERT_PCT: int = 80
+    # ยอดจริงจาก Cost Explorer (วันละครั้ง ครั้งละ $0.01) แทนค่าประมาณของวันที่ผ่านไปแล้ว — ปิดไว้เป็นค่าเริ่มต้น
+    # (เทส / dev ไม่ยิง AWS) prod เปิดผ่าน ansible บัญชีรวม → นับเฉพาะ resource ที่มี tag นี้
+    AWS_COST_EXPLORER_ENABLED: bool = False
+    AWS_COST_TAG_KEY: str = "skypilot-user"
+    AWS_COST_TAG_VALUE: str = "vlab-backend"
+    AWS_COST_LOOKBACK_DAYS: int = 62
+
+    # เมลแจ้งผลจองห้อง (หน้า /admin/scheduler) — Gmail: บัญชีที่เปิด 2FA + App Password, smtp.gmail.com:587 STARTTLS
+    # ไม่ตั้ง SMTP_USER = ไม่ส่ง (mail_status = skipped) — เปลี่ยนบัญชีผู้ส่งแก้แค่ค่าพวกนี้ใน group_vars/all.yml
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    MAIL_FROM_NAME: str = "Virtual Lab Team"
+    # ช่วงเทส: ส่งทุกฉบับไปที่อยู่นี้แทนผู้รับจริง (บอกผู้รับจริงในเนื้อเมล) — prod ปล่อยว่าง
+    MAIL_REDIRECT_TO: Optional[str] = None
+    # ส่งได้เฉพาะผู้รับในรายการ (คั่นด้วย , : เมลเต็ม หรือ @โดเมน) — ว่าง = ไม่ส่งให้ใครเลยนอกจาก MAIL_REDIRECT_TO
+    # "*" = ทุกคน (ใช้เมื่อบัญชีอาจารย์ใน DB เป็นของจริงทั้งหมดแล้ว — seed มีเมล @dome.tu.ac.th สมมติที่อาจเป็นของคนจริง)
+    MAIL_ALLOWED_RECIPIENTS: str = ""
     # ต้องเป็นแบบ dual-stack (...dkr-ecr.<region>.on.aws) เพราะ private subnet ออกได้แค่ IPv6
     ECR_REGISTRY_HOST: Optional[str] = None
+    # credential ที่ใช้ลบ image บน ECR (ไม่ตั้ง = ใช้ credential chain ของ AWS: env / profile / IAM role)
+    # ต้องมีสิทธิ์ ecr:BatchDeleteImage, ecr:ListImages, ecr:DeleteRepository บน repository/vlab/*
+    AWS_ECR_ACCESS_KEY_ID: Optional[str] = None
+    AWS_ECR_SECRET_ACCESS_KEY: Optional[str] = None
 
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
+
+    # Lab image scan (docs/LAB_IMAGE_SCAN_ARCHITECTURE.md) ปิดไว้เป็นค่าเริ่มต้น
+    # เปิดแล้ว backend จะรัน scan reconciler (ต้องมี K8S_ENABLED ด้วย)
+    LAB_IMAGE_SCAN_ENABLED: bool = False
+    SCAN_NAMESPACE: str = "vlab-scan"
+    # ทุกกี่วินาทีให้ reconciler เก็บผล / เปิด Job ใหม่ / เก็บกวาด (0 = ปิด)
+    SCAN_RECONCILE_INTERVAL_SECONDS: int = 15
+    # Job สแกนที่รันพร้อมกันได้สูงสุด ที่เหลือรอเป็น QUEUED
+    SCAN_MAX_CONCURRENT: int = 2
+    # เปิด Job ได้กี่ครั้งต่อไฟล์หนึ่งไฟล์ ก่อนเป็น ERROR (Job ล้ม / หาย / ERROR ชั่วคราว)
+    SCAN_MAX_ATTEMPTS: int = 2
+    # RUNNING นานกว่านี้โดยที่ Job ยังไม่จบ ถือว่าค้าง (ควร >= activeDeadlineSeconds ของ Job + เผื่อ)
+    SCAN_JOB_DEADLINE_SECONDS: int = 1800
+    # FAILED / ERROR เก็บไว้กี่วันให้อาจารย์ดูเหตุผล ก่อน reject_image (ลบแถว + tar) 0 = ลบในรอบถัดไป
+    SCAN_FAILED_RETENTION_DAYS: int = 7
+    # image ของ runner (docs/SCAN_RUNNER_IMAGE.md) ปกติไม่ต้องตั้ง: ใช้ <DOCKER_REGISTRY_HOST>/vlab/scan-runner:<VERSION>
+    # ที่ role Ansible scan-runner-image push ไว้ (tag นั้น immutable) ตั้งเองได้ถ้าอยากอ้างด้วย digest
+    SCAN_RUNNER_IMAGE: Optional[str] = None
+    SCAN_RUNNER_VERSION: str = "1.0.0"  # ต้องตรงกับ scan_runner_version ใน ansible/roles/scan-runner-image/defaults
+    # อายุ presigned GET ที่ Pod ใช้โหลด tar (ต้อง > เวลารอ schedule + เวลาโหลด)
+    SCAN_DOWNLOAD_URL_TTL_SECONDS: int = 3600
+    # ช่องโหว่ระดับนี้ขึ้นไปที่มีเวอร์ชันแก้แล้ว = FAIL (CRITICAL / HIGH / MEDIUM / LOW)
+    SCAN_FAIL_SEVERITY: str = "CRITICAL"
+    # พื้นที่ /work ของ Pod (tar + Trivy DB) ควรประมาณ 2 เท่าของ tar ใหญ่สุด
+    SCAN_WORK_SIZE_LIMIT: str = "15Gi"
+    # PriorityClass ต่ำ ให้ Job ถูกเบียดก่อน lab ของนักศึกษา (ไม่ตั้ง = ไม่ใส่)
+    # (สร้างโดย k8s/scan-namespace.yaml ที่ Ansible apply ให้ตอนรัน role k3s-server)
+    SCAN_PRIORITY_CLASS: Optional[str] = "vlab-scan"
+    # หน้า admin การ์ด System status: ตรวจ backend / k8s / registry / SkyPilot / AWS ทุกกี่วินาที (0 = ปิด)
+    HEALTH_CHECK_INTERVAL_SECONDS: int = 300
+    # เก็บผลตรวจย้อนหลังกี่วัน (job ลบของเก่าทุกรอบ ตารางไม่บวม)
+    HEALTH_CHECK_RETENTION_DAYS: int = 7
+    # ตอบช้ากว่านี้ (ms) = degraded
+    HEALTH_CHECK_SLOW_MS: int = 2000
 
     # Pre-pull image ลงทุก worker ก่อนคาบ (DaemonSet) ปิดไว้เป็นค่าเริ่มต้น ต้องสั่งเปิดเองเท่านั้น
     # เพราะเครื่องในห้องแลปจริงยังไม่รู้ว่าจะเปิดเครื่องตอนไหน (boot อัตโนมัติ / Deep Freeze ล้างดิสก์)
@@ -181,6 +261,15 @@ class Settings(BaseSettings):
     )
     
     @property
+    def scan_runner_image(self) -> Optional[str]:
+        """image ที่ Pod สแกนใช้: ค่าที่ตั้งเอง หรือสร้างจาก registry + เวอร์ชัน (None = ยังไม่มี registry)"""
+        if self.SCAN_RUNNER_IMAGE:
+            return self.SCAN_RUNNER_IMAGE
+        if self.DOCKER_REGISTRY_HOST:
+            return f"{self.DOCKER_REGISTRY_HOST}/vlab/scan-runner:{self.SCAN_RUNNER_VERSION}"
+        return None
+
+    @property
     def cors_origins(self) -> list:
         """Parse CORS origins from comma-separated string"""
         return [origin.strip() for origin in self.CORS_ORIGINS_STR.split(",")]
@@ -193,6 +282,8 @@ class Settings(BaseSettings):
             for domain in self.ALLOWED_EMAIL_DOMAINS_STR.split(",")
             if domain.strip()
         ]
+
+    @property
     def tailscale_trusted_proxy_cidrs(self) -> list[str]:
         return [
             cidr.strip()

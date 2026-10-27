@@ -10,6 +10,13 @@ from app.repositories.base import BaseRepository
 class LabRepository(BaseRepository[Lab]):
     model = Lab
 
+    def next_order_no(self, course_id: UUID) -> int:
+        """เลขถัดไปของวิชา — นับเฉพาะ lab ที่ยังไม่ถูกลบ (unique index ไม่นับตัวที่ลบแล้ว)"""
+        current = self.db.execute(
+            select(func.max(Lab.order_no)).where(Lab.course_id == course_id, Lab.deleted_at.is_(None))
+        ).scalar()
+        return (current or 0) + 1
+
     def find_by_course(
         self, course_id: UUID, status: LabStatus | None = None
     ) -> list[Lab]:

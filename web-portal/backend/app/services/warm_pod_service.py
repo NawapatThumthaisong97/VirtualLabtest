@@ -43,6 +43,22 @@ FATAL_WAITING_REASONS = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName",
                          "CreateContainerConfigError", "CrashLoopBackOff"}
 
 
+def _target_node(pod) -> Optional[str]:
+    """เครื่องของ pod: spec.nodeName ถ้าผูกแล้ว ไม่งั้นดูจาก node affinity ที่ DaemonSet ใส่ (matchFields metadata.name)"""
+    node = getattr(pod.spec, "node_name", None)
+    if node:
+        return node
+    try:
+        terms = pod.spec.affinity.node_affinity.required_during_scheduling_ignored_during_execution.node_selector_terms
+    except AttributeError:
+        return None
+    for term in terms or []:
+        for field in getattr(term, "match_fields", None) or []:
+            if field.key == "metadata.name" and field.values:
+                return field.values[0]
+    return None
+
+
 def warm_daemonset_name(lab_image) -> str:
     return daemonset_name(k8s_image_ref(lab_image), prefix="warm")
 
@@ -284,19 +300,24 @@ class WarmPodService:
         return None
 
     def has_starting_pod(self, node: str, lab_image_id) -> bool:
-        """มี warm pod ว่างของ lab image นี้บนเครื่องนี้ที่กำลังขึ้น (ยังไม่ Ready ไม่ได้ถูกลบ ไม่ได้พัง)"""
-        pods = self.v1.list_namespaced_pod(
-            self.namespace,
-            label_selector=f"{WARM_LABEL}=true,{STATE_LABEL}=free",
-            field_selector=f"spec.nodeName={node}",
-        ).items
-        return any(
-            (pod.metadata.annotations or {}).get(LAB_IMAGE_ANNOTATION) == str(lab_image_id)
-            and pod.metadata.deletion_timestamp is None
-            and not is_ready(pod)
-            and pod_problem(pod) is None
-            for pod in pods
-        )
+        """warm pod ของ lab image นี้บนเครื่องนี้กำลังจะว่าง — รอดีกว่าสร้าง pod ตรง (hostPort เดียวกันจะชนกัน)
+
+        - ตัวว่างที่ยังไม่ Ready (ไม่ถูกลบ ไม่พัง) รวมตัวที่ scheduler ยังไม่ผูกเครื่อง (ดูเครื่องจาก node affinity)
+        - ตัวที่กำลังปิด (Terminating) เช่นคนก่อนเพิ่งปิด lab — DaemonSet จะสร้างตัวใหม่หลังปิดเสร็จ (~5 วิ)
+        เทสจริง 2026-10-24: ปิด lab แล้วกด Start ทันที ไม่รอ → pod ตรงชนพอร์ตตัวที่กำลังปิด "ไม่มีที่ว่าง"
+        """
+        pods = self.v1.list_namespaced_pod(self.namespace, label_selector=f"{WARM_LABEL}=true").items
+        for pod in pods:
+            if _target_node(pod) != node:
+                continue
+            if (pod.metadata.annotations or {}).get(LAB_IMAGE_ANNOTATION) != str(lab_image_id):
+                continue
+            if pod.metadata.deletion_timestamp is not None:
+                return True
+            state = (pod.metadata.labels or {}).get(STATE_LABEL)
+            if state == "free" and not is_ready(pod) and pod_problem(pod) is None:
+                return True
+        return False
 
     def create_pod(self, body: dict) -> None:
         self.v1.create_namespaced_pod(self.namespace, body)

@@ -1,0 +1,30 @@
+---
+# vlab-scan-runner (docs/SCAN_RUNNER_IMAGE.md) build บนเครื่อง registry แล้ว push เข้า camp registry
+#
+# ทุก image อ้างด้วย digest เท่านั้น อัปเกรดเมื่อไหร่ให้ทำตามข้อ "อัปเกรด Trivy" ใน doc
+# แล้วเพิ่ม scan_runner_version ทุกครั้ง (tag ใน registry เป็น immutable role จะไม่ยอม push ทับ)
+
+scan_runner_version: "1.0.0"
+scan_runner_repo: vlab/scan-runner
+scan_runner_registry_port: 5001
+
+# source บนเครื่อง control / ที่วางบนเครื่อง build
+scan_runner_src: "{{ playbook_dir }}/../scan-runner/"
+scan_runner_build_dir: /opt/vlab-scan-runner-build
+
+# Trivy: เวอร์ชัน + digest ของ image index (multi-arch) ที่ตรวจ cosign แล้ว
+scan_runner_trivy_version: "0.76.1"
+scan_runner_trivy_image: "ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c"
+# เวอร์ชันที่ถูกวางโค้ดร้าย (Aqua advisory GHSA-69fq-xp46-6x23) ห้ามใช้เด็ดขาด
+scan_runner_blocked_trivy_versions: ["0.69.4", "0.69.5", "0.69.6"]
+
+scan_runner_base_image: "alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+
+# ตรวจลายเซ็น Trivy ทุกครั้งก่อน build (keyless: ต้องเซ็นโดย workflow release ของ tag นั้นเท่านั้น)
+scan_runner_cosign_verify: true
+scan_runner_cosign_image: "gcr.io/projectsigstore/cosign:v3.0.3@sha256:774391ac9f0c137ee419ce56522df5fd3b1f52be90c5b77e97f7c053bdd67a67"
+scan_runner_trivy_signer: "https://github.com/aquasecurity/trivy/.github/workflows/reusable-release.yaml@refs/tags/v{{ scan_runner_trivy_version }}"
+scan_runner_trivy_oidc_issuer: "https://token.actions.githubusercontent.com"
+
+# true = ยอม push ทับ tag เดิมที่เนื้อหาต่างกัน (ใช้เฉพาะตอนกู้ระบบ ปกติให้เพิ่มเวอร์ชันแทน)
+scan_runner_force_push: false

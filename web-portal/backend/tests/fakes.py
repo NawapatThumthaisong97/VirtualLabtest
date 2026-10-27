@@ -8,6 +8,7 @@ FakeK8s สำหรับเทส prewarm อยู่ท้ายไฟล์
 ของจริงคืน request_id แล้วต้อง sky.get(...) อีกที ที่นี่จำลองด้วย FakeRequest ที่ถือค่าหรือ
 exception ไว้ให้ get คืน / raise
 """
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as _ns
 
@@ -134,15 +135,25 @@ class FakeK8s:
         self._rv = 0
         self.v1 = self
         self.apps_v1 = self
+        self.batch_v1 = self
+        self.jobs: dict[str, object] = {}       # Job ของ scan: ชื่อ -> object (เทสใส่เองผ่าน add_job)
+        self.deleted_jobs: list[str] = []
+        self.created_jobs: dict[str, dict] = {}  # manifest ที่ create_namespaced_job ได้รับ
+        self.secrets: dict[str, dict] = {}
+        self.secret_error: Exception | None = None  # ตั้งไว้ = create_namespaced_secret raise
 
     def _check(self):
         if self.error is not None:
             raise self.error
 
     # ---- ตั้งโลก
-    def add_node(self, name, control_plane=False, ready=True, not_ready_for=timedelta(days=1), ip=None):
-        """not_ready_for = หลุดมานานแค่ไหน (ใช้เมื่อ ready=False) ค่าเริ่มต้น 1 วัน = ปิดเครื่องไปแล้ว"""
+    def add_node(self, name, control_plane=False, ready=True, not_ready_for=timedelta(days=1), ip=None,
+                 room=None):
+        """not_ready_for = หลุดมานานแค่ไหน (ใช้เมื่อ ready=False) ค่าเริ่มต้น 1 วัน = ปิดเครื่องไปแล้ว
+        room = label vlab/room (ห้องแลป)"""
         labels = {"node-role.kubernetes.io/control-plane": "true"} if control_plane else {}
+        if room is not None:
+            labels["vlab/room"] = room
         since = datetime.now(timezone.utc) - (not_ready_for if not ready else timedelta(days=30))
         condition = _ns(type="Ready", status="True" if ready else "Unknown", last_transition_time=since)
         addresses = [_ns(type="InternalIP", address=ip), _ns(type="Hostname", address=name)] if ip else []
@@ -169,8 +180,9 @@ class FakeK8s:
         ))
 
     def add_warm_pod(self, ds_name, node, lab_image_id, state="free", ready=True, phase="Running",
-                     session_id=None):
-        """pod ของ DaemonSet warm pod คืน pod ที่สร้าง (ชื่อ <ds>-<node>)"""
+                     session_id=None, bound=True):
+        """pod ของ DaemonSet warm pod คืน pod ที่สร้าง (ชื่อ <ds>-<node>)
+        bound=False = DaemonSet เพิ่งสร้าง scheduler ยังไม่ผูกเครื่อง (nodeName ว่าง มีแค่ node affinity)"""
         self._rv += 1
         annotations = {"vlab/lab-image-id": str(lab_image_id)}
         if session_id:
@@ -180,7 +192,9 @@ class FakeK8s:
                                                           "vlab/warm-state": state},
                          annotations=annotations, creation_timestamp=None, deletion_timestamp=None,
                          resource_version=str(self._rv)),
-            spec=_ns(node_name=node),
+            spec=_ns(node_name=node if bound else None, affinity=_ns(node_affinity=_ns(
+                required_during_scheduling_ignored_during_execution=_ns(node_selector_terms=[
+                    _ns(match_fields=[_ns(key="metadata.name", operator="In", values=[node])])])))),
             status=_ns(phase=phase, conditions=[_ns(type="Ready", status="True" if ready else "False")],
                        container_statuses=None),
         )
@@ -189,6 +203,70 @@ class FakeK8s:
 
     def pod(self, name):
         return next((p for p in self.pods if p.metadata.name == name), None)
+
+    def add_job(self, name, kind="ACTIVE", reason=None, result=None, labels=None):
+        """Job ของ scan + Pod ของมัน kind: ACTIVE / SUCCEEDED / FAILED, result: dict หรือ str (termination message)"""
+        labels = {"vlab/scan": "true", **(labels or {})}
+        conditions = []
+        if kind == "SUCCEEDED":
+            conditions.append(_ns(type="Complete", status="True", reason=None))
+        elif kind == "FAILED":
+            conditions.append(_ns(type="Failed", status="True", reason=reason))
+        self.jobs[name] = _ns(metadata=_ns(name=name, labels=labels), status=_ns(conditions=conditions))
+        if result is not None:
+            message = result if isinstance(result, str) else json.dumps(result)
+            terminated = _ns(exit_code=0, message=message)
+            self.pods.append(_ns(
+                metadata=_ns(name=f"{name}-pod", labels={**labels, "job-name": name}, annotations={},
+                             creation_timestamp=None, deletion_timestamp=None, resource_version="1"),
+                spec=_ns(node_name=None),
+                status=_ns(phase="Succeeded", conditions=[], container_statuses=[
+                    _ns(name="publish", state=_ns(waiting=None, running=None, terminated=terminated)),
+                ]),
+            ))
+
+    # ---- BatchV1Api
+    def list_namespaced_job(self, namespace, label_selector=None, _request_timeout=None):
+        self._check()
+        return _ns(items=[j for j in self.jobs.values() if _match(j.metadata.labels, label_selector)])
+
+    def delete_namespaced_job(self, name, namespace, propagation_policy=None, _request_timeout=None):
+        self._check()
+        self.deleted_jobs.append(name)
+        if self.jobs.pop(name, None) is None:
+            raise ApiException(status=404, reason="NotFound")
+        self.pods = [p for p in self.pods if (p.metadata.labels or {}).get("job-name") != name]
+        self.secrets.pop(name, None)  # ownerReference: ลบ Job แล้ว Secret ถูกลบตาม
+
+    def create_namespaced_job(self, namespace, body, _request_timeout=None):
+        """เก็บ manifest ไว้ใน created_jobs แล้วทำให้ list_namespaced_job เห็นเป็น Job ที่ยังทำงาน"""
+        self._check()
+        name = body["metadata"]["name"]
+        if name in self.jobs:
+            raise ApiException(status=409, reason="AlreadyExists")
+        self.created_jobs[name] = body
+        self.jobs[name] = _ns(metadata=_ns(name=name, labels=body["metadata"]["labels"], uid=f"uid-{name}"),
+                              status=_ns(conditions=[]))
+        return self.jobs[name]
+
+    def read_namespaced_job(self, name, namespace, _request_timeout=None):
+        self._check()
+        if name not in self.jobs:
+            raise ApiException(status=404, reason="NotFound")
+        return self.jobs[name]
+
+    def create_namespaced_secret(self, namespace, body, _request_timeout=None):
+        self._check()
+        if self.secret_error is not None:
+            raise self.secret_error
+        name = body["metadata"]["name"]
+        if name in self.secrets:
+            raise ApiException(status=409, reason="AlreadyExists")
+        self.secrets[name] = body
+
+    def replace_namespaced_secret(self, name, namespace, body, _request_timeout=None):
+        self._check()
+        self.secrets[name] = body
 
     # ---- AppsV1Api
     def create_namespaced_daemon_set(self, namespace, body):
@@ -221,7 +299,7 @@ class FakeK8s:
         return _ns(items=items)
 
     # ---- CoreV1Api
-    def list_namespaced_pod(self, namespace, label_selector=None, field_selector=None):
+    def list_namespaced_pod(self, namespace, label_selector=None, field_selector=None, _request_timeout=None):
         self._check()
         node = field_selector.split("=", 1)[1] if field_selector else None
         return _ns(items=[p for p in self.pods if _match(p.metadata.labels, label_selector)
@@ -331,3 +409,34 @@ class FakeGoogleSSO:
         if access_token not in self.access_tokens:
             raise SSOAuthenticationError("invalid access_token")
         return self.access_tokens[access_token]
+
+
+class FakeR2:
+    """แทน app.adapters.r2_adapter.R2Adapter — ไม่ต่อ R2 จริง แค่จดว่าถูกขอ presign อะไร
+
+    presigned: list ของ {"key", "content_type", "expires_in"} เรียงตามที่ถูกเรียก
+    """
+
+    def __init__(self):
+        self.presigned: list[dict] = []
+        self.deleted: list[str] = []
+        self.fail_delete = False  # True -> delete_object โยน R2DeleteError เหมือน R2 ล่ม
+
+    def generate_presigned_put_url(
+        self, key: str, content_type: str, expires_in: int | None = None
+    ) -> str:
+        self.presigned.append(
+            {"key": key, "content_type": content_type, "expires_in": expires_in}
+        )
+        return f"https://fake-r2.test/{key}?X-Amz-Expires={expires_in}&X-Amz-Signature=fake"
+
+    def generate_presigned_get_url(self, key: str, expires_in: int) -> str:
+        self.presigned.append({"key": key, "method": "GET", "expires_in": expires_in})
+        return f"https://fake-r2.test/{key}?X-Amz-Expires={expires_in}&X-Amz-Signature=get"
+
+    def delete_object(self, key: str) -> None:
+        if self.fail_delete:
+            from app.adapters.r2_adapter import R2DeleteError
+
+            raise R2DeleteError(f"Failed to delete {key} from R2")
+        self.deleted.append(key)

@@ -16,6 +16,8 @@ class LabResponse(CamelModel):
     order_no: int
     due_at: datetime | None
     status: LabStatus
+    # lab image ที่ผูกไว้ (None = lab แบบอ่านเอกสารอย่างเดียว) หน้าอาจารย์ใช้ตั้งค่า dropdown ตอนแก้ไข
+    image_id: UUID | None = None
     # kubernetes / aws / auto (auto = เลือกตามเครื่องที่กด Start ดู RunTarget)
     run_target: RunTarget | None = None
     # ความคืบหน้าของ "คนที่เรียก API" ไม่ใช่ของ lab — คนละคนเรียกได้คนละค่า
@@ -52,7 +54,8 @@ class LabDetailResponse(LabResponse):
 class LabCreateRequest(CamelModel):
     course_id: UUID
     title: str = Field(max_length=255)
-    order_no: int = Field(gt=0)
+    # ไม่ส่ง = ต่อท้าย (เลขสูงสุดในวิชา + 1) ฟอร์มอาจารย์ไม่ต้องมีช่องนี้
+    order_no: int | None = Field(None, gt=0)
     description: str | None = None
     doc_url: str | None = None
     image_id: UUID | None = None
@@ -73,6 +76,8 @@ class LabUpdateRequest(CamelModel):
     due_at: datetime | None = None
     status: LabStatus | None = None
     run_target: RunTarget | None = None
+    # ส่ง null = ถอด image ออกจาก lab, ไม่ส่ง = ไม่แก้
+    image_id: UUID | None = None
 
 
 # Delete don't require schemas implementation
