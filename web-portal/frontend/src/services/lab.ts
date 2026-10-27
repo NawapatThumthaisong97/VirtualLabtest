@@ -23,7 +23,8 @@ export interface Lab {
 export interface CreateLabPayload {
   courseId: string;
   title: string;
-  orderNo: number;
+  /** ไม่ส่ง = backend ต่อท้ายวิชาให้ (เลขสูงสุด + 1) */
+  orderNo?: number;
   description?: string | null;
   docUrl?: string | null;
   imageId?: string | null;
@@ -74,6 +75,7 @@ export interface LabSummary {
   orderNo: number;
   dueAt: string | null;
   status: LabStatus;
+  imageId?: string | null;
   progressStatus: ProgressStatus | null;
 }
 
@@ -168,6 +170,18 @@ export const labService = {
     if (payload.runTarget !== undefined) apiPayload.run_target = payload.runTarget;
 
     const response = await apiClient.patch(`/labs/${labId}`, apiPayload);
+    return transformToLab(unwrap<LabApiResponse>(response));
+  },
+
+  /** อัปโหลดเอกสาร PDF ของ lab (แทนไฟล์เดิม) — ผู้สอนวิชานั้น / admin */
+  uploadDoc: async (labId: string, file: File): Promise<Lab> => {
+    const form = new FormData();
+    form.append('document', file);
+    // apiClient ตั้ง Content-Type เป็น JSON ไว้ ถ้าไม่ override axios จะแปลง FormData เป็น JSON (ไฟล์หาย)
+    // ใส่ multipart แล้ว axios ลบ header ทิ้งให้เบราว์เซอร์เติม boundary เอง
+    const response = await apiClient.post(`/labs/${labId}/doc`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return transformToLab(unwrap<LabApiResponse>(response));
   },
 
