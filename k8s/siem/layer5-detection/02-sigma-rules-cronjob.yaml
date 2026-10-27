@@ -1,0 +1,273 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sigma-rules-detection-as-code
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: sigma-logsql-detector
+    app.kubernetes.io/component: sigma-detection-engine
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "5-detection"
+data:
+  sigma_rule_01_container_shadow_access.yml: |
+    title: Container Sensitive Credential File Access (/etc/shadow or /etc/sudoers)
+    id: sigma-vlab-001-credential-access
+    status: production
+    description: Detects unauthorized reading of /etc/shadow or /etc/sudoers inside a student container via Falco eBPF or system logs
+    logsource:
+      product: linux
+      service: container_ebpf
+    detection:
+      selection:
+        category: SECURITY_VIOLATION
+        keywords:
+          - "/etc/shadow"
+          - "/etc/sudoers"
+      condition: selection
+    level: critical
+    tags:
+      - attack.credential_access
+      - attack.t1003
+  sigma_rule_02_c2_botnet_egress.yml: |
+    title: Outbound Connection to Known C2 Botnet Infrastructure
+    id: sigma-vlab-002-c2-egress
+    status: production
+    description: Detects outbound egress traffic toward blacklisted Command & Control servers
+    logsource:
+      product: squid_or_ebpf
+      service: boundary_proxy
+    detection:
+      selection:
+        category: SECURITY_VIOLATION
+        keywords:
+          - "198.51.100.24"
+          - "c2-botnet.darknet.io"
+          - "T1071"
+      condition: selection
+    level: critical
+    tags:
+      - attack.command_and_control
+      - attack.t1071
+  sigma_rule_03_cryptomining_stratum.yml: |
+    title: Unauthorized Cryptomining Pool Connection (Stratum / Mining Domain)
+    id: sigma-vlab-003-cryptomining
+    status: production
+    description: Detects compute resource hijacking and connections to mining pools on K3s or AWS SkyPilot nodes
+    logsource:
+      product: hybrid_cloud
+      service: network_egress
+    detection:
+      selection:
+        category: SECURITY_VIOLATION
+        keywords:
+          - "malicious-mining.org"
+          - "203.0.113.66"
+          - "stratum+tcp"
+      condition: selection
+    level: critical
+    tags:
+      - attack.resource_hijacking
+      - attack.t1496
+  sigma_rule_04_k8s_privilege_escalation.yml: |
+    title: Kubernetes Pod Privilege Escalation or HostNetwork Escape Attempt
+    id: sigma-vlab-004-k8s-privesc
+    status: production
+    description: Detects blocked attempts to launch privileged pods or bind hostNetwork in student namespaces
+    logsource:
+      product: kubernetes
+      service: kyverno_admission
+    detection:
+      selection:
+        category: SECURITY_VIOLATION
+        keywords:
+          - "KYVERNO_POLICY_BLOCK"
+          - "privileged=true"
+      condition: selection
+    level: high
+    tags:
+      - attack.privilege_escalation
+      - attack.t1611
+  sigma_logsql_engine.py: |
+    import json
+    import os
+    import urllib.parse
+    import urllib.request
+    from pathlib import Path
+
+    VICTORIALOGS_URL = os.getenv(
+        "VICTORIALOGS_QUERY_URL",
+        "http://victorialogs.siem-system.svc.cluster.local:9428/select/logsql/query",
+    )
+    BACKEND_LOGS_URL = os.getenv(
+        "SIEM_CENTRAL_TAILSCALE_ENDPOINT",
+        "http://100.86.87.27:8000/api/v1/logs",
+    )
+    COLLECTOR_TOKEN = os.getenv("SIEM_COLLECTOR_TOKEN", "")
+    RULES_DIR = Path("/etc/sigma-rules")
+
+    def parse_simple_sigma_yaml(text: str) -> dict:
+        """Lightweight zero-dependency parser for Sigma Rule YAML files."""
+        rule = {"keywords": [], "tags": []}
+        mode = None
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("title:"):
+                rule["title"] = line.split(":", 1)[1].strip()
+            elif line.startswith("id:"):
+                rule["id"] = line.split(":", 1)[1].strip()
+            elif line.startswith("level:"):
+                rule["level"] = line.split(":", 1)[1].strip()
+            elif line.startswith("category:"):
+                rule["category"] = line.split(":", 1)[1].strip()
+            elif line.startswith("keywords:"):
+                mode = "keywords"
+            elif line.startswith("tags:"):
+                mode = "tags"
+            elif line.startswith("- ") and mode in ("keywords", "tags"):
+                val = line[2:].strip().strip('"').strip("'")
+                rule[mode].append(val)
+            elif ":" in line:
+                mode = None
+        return rule
+
+    def compile_sigma_to_logsql(rule: dict) -> str:
+        """Compiles a Sigma detection block into a VictoriaLogs LogsQL query expression."""
+        cat = rule.get("category", "SECURITY_VIOLATION")
+        keywords = rule.get("keywords", [])
+        if not keywords:
+            return f'category:"{cat}"'
+        kw_expr = " OR ".join(f'"{kw}"' for kw in keywords)
+        return f'category:"{cat}" AND ({kw_expr})'
+
+    def run_sigma_scan():
+        results = []
+        for yml_file in sorted(RULES_DIR.glob("sigma_rule_*.yml")):
+            rule = parse_simple_sigma_yaml(yml_file.read_text(encoding="utf-8"))
+            logsql_query = compile_sigma_to_logsql(rule)
+            data = urllib.parse.urlencode({"query": logsql_query, "limit": "5"}).encode("utf-8")
+            req = urllib.request.Request(VICTORIALOGS_URL, data=data, method="POST")
+            matched_lines = []
+            try:
+                with urllib.request.urlopen(req, timeout=8) as res:
+                    matched_lines = [
+                        json.loads(line)
+                        for line in res.read().decode("utf-8").splitlines()
+                        if line.strip()
+                    ]
+            except Exception as exc:
+                print(f"Warning querying VictoriaLogs for {rule.get('id')}: {exc}")
+
+            mitre_tech = next(
+                (t.split(".")[1].upper() for t in rule.get("tags", []) if t.startswith("attack.t")),
+                "T1071",
+            )
+            mitre_tactic = next(
+                (t.split(".")[1].replace("_", " ").title() for t in rule.get("tags", []) if not t.startswith("attack.t")),
+                "Execution",
+            )
+
+            hit_count = len(matched_lines)
+            results.append({
+                "sigma_rule_id": rule.get("id"),
+                "sigma_rule_title": rule.get("title"),
+                "compiled_logsql": logsql_query,
+                "matches_found": hit_count,
+                "mitre_technique": mitre_tech,
+            })
+
+            if hit_count > 0:
+                alert_payload = {
+                    "severity": "CRITICAL" if rule.get("level") == "critical" else "WARNING",
+                    "category": "SECURITY_VIOLATION",
+                    "eventType": "SIGMA_RULE_MATCH",
+                    "source": "layer5-sigma-logsql-detector",
+                    "message": f"[Sigma Detection-as-Code] Rule '{rule.get('title')}' ({rule.get('id')}) matched {hit_count} event(s) in VictoriaLogs via LogsQL [{logsql_query}]",
+                    "clusterOrSubnet": "192.168.1.0/24",
+                    "metadata": {
+                        "siem_layer": "layer5-detection",
+                        "engine": "sigma-to-logsql",
+                        "sigma_rule_id": rule.get("id"),
+                        "sigma_rule_title": rule.get("title"),
+                        "compiled_logsql": logsql_query,
+                        "matches_found": hit_count,
+                        "sigma_mitre_technique": mitre_tech,
+                        "sigma_mitre_tactic": mitre_tactic,
+                        "fast_track": False,
+                    },
+                }
+                headers = {"Content-Type": "application/json"}
+                if COLLECTOR_TOKEN:
+                    headers["X-Collector-Token"] = COLLECTOR_TOKEN
+                post_req = urllib.request.Request(
+                    BACKEND_LOGS_URL,
+                    data=json.dumps(alert_payload).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                try:
+                    urllib.request.urlopen(post_req, timeout=5)
+                except Exception as exc:
+                    print(f"Warning posting Sigma alert to backend: {exc}")
+
+        print(json.dumps({"sigma_scan_status": "completed", "rules_evaluated": len(results), "results": results}))
+
+    if __name__ == "__main__":
+        run_sigma_scan()
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sigma-logsql-detector
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: sigma-logsql-detector
+    app.kubernetes.io/component: sigma-detection-engine
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "5-detection"
+spec:
+  # Runs every 2 minutes (within the 1-5 minute specification) to scan VictoriaLogs using Sigma -> LogsQL
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: sigma-logsql-detector
+            vlab.siem/layer: "5-detection"
+        spec:
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
+          restartPolicy: OnFailure
+          containers:
+            - name: sigma-logsql-runner
+              image: python:3.11-slim
+              imagePullPolicy: IfNotPresent
+              command:
+                - python3
+                - /etc/sigma-rules/sigma_logsql_engine.py
+              env:
+                - name: SIEM_CENTRAL_TAILSCALE_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: siem-collector-secrets
+                      key: central-tailscale-endpoint
+                      optional: true
+                - name: SIEM_COLLECTOR_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: siem-collector-secrets
+                      key: collector-token
+                      optional: true
+              volumeMounts:
+                - name: sigma-rules-vol
+                  mountPath: /etc/sigma-rules
+                  readOnly: true
+          volumes:
+            - name: sigma-rules-vol
+              configMap:
+                name: sigma-rules-detection-as-code

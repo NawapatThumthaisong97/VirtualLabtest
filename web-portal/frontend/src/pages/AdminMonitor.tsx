@@ -1,358 +1,147 @@
 /**
  * AdminMonitor Page
- * Sub-Issue 3 (Issue #75): Read-Only Monitor, Security Overview & Billing Dashboard UI
- * SIEM-Ready Observability Portal for Administrators.
- * Strictly operates in [🔒 READ-ONLY MODE] with Zero PII and No Destructive Actions.
+ * SIEM Observability Workspace powered by Grafana, VictoriaLogs, and AWS S3.
  */
-import { useState, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import {
-  Activity,
-  CreditCard,
-  Lock,
-  Terminal,
+  BarChart3,
+  ChevronRight,
+  ExternalLink,
+  LayoutDashboard,
+  RefreshCw,
 } from 'lucide-react';
-import {
-  GlobalFilterBar,
-  type GlobalFilters,
-} from '../components/monitor/GlobalFilterBar';
-import { ResourceSecurityOverview } from '../components/monitor/ResourceSecurityOverview';
-import { LogExplorerTable } from '../components/monitor/LogExplorerTable';
-import { LogSideDrawer } from '../components/monitor/LogSideDrawer';
-import { BillingDashboard } from '../components/monitor/BillingDashboard';
-import {
-  monitorService,
-  type InfrastructureLog,
-} from '../services/monitor';
-import {
-  billingService,
-  type BillingGroupBy,
-} from '../services/billing';
+
+const GRAFANA_VISUAL_ANALYTICS_URL =
+  'http://100.69.137.47:30300/d/vlab-siem-analytics?orgId=1&kiosk';
+const GRAFANA_COMMAND_CENTER_URL =
+  import.meta.env.VITE_SIEM_GRAFANA_URL ||
+  'http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1&kiosk';
+const VICTORIALOGS_UI_URL =
+  import.meta.env.VITE_SIEM_VICTORIALOGS_URL ||
+  'http://100.69.137.47:30428/select/vmui';
+const S3_EXPLORER_URL =
+  import.meta.env.VITE_SIEM_S3_EXPLORER_URL ||
+  'http://100.69.137.47:30900';
 
 export default function AdminMonitorPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  // Graphs tab ('analytics') is first and default
+  const [activeDashboard, setActiveDashboard] = useState<'analytics' | 'command'>('analytics');
+  const [iframeKey, setIframeKey] = useState<number>(0);
 
-  // Active Tab state
-  const activeTab = searchParams.get('tab') || 'overview';
-  const setActiveTab = (tab: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('tab', tab);
-      return next;
-    });
+  const handleReloadGrafana = () => {
+    setIframeKey((prev) => prev + 1);
   };
 
-  // Extract Global Filters from URL
-  const filters: GlobalFilters = useMemo(() => ({
-    provider: (searchParams.get('provider') as GlobalFilters['provider']) || 'all',
-    natSubnet: searchParams.get('nat_subnet') || 'all',
-    timeRange: (searchParams.get('time_range') as GlobalFilters['timeRange']) || '24h',
-    anonId: searchParams.get('anon_id') || '',
-  }), [searchParams]);
+  const currentGrafanaUrl =
+    activeDashboard === 'analytics'
+      ? GRAFANA_VISUAL_ANALYTICS_URL
+      : GRAFANA_COMMAND_CENTER_URL;
 
-  // Update Global Filters in URL
-  const handleFilterChange = (partial: Partial<GlobalFilters>) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (partial.provider !== undefined) {
-        if (partial.provider === 'all') next.delete('provider');
-        else next.set('provider', partial.provider);
-      }
-      if (partial.natSubnet !== undefined) {
-        if (partial.natSubnet === 'all') next.delete('nat_subnet');
-        else next.set('nat_subnet', partial.natSubnet);
-      }
-      if (partial.timeRange !== undefined) {
-        next.set('time_range', partial.timeRange);
-      }
-      if (partial.anonId !== undefined) {
-        if (!partial.anonId) next.delete('anon_id');
-        else next.set('anon_id', partial.anonId);
-      }
-      return next;
-    });
-  };
-
-  // Calculate start/end date from timeRange
-  const { startDate, endDate } = useMemo(() => {
-    const end = new Date();
-    const start = new Date();
-    switch (filters.timeRange) {
-      case '1h':
-        start.setHours(end.getHours() - 1);
-        break;
-      case '6h':
-        start.setHours(end.getHours() - 6);
-        break;
-      case '24h':
-        start.setHours(end.getHours() - 24);
-        break;
-      case '7d':
-        start.setDate(end.getDate() - 7);
-        break;
-      case '30d':
-        start.setDate(end.getDate() - 30);
-        break;
-      default:
-        start.setHours(end.getHours() - 24);
-    }
-    return {
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
-    };
-  }, [filters.timeRange]);
-
-  // Log filter states
-  const severityFilter = searchParams.get('severity') || 'ALL';
-  const categoryFilter = searchParams.get('category') || 'ALL';
-  const logLimit = 50;
-  const [logOffset, setLogOffset] = useState<number>(0);
-  const [selectedLog, setSelectedLog] = useState<InfrastructureLog | null>(null);
-
-  const handleSeverityChange = (sev: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (sev === 'ALL') next.delete('severity');
-      else next.set('severity', sev);
-      return next;
-    });
-    setLogOffset(0);
-  };
-
-  const handleCategoryChange = (cat: string) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (cat === 'ALL') next.delete('category');
-      else next.set('category', cat);
-      return next;
-    });
-    setLogOffset(0);
-  };
-
-  // Billing Grouping State
-  const billingGroupBy: BillingGroupBy = (searchParams.get('billing_group_by') as BillingGroupBy) || 'course';
-  const handleBillingGroupByChange = (groupBy: BillingGroupBy) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('billing_group_by', groupBy);
-      return next;
-    });
-  };
-
-  // Click-to-Correlate handler: sets anon_id in URL and switches or filters seamlessly
-  const handleCorrelateAnonId = (anonId: string) => {
-    handleFilterChange({ anonId });
-  };
-
-  // 1. Fetch Cluster Metrics
-  const {
-    data: metricsData,
-    isLoading: isMetricsLoading,
-    refetch: refetchMetrics,
-  } = useQuery({
-    queryKey: ['admin-metrics', filters.provider, filters.natSubnet, startDate, endDate],
-    queryFn: () =>
-      monitorService.getMetrics({
-        provider: filters.provider,
-        natSubnet: filters.natSubnet,
-        startDate,
-        endDate,
-      }),
-  });
-
-  // 2. Fetch Security Counters
-  const {
-    data: securityData,
-    isLoading: isSecurityLoading,
-    refetch: refetchSecurity,
-  } = useQuery({
-    queryKey: ['admin-security-counters', startDate, endDate],
-    queryFn: () =>
-      monitorService.getSecurityCounters({
-        startDate,
-        endDate,
-      }),
-  });
-
-  // 3. Fetch Boundary Logs
-  const {
-    data: logsData,
-    isLoading: isLogsLoading,
-    refetch: refetchLogs,
-  } = useQuery({
-    queryKey: [
-      'admin-logs',
-      severityFilter,
-      categoryFilter,
-      filters.anonId,
-      startDate,
-      endDate,
-      logLimit,
-      logOffset,
-    ],
-    queryFn: () =>
-      monitorService.getLogs({
-        severity: severityFilter,
-        category: categoryFilter,
-        anonId: filters.anonId || undefined,
-        startDate,
-        endDate,
-        limit: logLimit,
-        offset: logOffset,
-      }),
-  });
-
-  // 4. Fetch Billing Summary
-  const {
-    data: billingData,
-    isLoading: isBillingLoading,
-    refetch: refetchBilling,
-  } = useQuery({
-    queryKey: ['admin-billing', billingGroupBy, startDate, endDate],
-    queryFn: () =>
-      billingService.getSummary({
-        groupBy: billingGroupBy,
-        startDate,
-        endDate,
-      }),
-  });
-
-  const handleGlobalRefresh = () => {
-    refetchMetrics();
-    refetchSecurity();
-    refetchLogs();
-    refetchBilling();
-  };
-
-  const isGlobalLoading =
-    isMetricsLoading || isSecurityLoading || isLogsLoading || isBillingLoading;
+  const currentFullTabUrl =
+    activeDashboard === 'analytics'
+      ? 'http://100.69.137.47:30300/d/vlab-siem-analytics?orgId=1'
+      : 'http://100.69.137.47:30300/d/vlab-siem-5layer?orgId=1';
 
   return (
-    <div className="min-h-screen bg-[#0a0a0d] text-white p-6 md:p-8">
-      <div className="mx-auto max-w-7xl flex flex-col gap-6">
-        {/* Page Header */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="flex h-[calc(100vh-56px)] w-full flex-col bg-[#111217] text-white overflow-hidden">
+      {/* Unified Dark Toolbar blending seamlessly with Navigation (#0B0B0B) and Grafana (#111217) */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 bg-[#111217] px-6 py-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight text-white">
-                Admin Monitor & SIEM Dashboard
-              </h1>
-              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-0.5 text-xs font-semibold text-amber-300">
+            <div className="flex items-center gap-1.5 text-xs text-white/45">
+              <span>Admin workspace</span>
+              <ChevronRight size={13} />
+              <span className="font-medium text-white/75">SIEM Monitoring</span>
+              <span className="ml-1 rounded border border-white/15 bg-white/[0.04] px-1.5 py-0.5 text-[11px] font-medium text-white/65">
                 [🔒 READ-ONLY MODE]
               </span>
             </div>
-            <p className="mt-1 text-xs text-white/50">
-              Observability for hybrid cloud resources, Zero Trust boundaries, and anonymized billing.
-            </p>
+            <h1 className="mt-0.5 text-base font-semibold tracking-tight text-white">
+              Admin Monitor & SIEM Dashboard
+            </h1>
           </div>
 
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/60">
-            <Lock className="h-3.5 w-3.5 text-amber-400" />
-            <span>Strict View-Only. Remediation via Bastion Host terminal only.</span>
+          {/* Unified Dark Tab Navigation */}
+          <div className="flex gap-1 rounded-lg border border-white/10 bg-[#0B0B0B] p-1">
+            <button
+              type="button"
+              onClick={() => setActiveDashboard('analytics')}
+              className={`inline-flex h-8 items-center gap-2 rounded-md px-3.5 text-xs font-medium transition cursor-pointer ${
+                activeDashboard === 'analytics'
+                  ? 'bg-white/15 text-white shadow-sm'
+                  : 'text-white/55 hover:bg-white/[0.05] hover:text-white/90'
+              }`}
+            >
+              <BarChart3 size={14} />
+              <span>Threat Analytics & Charts</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveDashboard('command')}
+              className={`inline-flex h-8 items-center gap-2 rounded-md px-3.5 text-xs font-medium transition cursor-pointer ${
+                activeDashboard === 'command'
+                  ? 'bg-white/15 text-white shadow-sm'
+                  : 'text-white/55 hover:bg-white/[0.05] hover:text-white/90'
+              }`}
+            >
+              <LayoutDashboard size={14} />
+              <span>SIEM Command Center</span>
+            </button>
           </div>
         </div>
 
-        {/* Global Filter Bar */}
-        <GlobalFilterBar
-          filters={filters}
-          onChange={handleFilterChange}
-          onRefresh={handleGlobalRefresh}
-          isLoading={isGlobalLoading}
-        />
-
-        {/* Tab Navigation */}
-        <div className="flex border-b border-white/10 text-sm font-medium">
+        {/* Clean Dark Action Links */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             type="button"
-            onClick={() => setActiveTab('overview')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 transition-colors cursor-pointer ${
-              activeTab === 'overview'
-                ? 'border-indigo-500 text-indigo-400 font-semibold'
-                : 'border-transparent text-white/60 hover:text-white'
-            }`}
+            onClick={handleReloadGrafana}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 font-medium text-white/80 hover:bg-white/10 hover:text-white transition cursor-pointer"
           >
-            <Activity className="h-4 w-4" />
-            <span>Cluster & Security Overview</span>
-            {securityData && securityData.totalViolations > 0 && (
-              <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[11px] font-bold text-rose-300 border border-rose-500/30">
-                {securityData.totalViolations}
-              </span>
-            )}
+            <RefreshCw size={13} />
+            <span>Refresh</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('logs')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 transition-colors cursor-pointer ${
-              activeTab === 'logs'
-                ? 'border-indigo-500 text-indigo-400 font-semibold'
-                : 'border-transparent text-white/60 hover:text-white'
-            }`}
+          <a
+            href={VICTORIALOGS_UI_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 font-medium text-white/80 hover:bg-white/10 hover:text-white transition"
           >
-            <Terminal className="h-4 w-4" />
-            <span>Boundary Logs Explorer</span>
-            {logsData && logsData.total > 0 && (
-              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-white/80">
-                {logsData.total}
-              </span>
-            )}
-          </button>
+            <span>VictoriaLogs</span>
+            <ExternalLink size={12} className="text-white/40" />
+          </a>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('billing')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 transition-colors cursor-pointer ${
-              activeTab === 'billing'
-                ? 'border-indigo-500 text-indigo-400 font-semibold'
-                : 'border-transparent text-white/60 hover:text-white'
-            }`}
+          <a
+            href={S3_EXPLORER_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 font-medium text-white/80 hover:bg-white/10 hover:text-white transition"
           >
-            <CreditCard className="h-4 w-4" />
-            <span>Billing & Financial Reports</span>
-          </button>
+            <span>S3 Cold Storage</span>
+            <ExternalLink size={12} className="text-white/40" />
+          </a>
+
+          <a
+            href={currentFullTabUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/20 bg-white/15 px-3.5 font-medium text-white hover:bg-white/25 transition"
+          >
+            <span>Open in Grafana</span>
+            <ExternalLink size={12} />
+          </a>
         </div>
+      </div>
 
-        {/* Tab Content Display */}
-        {activeTab === 'overview' && (
-          <ResourceSecurityOverview
-            metrics={metricsData}
-            securityCounters={securityData}
-            isLoading={isMetricsLoading || isSecurityLoading}
-          />
-        )}
-
-        {activeTab === 'logs' && (
-          <LogExplorerTable
-            logs={logsData?.logs || []}
-            total={logsData?.total || 0}
-            isLoading={isLogsLoading}
-            selectedSeverity={severityFilter}
-            selectedCategory={categoryFilter}
-            onSeverityChange={handleSeverityChange}
-            onCategoryChange={handleCategoryChange}
-            onSelectLog={(log) => setSelectedLog(log)}
-            onCorrelateAnonId={handleCorrelateAnonId}
-            limit={logLimit}
-            offset={logOffset}
-            onPageChange={(newOffset) => setLogOffset(newOffset)}
-          />
-        )}
-
-        {activeTab === 'billing' && (
-          <BillingDashboard
-            summary={billingData}
-            groupBy={billingGroupBy}
-            onGroupByChange={handleBillingGroupByChange}
-            isLoading={isBillingLoading}
-          />
-        )}
-
-        {/* Side Drawer for Log Details & Bastion Runbook */}
-        <LogSideDrawer
-          log={selectedLog}
-          onClose={() => setSelectedLog(null)}
-          onCorrelateAnonId={handleCorrelateAnonId}
+      {/* Full-Screen Grafana SIEM View */}
+      <div className="relative flex-1 w-full bg-[#111217]">
+        <iframe
+          key={`${activeDashboard}-${iframeKey}`}
+          data-testid="grafana-siem-fullscreen-iframe"
+          title="Grafana SIEM Dashboard"
+          src={currentGrafanaUrl}
+          className="h-full w-full border-0"
         />
       </div>
     </div>
