@@ -51,6 +51,7 @@ export interface SecurityCountersData {
   squidEgressAllowed: number;
   kyvernoBlocks: number;
   tailscaleDenies: number;
+  falcoEbpfAlerts?: number;
   totalViolations: number;
 }
 

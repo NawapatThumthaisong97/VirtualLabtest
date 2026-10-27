@@ -16,7 +16,8 @@
     - { role: common, tags: ['common'] }
     - { role: tailscale, tags: ['tailscale'] }
     - { role: k3s-agent, tags: ['k3s-agent'] }
-    - { role: siem-log-forwarding, tags: ['siem-log-forwarding', 'monitoring'] }  
+    - { role: siem-log-forwarding, tags: ['siem-log-forwarding', 'monitoring'] }
+    - { role: siem-layer1-collector, tags: ['siem-layer1'], when: enable_siem_layer1 | default(false) | bool }
 
 - name: Provision Virtual-Lab registry
   hosts: registry

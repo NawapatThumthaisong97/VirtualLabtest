@@ -34,6 +34,7 @@ class MonitorRepository:
         "squid_egress_drops": 42,
         "kyverno_policy_blocks": 15,
         "tailscale_cross_cluster_attempts": 7,
+        "falco_ebpf_alerts": 0,
         "last_violation_timestamp": datetime.now(timezone.utc) - timedelta(minutes=12),
     }
 
@@ -352,6 +353,9 @@ class MonitorRepository:
             self._security_counters["last_violation_timestamp"] = timestamp
         elif "TAILSCALE" in event_type_str:
             self._security_counters["tailscale_cross_cluster_attempts"] += 1
+            self._security_counters["last_violation_timestamp"] = timestamp
+        elif "FALCO" in event_type_str or "EBPF" in event_type_str:
+            self._security_counters["falco_ebpf_alerts"] = int(self._security_counters.get("falco_ebpf_alerts", 0)) + 1
             self._security_counters["last_violation_timestamp"] = timestamp
 
         return db_log
