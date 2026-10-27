@@ -1,0 +1,117 @@
+---
+# vlab-ecr-sync: sync camp registry -> ECR ด้วย systemd timer (รันหลัง role registry)
+# ปิด (ecr_sync_enabled: false) = หยุด timer แต่ไม่ลบไฟล์/key
+
+- name: Stop ECR sync when disabled
+  ansible.builtin.systemd:
+    name: vlab-ecr-sync.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: not (ecr_sync_enabled | bool)
+
+- name: ECR sync tasks
+  when: ecr_sync_enabled | bool
+  block:
+    - name: Validate ECR sync inputs
+      ansible.builtin.assert:
+        that:
+          - ecr_sync_registry is match('^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com$')
+          - ecr_sync_aws_access_key_id is match('^(AKIA|ASIA)[A-Z0-9]{16}$')
+          - ecr_sync_aws_secret_access_key | length >= 40
+          - ecr_sync_max_copies | int > 0
+          - ecr_sync_copy_timeout | int > 0
+        fail_msg: >-
+          ตั้ง ecr_sync_registry (<account>.dkr.ecr.<region>.amazonaws.com) และ
+          vault_ecr_sync_aws_access_key_id / vault_ecr_sync_aws_secret_access_key ใน group_vars/all.yml ให้ครบ
+        quiet: true
+      no_log: true
+
+    - name: Install skopeo and boto3
+      ansible.builtin.apt:
+        name: [skopeo, python3-boto3]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create sync user
+      ansible.builtin.user:
+        name: "{{ ecr_sync_user }}"
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+        home: /nonexistent
+
+    - name: Create install directory
+      ansible.builtin.file:
+        path: "{{ ecr_sync_install_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install sync script and skopeo policy
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ ecr_sync_install_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [ecr_sync.py, policy.json]
+      notify: Restart vlab-ecr-sync timer
+
+    # อ่านได้เฉพาะ root, service ได้ key ผ่าน LoadCredential
+    - name: Create config directory
+      ansible.builtin.file:
+        path: "{{ ecr_sync_config_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Write sync config
+      ansible.builtin.template:
+        src: config.env.j2
+        dest: "{{ ecr_sync_config_dir }}/config.env"
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Restart vlab-ecr-sync timer
+
+    - name: Write AWS credentials
+      ansible.builtin.template:
+        src: aws.env.j2
+        dest: "{{ ecr_sync_config_dir }}/aws.env"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Install systemd units
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [vlab-ecr-sync.service, vlab-ecr-sync.timer]
+      notify: Restart vlab-ecr-sync timer
+
+    # --check ไม่ได้เขียนไฟล์ unit จริง systemd จึงหา unit ไม่เจอ (ครั้งแรกที่ยังไม่เคยติดตั้ง) ข้ามไป
+    - name: Enable ECR sync timer
+      ansible.builtin.systemd:
+        name: vlab-ecr-sync.timer
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: not ansible_check_mode
+
+    # oneshot: start รอจนจบรอบ ล้ม = key / สิทธิ์ IAM / เครือข่ายมีปัญหา ดูด้วย journalctl -u vlab-ecr-sync
+    - name: Run first sync
+      ansible.builtin.systemd:
+        name: vlab-ecr-sync.service
+        state: started
+      when:
+        - ecr_sync_run_now | bool
+        - not ansible_check_mode
+      changed_when: false

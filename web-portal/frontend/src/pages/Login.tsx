@@ -20,6 +20,7 @@ import art6 from '../assets/login/ART_6.jpeg';
 import art7 from '../assets/login/ART_7.jpeg';
 import art8 from '../assets/login/ART_8.jpeg';
 import art9 from '../assets/login/ART_9.jpeg';
+import { homeFor } from '../utils/homePath';
 
 /* ══ REVEAL TIMELINE — art nodes ══
    ART1+ART2 0.15s · ART3 0.55s · ART4 0.80s · ART5 1.15s
@@ -85,21 +86,21 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { login, loginWithSSO, isAuthenticated, isLoading } = useAuth();
+  const { user, login, loginWithSSO, isAuthenticated, isLoading } = useAuth();
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
 
-  // Determine redirection destination after successful authentication
-  const destination = (location.state as { from?: { pathname?: string } })?.from?.pathname || '/';
+  // หน้าที่ถูกเด้งมา login (ถ้ามี) — ไม่มี = หน้าแรกตาม role (admin → /admin) ดู homeFor
+  const from = (location.state as { from?: { pathname?: string } })?.from?.pathname;
 
   // If already authenticated, redirect to destination immediately
   useEffect(() => {
     if (isAuthenticated && !isLoading) {
-      navigate(destination, { replace: true });
+      navigate(homeFor(user?.role, from), { replace: true });
     }
-  }, [isAuthenticated, isLoading, navigate, destination]);
+  }, [isAuthenticated, isLoading, navigate, user, from]);
 
   // Read error message from URL query params (e.g. from OAuth redirect failure)
   useEffect(() => {
@@ -186,8 +187,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(username, password);
-      navigate(destination, { replace: true });
+      const loggedIn = await login(username, password);
+      navigate(homeFor(loggedIn.role, from), { replace: true });
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } }).response?.status;
       setError(

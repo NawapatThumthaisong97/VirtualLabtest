@@ -1,6 +1,7 @@
 - name: Get registry-host IP from inventory
   ansible.builtin.set_fact:
     registry_ip: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}"
+  tags: [scan]   # namespace ของ scan ใช้ตัวแปรนี้ — รัน --tags scan ต้องได้ด้วย
 
 # master ก็ pull image เองได้ (sky launch ทดสอบ, pod ที่ไม่มี taint กันไว้) ต้องเชื่อ registry
 # แบบ HTTP เหมือนกับ worker - เขียนไว้ก่อนติดตั้ง k3s ให้มีผลตั้งแต่ครั้งแรกที่ server เริ่มรัน
@@ -125,6 +126,15 @@
   changed_when: "'unchanged' not in coredns_custom.stdout"
 
 # CoreDNS อ่าน resolv.conf (upstream) ตอนสร้าง pod เท่านั้น เปลี่ยน resolv-conf ของ k3s แล้วต้อง restart ด้วย
+# node Ready แล้ว แต่ k3s ยังทยอยสร้าง addon (coredns) จาก manifests อยู่ ติดตั้งใหม่ครั้งแรกจึงยังไม่มี deployment
+- name: Wait for CoreDNS deployment to exist
+  ansible.builtin.command: k3s kubectl -n kube-system get deploy/coredns
+  register: coredns_exists
+  until: coredns_exists.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+
 - name: Restart CoreDNS to load coredns-custom / new upstream resolv.conf
   ansible.builtin.command: k3s kubectl rollout restart deploy/coredns -n kube-system
   when: coredns_custom.changed or k3s_resolv.changed or k3s_config.changed
@@ -138,3 +148,14 @@
     YAML
   register: lab_np_default
   changed_when: "'unchanged' not in lab_np_default.stdout"
+
+# namespace + quota + NetworkPolicy ของ Job สแกน lab image (scan reconciler ของ backend สร้าง Job ที่นี่)
+# NetworkPolicy ต้องรู้ IP ของ registry จึงแทน REGISTRY_IP ตอน apply
+- name: Apply lab image scan namespace (vlab-scan)
+  ansible.builtin.shell: |
+    cat <<'YAML' | k3s kubectl apply -f -
+    {{ lookup('file', playbook_dir + '/../k8s/scan-namespace.yaml') | replace('REGISTRY_IP', registry_ip) }}
+    YAML
+  register: scan_namespace
+  changed_when: "'unchanged' not in scan_namespace.stdout"
+  tags: [scan]

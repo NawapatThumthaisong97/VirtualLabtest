@@ -56,6 +56,9 @@ webservice_aws_access_key_id: "{{ skypilot_aws_access_key_id | default('') }}"
 webservice_aws_secret_access_key: "{{ skypilot_aws_secret_access_key | default('') }}"
 
 # --- prewarm / warm pod / lab isolation (ดู docs/RUNBOOK.md หัวข้อ 3) ---
+# สแกน lab image ที่อาจารย์อัปโหลด (Trivy ใน Job บน K3s) ปิดไว้จนกว่าจะรัน role registry (scan-runner) + k3s-server แล้ว
+webservice_scan_enabled: false
+
 webservice_prewarm_enabled: true
 webservice_prewarm_lead_minutes: 30
 webservice_warm_pod_enabled: true

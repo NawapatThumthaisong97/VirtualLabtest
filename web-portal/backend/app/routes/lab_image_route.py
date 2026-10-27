@@ -1,0 +1,102 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Header, Query, status as http_status
+from sqlalchemy.orm import Session
+
+from app.adapters.r2_adapter import r2_adapter
+from app.configs.db import get_db
+from app.controllers.lab_image_controller import LabImageController
+from app.middlewares.auth import get_current_user
+from app.middlewares.request_validation import require_non_empty_body
+from app.models.user import User
+from app.repositories.lab_image_repository import LabImageRepository
+from app.schemas.lab_image_schema import (
+    LabImageResponse,
+    LabImageUploadRequest,
+    LabImageUploadResponse,
+    R2UploadWebhookPayload,
+    R2UploadWebhookResponse,
+)
+from app.schemas.response import ApiResponse
+from app.services.lab_image_service import LabImageService
+
+router = APIRouter()
+
+
+def get_controller(db: Session = Depends(get_db)) -> LabImageController:
+    return LabImageController(LabImageService(db, LabImageRepository(db), r2_adapter))
+
+
+@router.get("/lab-image", response_model=ApiResponse[list[LabImageResponse]])
+def list_lab_images(
+    course_id: UUID = Query(..., alias="courseId"),
+    current_user: User = Depends(get_current_user),
+    controller: LabImageController = Depends(get_controller),
+):
+    """lab image ทั้งหมดของวิชา (ใหม่สุดก่อน) พร้อมสถานะการสแกน
+
+    สิทธิ์เดียวกับการอัปโหลด: ผู้สอนวิชานั้น หรือ admin
+    """
+    return {
+        "success": True,
+        "message": "Lab images retrieved",
+        "data": controller.list_course_images(course_id, current_user),
+    }
+
+
+@router.post(
+    "/lab-image",
+    response_model=ApiResponse[LabImageUploadResponse],
+    status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(require_non_empty_body)],
+)
+def create_lab_image_upload(
+    payload: LabImageUploadRequest,
+    current_user: User = Depends(get_current_user),
+    controller: LabImageController = Depends(get_controller),
+):
+    """สร้าง draft lab image แล้วคืน presigned PUT URL สำหรับอัปโหลด .tar ขึ้น R2
+
+    ต้องเป็น instructor ที่สอนวิชา courseId ใน body (หรือ admin)
+    """
+    return {
+        "success": True,
+        "message": "Upload URL created",
+        "data": controller.create_upload(payload, current_user),
+    }
+
+
+@router.delete("/lab-image/{image_id}", response_model=ApiResponse[dict])
+def delete_lab_image(
+    image_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabImageController = Depends(get_controller),
+):
+    """ลบ image (DB + R2 + ECR) และปลดออกจาก lab ที่ใช้อยู่ — ผู้สอนวิชานั้น หรือ admin"""
+    detached = controller.delete_image(image_id, current_user)
+    return {
+        "success": True,
+        "message": "Lab image deleted",
+        "data": {"detachedLabs": detached},
+    }
+
+
+@router.post(
+    "/webhook/upload-trigger",
+    response_model=ApiResponse[R2UploadWebhookResponse],
+)
+def r2_upload_webhook(
+    payload: R2UploadWebhookPayload,
+    webhook_secret: str | None = Header(default=None, alias="Webhook-Secret"),
+    controller: LabImageController = Depends(get_controller),
+):
+    """รับ event จาก Cloudflare Worker (R2 PutObject / CompleteMultipartUpload)
+
+    ยืนยันตัวตนด้วย header Webhook-Secret เท่านั้น (ไม่ใช้ JWT)
+    """
+    data = controller.handle_upload_webhook(payload, webhook_secret)
+    return {
+        "success": True,
+        "message": "Upload event recorded" if data.updated else "No matching lab image",
+        "data": data,
+    }

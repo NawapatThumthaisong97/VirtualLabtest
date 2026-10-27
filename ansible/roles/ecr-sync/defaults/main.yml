@@ -1,0 +1,35 @@
+---
+# vlab-ecr-sync: systemd timer บนเครื่อง registry คัดลอก image จาก camp registry (localhost:5001) ขึ้น ECR
+#
+# image ใน camp registry ผ่าน scan มาแล้ว (scan-runner publish เฉพาะ PASS) role นี้จึงไม่สแกนซ้ำ
+# ชื่อ repository:tag บน ECR = ชื่อเดียวกับใน camp registry (backend ดึง ECR_REGISTRY_HOST/<repo>:<tag>)
+
+ecr_sync_enabled: false
+
+# <account>.dkr.ecr.<region>.amazonaws.com ต้องตรงกับ ECR_REGISTRY_HOST ของ backend (region ดึงจากชื่อนี้)
+ecr_sync_registry: ""
+
+# key ของ IAM user แยกเฉพาะงานนี้ (ห้ามใช้ key ของ SkyPilot / root) ใส่ใน group_vars/all.yml
+ecr_sync_aws_access_key_id: "{{ vault_ecr_sync_aws_access_key_id | default('') }}"
+ecr_sync_aws_secret_access_key: "{{ vault_ecr_sync_aws_secret_access_key | default('') }}"
+
+ecr_sync_source_registry: "localhost:5001"
+ecr_sync_interval: "2min"
+
+# เลือก repo ที่ sync (regex ของ Python) ว่าง = ทุก repo
+# lab image ทุกตัวต้องขึ้นต้น vlab/ (backend บังคับตอนขอ upload) และ IAM policy ให้สิทธิ์แค่ repository/vlab/*
+# ชื่ออื่นจึง sync ไม่ได้อยู่แล้ว (AccessDenied) include ไว้กันไม่ให้ทั้งรอบล้มเพราะ repo นอก prefix
+# vlab/scan-runner เป็น image ของระบบ ใช้ในห้องแลปเท่านั้น ไม่ต้องขึ้น ECR
+ecr_sync_include_regex: "^vlab/"
+ecr_sync_exclude_regex: "^vlab/scan-runner$"
+
+# จำกัดงานต่อรอบ (image ที่เหลือไปรอบถัดไป) และเวลาต่อ image
+ecr_sync_max_copies: 20
+ecr_sync_copy_timeout: 3600
+
+# รัน sync หนึ่งรอบตอนจบ role ไว้ตรวจว่า key / สิทธิ์ใช้ได้ (ล้ม = playbook ล้ม)
+ecr_sync_run_now: true
+
+ecr_sync_install_dir: /opt/vlab-ecr-sync
+ecr_sync_config_dir: /etc/vlab-ecr-sync
+ecr_sync_user: vlab-ecr-sync

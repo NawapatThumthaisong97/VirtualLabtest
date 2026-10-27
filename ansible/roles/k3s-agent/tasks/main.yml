@@ -121,13 +121,22 @@
   register: node_ready
   until: node_ready.rc == 0
 
-
-- name: Apply room label to worker node (vlab_room)
+# ห้องแลปของเครื่องนี้ (คอม 1 เครื่อง = 1 worker) หน้า admin monitor จัดกลุ่มห้องจาก label นี้
+# ใส่ vlab_room ต่อ host ใน inventory ไม่ใส่ = ไม่แตะ label (ห้อง unassigned) — docs/ADMIN_MONITOR.md
+# ใช้ kubectl label ไม่ใช้ --node-label ของ k3s เพราะ k3s ใส่ label นั้นแค่ตอน node ลงทะเบียนครั้งแรก
+- name: Label this node with its lab room (vlab/room)
   ansible.builtin.shell: |
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    NODE_NAME=$(k3s kubectl get nodes -o wide --no-headers | awk -v ip="{{ ansible_host }}" '$6==ip {print $1}')
-    [ -n "$NODE_NAME" ] && k3s kubectl label node "$NODE_NAME" vlab_room="{{ vlab_room }}" --overwrite
+    node=$(k3s kubectl get nodes -o wide --no-headers | awk -v ip="{{ ansible_host }}" '$6==ip {print $1}')
+    [ -n "$node" ] || { echo "node with IP {{ ansible_host }} not found" >&2; exit 1; }
+    current=$(k3s kubectl get node "$node" -o jsonpath='{.metadata.labels.vlab/room}')
+    [ "$current" = "{{ vlab_room }}" ] && exit 0
+    k3s kubectl label node "$node" vlab/room="{{ vlab_room }}" --overwrite >/dev/null && echo changed
+  args:
+    executable: /bin/bash
   delegate_to: "{{ groups['master'][0] }}"
   vars:
     ansible_become: false
+  register: room_label
+  changed_when: "'changed' in room_label.stdout"
   when: vlab_room is defined

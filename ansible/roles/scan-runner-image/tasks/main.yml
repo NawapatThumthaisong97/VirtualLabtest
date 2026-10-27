@@ -1,0 +1,212 @@
+---
+# Build vlab-scan-runner แล้ว push เข้า camp registry (role registry ต้องรันก่อน: มี docker + camp-registry)
+#
+# push ผ่าน localhost:5001 ไม่ใช่ IP: docker เชื่อ registry HTTP บน localhost โดยไม่ต้องแก้
+# insecure-registries ของเครื่องนี้ storage เดียวกับที่ K3s ดึงผ่าน <registry IP>:5001
+
+- name: Validate scan runner inputs
+  ansible.builtin.assert:
+    that:
+      - scan_runner_trivy_image is match('^[a-z0-9./-]+:[0-9.]+@sha256:[0-9a-f]{64}$')
+      - (':' ~ scan_runner_trivy_version ~ '@') in scan_runner_trivy_image
+      - scan_runner_trivy_version not in scan_runner_blocked_trivy_versions
+      - scan_runner_base_image is match('^[a-z0-9./-]+:[0-9a-z.-]+@sha256:[0-9a-f]{64}$')
+      - scan_runner_cosign_image is match('^.+@sha256:[0-9a-f]{64}$')
+      - scan_runner_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - scan_runner_repo is match('^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$')
+    fail_msg: >-
+      ค่า scan_runner_* ไม่ถูกต้อง: image ทุกตัวต้อง pin ด้วย digest, Trivy ห้ามเป็นเวอร์ชันที่ถูกวางโค้ดร้าย
+      และ scan_runner_version ต้องเป็น semver
+    quiet: true
+
+- name: Set scan runner facts
+  ansible.builtin.set_fact:
+    scan_runner_local_ref: "localhost:{{ scan_runner_registry_port }}/{{ scan_runner_repo }}:{{ scan_runner_version }}"
+    scan_runner_public_ref: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}:{{ scan_runner_registry_port }}/{{ scan_runner_repo }}"
+
+# ---------- supply chain: ตรวจลายเซ็น Trivy ----------
+
+- name: Verify Trivy image signature with cosign
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --read-only
+      - --cap-drop=ALL
+      - --security-opt=no-new-privileges
+      # cosign เขียน cache ของ TUF (trusted root) ที่ ~/.sigstore ต้องมีที่เขียนได้ แต่เป็น RAM ที่หายเมื่อ container จบ
+      - --tmpfs=/home/nonroot:rw,noexec,nosuid,size=32m,uid=65532,gid=65532
+      - "{{ scan_runner_cosign_image }}"
+      - verify
+      - "{{ scan_runner_trivy_image }}"
+      - --certificate-identity
+      - "{{ scan_runner_trivy_signer }}"
+      - --certificate-oidc-issuer
+      - "{{ scan_runner_trivy_oidc_issuer }}"
+  register: scan_runner_cosign
+  changed_when: false
+  when: scan_runner_cosign_verify | bool
+
+# ---------- source ----------
+
+- name: Create scan runner build directory
+  ansible.builtin.file:
+    path: "{{ scan_runner_build_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Copy scan runner build context
+  ansible.builtin.copy:
+    src: "{{ scan_runner_src }}{{ item }}"
+    dest: "{{ scan_runner_build_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - Dockerfile
+    - .dockerignore
+    - runner.py
+    - policy.json
+  register: scan_runner_context
+
+# hash ของ input ทั้งหมด (ไฟล์ + base image + เวอร์ชัน) ติดเป็น label ใช้ตัดสินว่า tag ใน registry คือของเดิมไหม
+- name: Compute build input hash
+  ansible.builtin.set_fact:
+    scan_runner_build_hash: >-
+      {{ ((scan_runner_context.results | map(attribute='checksum') | join(','))
+          ~ scan_runner_trivy_image ~ scan_runner_base_image ~ scan_runner_version) | hash('sha256') }}
+
+# ---------- build ----------
+
+- name: Build scan runner image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - --pull
+      - --build-arg
+      - "TRIVY_IMAGE={{ scan_runner_trivy_image }}"
+      - --build-arg
+      - "BASE_IMAGE={{ scan_runner_base_image }}"
+      - --build-arg
+      - "RUNNER_VERSION={{ scan_runner_version }}"
+      - --build-arg
+      - "TRIVY_VERSION={{ scan_runner_trivy_version }}"
+      - --label
+      - "vlab.scan-runner.build-hash={{ scan_runner_build_hash }}"
+      - -t
+      - "{{ scan_runner_local_ref }}"
+      - "{{ scan_runner_build_dir }}"
+  changed_when: false
+
+- name: Inspect built image
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ scan_runner_local_ref }}"]
+  register: scan_runner_inspect
+  changed_when: false
+
+- name: Read built image metadata
+  ansible.builtin.set_fact:
+    scan_runner_image_user: "{{ (scan_runner_inspect.stdout | from_json)[0].Config.User }}"
+
+- name: Image must run as non-root
+  ansible.builtin.assert:
+    that: scan_runner_image_user == '10001:10001'
+    fail_msg: "scan runner image must run as 10001:10001 (got '{{ scan_runner_image_user }}')"
+    quiet: true
+
+# smoke test ภายใต้ข้อจำกัดเดียวกับใน Pod: read-only, ไม่มี capability, ไม่มีเครือข่าย
+- name: Smoke test scan runner image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --read-only
+      - --cap-drop=ALL
+      - --security-opt=no-new-privileges
+      - --network=none
+      - --tmpfs=/work:rw,size=64m,uid=10001,gid=10001
+      - "{{ scan_runner_local_ref }}"
+      - version
+  register: scan_runner_smoke
+  changed_when: false
+
+- name: Smoke test must report the pinned Trivy version
+  ansible.builtin.assert:
+    that:
+      - (scan_runner_smoke.stdout | from_json).trivy == scan_runner_trivy_version
+      - (scan_runner_smoke.stdout | from_json).runner is defined
+    fail_msg: "unexpected tool versions: {{ scan_runner_smoke.stdout }}"
+    quiet: true
+
+# ---------- push (tag เป็น immutable) ----------
+
+- name: Ensure camp registry is reachable
+  ansible.builtin.uri:
+    url: "http://localhost:{{ scan_runner_registry_port }}/v2/"
+    status_code: 200
+  register: scan_runner_registry_check
+  retries: 3
+  delay: 5
+  until: scan_runner_registry_check.status == 200
+
+- name: Read existing manifest for this version
+  ansible.builtin.uri:
+    url: "http://localhost:{{ scan_runner_registry_port }}/v2/{{ scan_runner_repo }}/manifests/{{ scan_runner_version }}"
+    headers:
+      Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
+    status_code: [200, 404]
+    return_content: true
+  register: scan_runner_remote
+
+- name: Read existing image config
+  ansible.builtin.uri:
+    url: "http://localhost:{{ scan_runner_registry_port }}/v2/{{ scan_runner_repo }}/blobs/{{ (scan_runner_remote.content | from_json).config.digest }}"
+    return_content: true
+  register: scan_runner_remote_blob
+  when:
+    - scan_runner_remote.status == 200
+    - (scan_runner_remote.content | from_json).config is defined
+
+# build-hash เดิม = ของเดิม ไม่ต้อง push, ต่างกัน = ห้ามทับเงียบๆ (Job อาจกำลังใช้ tag นี้)
+- name: Decide whether to push
+  ansible.builtin.set_fact:
+    scan_runner_remote_hash: >-
+      {{ '' if scan_runner_remote.status != 200
+         else 'unknown' if scan_runner_remote_blob.content is not defined
+         else ((scan_runner_remote_blob.content | from_json).config.Labels | default({}, true))
+                .get('vlab.scan-runner.build-hash', 'unknown') }}
+
+- name: Refuse to overwrite an existing version with different content
+  ansible.builtin.fail:
+    msg: >-
+      {{ scan_runner_repo }}:{{ scan_runner_version }} มีอยู่แล้วใน registry แต่ build จาก input ต่างกัน
+      ให้เพิ่ม scan_runner_version (ห้ามเปลี่ยนเนื้อหาของเวอร์ชันที่ Job อาจใช้อยู่)
+      หรือรันด้วย -e scan_runner_force_push=true ถ้าตั้งใจจริง
+  when:
+    - scan_runner_remote_hash | length > 0
+    - scan_runner_remote_hash != scan_runner_build_hash
+    - not (scan_runner_force_push | bool)
+
+- name: Push scan runner image
+  ansible.builtin.command:
+    argv: [docker, push, "{{ scan_runner_local_ref }}"]
+  when: scan_runner_remote_hash != scan_runner_build_hash
+  changed_when: true
+
+- name: Read pushed manifest digest
+  ansible.builtin.uri:
+    url: "http://localhost:{{ scan_runner_registry_port }}/v2/{{ scan_runner_repo }}/manifests/{{ scan_runner_version }}"
+    method: HEAD
+    headers:
+      Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json"
+    status_code: 200
+  register: scan_runner_head
+
+- name: Report SCAN_RUNNER_IMAGE for the backend
+  ansible.builtin.debug:
+    msg: "SCAN_RUNNER_IMAGE={{ scan_runner_public_ref }}@{{ scan_runner_head.docker_content_digest }}"

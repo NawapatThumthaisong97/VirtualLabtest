@@ -66,6 +66,16 @@ interface CoursesApiResponse {
   }[];
 }
 
+/** `GET /api/courses/{id}/students` — EnrolledStudentResponse */
+export interface EnrolledStudent {
+  id: string;
+  name: string;
+  email: string;
+  studentId: string | null;
+  roleInCourse: 'student' | 'ta';
+  enrolledAt: string;
+}
+
 export const coursesService = {
   getAll: async (): Promise<Courses[]> => {
     const response = await apiClient.get<CoursesApiResponse[]>('/courses');
@@ -194,6 +204,12 @@ export const coursesService = {
 
   deleteAnnouncement: async (courseId: string, announcementId: string): Promise<void> => {
     await apiClient.delete(`/courses/${courseId}/announcements/${announcementId}`);
+  },
+
+  // Enrolled students (instructor / admin)
+  getStudents: async (courseId: string): Promise<EnrolledStudent[]> => {
+    const response = await apiClient.get<EnrolledStudent[]>(`/courses/${courseId}/students`);
+    return response as unknown as EnrolledStudent[];
   },
 
   // Delete course

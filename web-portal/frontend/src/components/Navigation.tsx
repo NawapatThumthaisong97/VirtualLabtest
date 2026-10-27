@@ -60,12 +60,12 @@ export default function Navigation() {
       <div className="relative flex items-center gap-3" ref={dropdownRef}>
         {user?.role === 'admin' && (
           <Link
-            to="/admin/monitor"
+            to="/admin"
             className="hidden sm:flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors"
-            title="Open Admin Monitor & SIEM Dashboard [🔒 READ-ONLY MODE]"
+            title="Open Admin Dashboard"
           >
             <Activity size={14} className="text-amber-400" />
-            <span>Monitor [🔒 Read-Only]</span>
+            <span>Admin Dashboard</span>
           </Link>
         )}
 
@@ -75,16 +75,14 @@ export default function Navigation() {
               type="button"
               aria-label="Account"
               onClick={() => setDropdownOpen((prev) => !prev)}
-              className="flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.05] py-1 pl-2 pr-3 text-white/90 hover:border-white/40 transition-colors cursor-pointer"
+              className="flex items-center gap-2 border-0 bg-transparent p-0 text-white/90 hover:text-white transition-colors cursor-pointer"
             >
+              {/* รูปโปรไฟล์ + ชื่อเท่านั้น ไม่มีกรอบ / ป้าย role (Pete ขอ) — role ดูได้จากเมนูที่เห็น */}
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/90">
                 <User size={15} strokeWidth={2} />
               </div>
-              <span className="text-[13px] font-medium max-w-[120px] truncate">
+              <span className="text-[13px] font-medium max-w-[180px] truncate">
                 {user.name || user.email}
-              </span>
-              <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-white/60">
-                {user.role}
               </span>
             </button>
 
@@ -100,12 +98,12 @@ export default function Navigation() {
 
                 {user.role === 'admin' && (
                   <Link
-                    to="/admin/monitor"
+                    to="/admin"
                     onClick={() => setDropdownOpen(false)}
                     className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-amber-300 hover:bg-white/[0.06] transition-colors cursor-pointer"
                   >
                     <Activity size={15} className="text-amber-400" />
-                    <span>Admin Monitor & SIEM</span>
+                    <span>Admin Dashboard</span>
                   </Link>
                 )}
 

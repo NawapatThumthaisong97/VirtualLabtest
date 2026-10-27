@@ -9,6 +9,8 @@ import compute from '../assets/home/compute-service-icon-white.png';
 const ICONS: Record<string, string> = {
   labwork: flask,
   compute: compute,
+  // Instructor Console ใช้ขวดเดียวกับ Lab work ตาม mockup
+  instructor: flask,
 };
 
 export type Service = {

@@ -3,7 +3,7 @@
  * Refactored into smaller components
  */
 import { useState } from 'react'
-import { ChevronRight, Plus, Bell, LayoutDashboard, FlaskConical, Users } from 'lucide-react'
+import { ChevronRight, Plus, Bell, LayoutDashboard, FlaskConical, Users, Container } from 'lucide-react'
 import { cn } from '../lib/utils'
 import CreateCourseModal from '../components/CreateCourseModal'
 import { coursesService } from '../services/courses'
@@ -14,6 +14,7 @@ import CourseSidebar from '../components/instructor/CourseSidebar'
 import OverviewTab from '../components/instructor/OverviewTab'
 import AnnouncementTab from '../components/instructor/AnnouncementTab'
 import LabsTab from '../components/instructor/LabsTab'
+import LabImageTab from '../components/instructor/LabImageTab'
 import StudentsTab from '../components/instructor/StudentsTab'
 import { useToast } from '../hooks/useToast'
 
@@ -72,6 +73,7 @@ export default function InstructorPage() {
     { id: 'overview', label: 'Course CRUD', icon: LayoutDashboard },
     { id: 'announcement', label: 'Announcements', icon: Bell },
     { id: 'labs', label: 'Labs', icon: FlaskConical },
+    { id: 'labImages', label: 'Lab images', icon: Container },
     { id: 'students', label: 'Enrolled students', icon: Users }
   ]
 
@@ -201,8 +203,11 @@ export default function InstructorPage() {
                       onUpdate={refreshCourseDetail}
                     />
                   )}
-                  {activeTab === 'labs' && <LabsTab courseId={course.id} />}
-                  {activeTab === 'students' && <StudentsTab />}
+                  {activeTab === 'labs' && (
+                    <LabsTab courseId={course.id} onManageImages={() => setActiveTab('labImages')} />
+                  )}
+                  {activeTab === 'labImages' && <LabImageTab courseId={course.id} />}
+                  {activeTab === 'students' && <StudentsTab courseId={course.id} />}
                 </>
               ) : (
                 <div className="flex h-96 items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white">

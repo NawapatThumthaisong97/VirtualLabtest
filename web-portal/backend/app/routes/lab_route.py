@@ -1,7 +1,7 @@
 import mimetypes
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status as http_status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status as http_status
 from fastapi.responses import FileResponse
 from app.middlewares.request_validation import require_non_empty_body
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def list_labs(
     return {
         "success": True,
         "message": "Labs retrieved successfully",
-        "data": controller.get_lab_by_course(course_id, current_user.id, status),
+        "data": controller.get_lab_by_course(course_id, current_user, status),
     }
 
 
@@ -53,7 +53,7 @@ def get_lab(
     return {
         "success": True,
         "message": "Lab retrieved successfully",
-        "data": controller.get_lab(lab_id),
+        "data": controller.get_lab(lab_id, current_user),
     }
 
 
@@ -64,7 +64,7 @@ def get_lab_doc(
     controller: LabController = Depends(get_controller)
 ):
     """ส่งไฟล์เอกสารแลปออกไปตรง ๆ (ต้อง login)"""
-    path = controller.get_lab_doc_path(lab_id)
+    path = controller.get_lab_doc_path(lab_id, current_user)
     media_type, _ = mimetypes.guess_type(path.name)
     return FileResponse(
         path,
@@ -83,11 +83,11 @@ def create_lab(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller)
 ):
-    """สร้าง lab ใหม่ (ต้อง login)"""
+    """สร้าง lab ใหม่ (ผู้สอนวิชานั้น / admin)"""
     return {
         "success": True,
         "message": "Lab created successfully",
-        "data": controller.create_lab(payload),
+        "data": controller.create_lab(payload, current_user),
     }
 
 
@@ -102,11 +102,26 @@ def update_lab(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller),
 ):
-    """อัปเดต lab (ต้อง login)"""
+    """อัปเดต lab (ผู้สอนวิชานั้น / admin)"""
     return {
         "success": True,
         "message": "Lab updated successfully",
-        "data": controller.update_lab(lab_id, payload),
+        "data": controller.update_lab(lab_id, payload, current_user),
+    }
+
+
+@router.post("/{lab_id}/doc", response_model=ApiResponse[LabResponse])
+def upload_lab_doc(
+    lab_id: UUID,
+    document: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller),
+):
+    """อัปโหลดเอกสาร PDF ของ lab (ผู้สอนวิชานั้น หรือ admin) — แทนไฟล์เดิมถ้ามี"""
+    return {
+        "success": True,
+        "message": "Lab document uploaded successfully",
+        "data": controller.save_lab_doc(lab_id, current_user, document.filename or "", document),
     }
 
 
@@ -116,5 +131,5 @@ def delete_lab(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller)
 ):
-    """ลบ lab (ต้อง login)"""
-    controller.delete_lab(lab_id)
+    """ลบ lab (ผู้สอนวิชานั้น / admin)"""
+    controller.delete_lab(lab_id, current_user)
