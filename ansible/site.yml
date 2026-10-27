@@ -25,7 +25,7 @@
     - { role: common, tags: ['common'] }
     - { role: registry, tags: ['registry'] }
     # ต้องรันหลัง registry (ใช้ docker + camp-registry ที่ role นั้นตั้งไว้)
-    - { role: scan-runner-image, tags: ['scan-runner'] }
+    - { role: scan-runner-image, tags: ['scan-runner', 'scan'] }
     # sync image ใน camp registry ขึ้น ECR (เปิดด้วย ecr_sync_enabled: true)
     - { role: ecr-sync, tags: ['ecr-sync'] }
 
