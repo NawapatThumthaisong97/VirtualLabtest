@@ -102,7 +102,8 @@ def test_publish_reading_only_lab_without_image(client, world, auth, create_lab)
 
 @pytest.mark.parametrize("who", ["owner", "co_instructor", "admin"])
 def test_course_staff_can_upload_pdf_and_students_can_read_it(client, world, auth, create_lab, who):
-    lab = create_lab()
+    # นักศึกษาเปิดเอกสารได้เฉพาะ lab ที่ published (draft ซ่อน ดูเทสด้านล่าง)
+    lab = create_lab(status="published")
     response = client.post(
         f"/api/labs/{lab['id']}/doc",
         files={"document": ("intro.pdf", PDF, "application/pdf")},
@@ -171,3 +172,31 @@ def test_create_lab_in_deleted_course_is_404(client, world, auth):
         "/api/labs", json={"courseId": str(world.deleted_course.id), "title": "x"}, headers=auth(world.owner)
     )
     assert response.status_code == 404
+
+
+# ---------- lab ที่เป็น draft เห็นได้เฉพาะผู้สอน / admin ----------
+
+def test_student_lists_only_published_labs(client, world, auth, create_lab):
+    draft = create_lab()
+    published = create_lab(status="published")
+    student = client.get(f"/api/labs?courseId={world.course.id}", headers=auth(world.student)).json()["data"]
+    staff = client.get(f"/api/labs?courseId={world.course.id}", headers=auth(world.owner)).json()["data"]
+    assert [lab["id"] for lab in student] == [published["id"]]
+    assert {lab["id"] for lab in staff} == {draft["id"], published["id"]}
+
+
+def test_student_asking_for_drafts_gets_nothing(client, world, auth, create_lab):
+    create_lab()
+    response = client.get(f"/api/labs?courseId={world.course.id}&status=draft", headers=auth(world.student))
+    assert response.json()["data"] == []
+
+
+def test_draft_lab_detail_and_doc_hidden_from_student(client, world, auth, create_lab):
+    lab = create_lab()
+    client.post(
+        f"/api/labs/{lab['id']}/doc", files={"document": ("a.pdf", PDF, "application/pdf")}, headers=auth(world.owner)
+    )
+    assert client.get(f"/api/labs/{lab['id']}", headers=auth(world.student)).status_code == 404
+    assert client.get(f"/api/labs/{lab['id']}/doc", headers=auth(world.student)).status_code == 404
+    assert client.get(f"/api/labs/{lab['id']}", headers=auth(world.co_instructor)).status_code == 200
+    assert client.get(f"/api/labs/{lab['id']}/doc", headers=auth(world.admin)).status_code == 200

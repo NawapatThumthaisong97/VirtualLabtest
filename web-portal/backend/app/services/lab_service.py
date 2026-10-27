@@ -103,6 +103,14 @@ class LabService:
             return
         raise ForbiddenError("ไม่ได้เป็นผู้สอนของวิชานี้")
 
+    def can_manage(self, user: User, course_id: UUID) -> bool:
+        """แบบไม่ raise — ใช้ตัดสินว่าจะให้เห็น lab ที่ยังไม่ published ไหม"""
+        try:
+            self.ensure_can_manage(user, course_id)
+            return True
+        except (CourseNotFoundError, ForbiddenError):
+            return False
+
     # POST
     def create_lab(self, payload: LabCreateRequest) -> Lab:
         self._ensure_image_in_course(payload.image_id, payload.course_id)

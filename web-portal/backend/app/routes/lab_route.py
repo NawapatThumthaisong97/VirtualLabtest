@@ -39,7 +39,7 @@ def list_labs(
     return {
         "success": True,
         "message": "Labs retrieved successfully",
-        "data": controller.get_lab_by_course(course_id, current_user.id, status),
+        "data": controller.get_lab_by_course(course_id, current_user, status),
     }
 
 
@@ -53,7 +53,7 @@ def get_lab(
     return {
         "success": True,
         "message": "Lab retrieved successfully",
-        "data": controller.get_lab(lab_id),
+        "data": controller.get_lab(lab_id, current_user),
     }
 
 
@@ -64,7 +64,7 @@ def get_lab_doc(
     controller: LabController = Depends(get_controller)
 ):
     """ส่งไฟล์เอกสารแลปออกไปตรง ๆ (ต้อง login)"""
-    path = controller.get_lab_doc_path(lab_id)
+    path = controller.get_lab_doc_path(lab_id, current_user)
     media_type, _ = mimetypes.guess_type(path.name)
     return FileResponse(
         path,
