@@ -25,7 +25,18 @@ function PageMessage({ children }: { children: React.ReactNode }) {
   return <div className={styles.message}>{children}</div>;
 }
 
-export default function CoursesPage() {
+type CoursesPageProps = {
+  /** หัวแถบ — นักศึกษา "Lab work" / อาจารย์ "Instructor Console" */
+  title?: string;
+  /** การ์ดวิชาพาไปไหน — อาจารย์ไปหน้าจัดการวิชาแทนหน้าเรียน */
+  linkTo?: (course: Courses) => string;
+};
+
+// หน้าเดียวใช้ทั้งนักศึกษาและอาจารย์ /courses กรองตาม role ให้แล้ว (อาจารย์ได้เฉพาะวิชาที่สอน)
+export default function CoursesPage({
+  title = 'Lab work',
+  linkTo = (course) => `/courses/${course.id}`,
+}: CoursesPageProps) {
   const { data: courses = [], isPending, isError } = useQuery({
     queryKey: ['courses'],
     queryFn: coursesService.getAll,
@@ -39,7 +50,7 @@ export default function CoursesPage() {
       <div className={styles.header}>
         <div className={styles.headerInner}>
           <img src={labLogo} alt="" className={styles.headerLogo} />
-          <h1>Lab work</h1>
+          <h1>{title}</h1>
         </div>
       </div>
 
@@ -49,7 +60,7 @@ export default function CoursesPage() {
         ) : (
           <section className={styles.grid} aria-label="Courses">
             {courses.map((course) => (
-              <Link to={`/courses/${course.id}`} key={course.id} className={styles.cardLink}>
+              <Link to={linkTo(course)} key={course.id} className={styles.cardLink}>
                 <article className={styles.card}>
                   <div
                     className={styles.cover}

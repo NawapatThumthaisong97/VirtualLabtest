@@ -31,22 +31,33 @@ const TABS: Tab[] = [
   { id: 'helpdesk', label: 'Help Desk' },
 ];
 
-const SERVICES: Service[] = [
-  {
-    id: 'labwork',
-    title: 'Lab work',
-    text: 'Launch a preconfigured lab in one click. No setup, no installs, just start working.',
-    icon: 'labwork',
-    iconWidth: 48,
-  },
-  {
-    id: 'compute',
-    title: 'Compute service',
-    text: 'Need more power? Burst your lab to the cloud and get GPUs on demand.',
-    icon: 'compute',
-    iconWidth: 60,
-  },
-];
+const LAB_WORK: Service = {
+  id: 'labwork',
+  title: 'Lab work',
+  text: 'Launch a preconfigured lab in one click. No setup, no installs, just start working.',
+  icon: 'labwork',
+  iconWidth: 48,
+};
+
+const COMPUTE: Service = {
+  id: 'compute',
+  title: 'Compute service',
+  text: 'Need more power? Burst your lab to the cloud and get GPUs on demand.',
+  icon: 'compute',
+  iconWidth: 60,
+};
+
+const INSTRUCTOR_CONSOLE: Service = {
+  id: 'instructor',
+  title: 'Instructor Console',
+  text: 'Manage your courses, labs and lab images in one place.',
+  icon: 'instructor',
+  iconWidth: 48,
+};
+
+// อาจารย์ / admin ไม่มีงานแลปให้ทำเอง การ์ดแรกเลยเป็นหน้าจัดการวิชาแทน (เรียงตาม mockup)
+const STUDENT_SERVICES: Service[] = [LAB_WORK, COMPUTE];
+const INSTRUCTOR_SERVICES: Service[] = [COMPUTE, INSTRUCTOR_CONSOLE];
 
 const ACTIVITY_LOG: Entry[] = [
   { name: 'Virtual Lab team', text: LOREM },
@@ -104,10 +115,16 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
     announcements && announcements.length > 0 ? announcements : NO_ANNOUNCEMENT;
 
   const isService = tab === 'service';
+  const isInstructor = currentUser?.role === 'instructor' || currentUser?.role === 'admin';
+  const services = isInstructor ? INSTRUCTOR_SERVICES : STUDENT_SERVICES;
 
   const handleServiceSelect = (serviceId: string) => {
     if (serviceId === 'labwork') {
       navigate('/courses');
+      return;
+    }
+    if (serviceId === 'instructor') {
+      navigate('/instructor/courses');
       return;
     }
     setSelectedService(serviceId);
@@ -143,7 +160,7 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
               </div>
 
               <div className="flex flex-wrap gap-4">
-                {SERVICES.map((svc) => (
+                {services.map((svc) => (
                   <ServiceCard
                     key={svc.id}
                     service={svc}
