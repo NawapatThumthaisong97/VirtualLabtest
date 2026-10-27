@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 
-from app.exceptions.domain import LabNotFoundError
+from app.exceptions.domain import ForbiddenError, LabNotFoundError
 from app.models.lab import LabStatus
 from app.schemas.lab_schema import (
     LabCreateRequest,
@@ -16,12 +16,14 @@ class LabController:
     def __init__(self, service: LabService):
         self.service = service
 
-    # lab ที่ยังไม่ published (draft) เห็นได้เฉพาะผู้สอนวิชานั้น / admin
-    # คนอื่นตอบเหมือนไม่มี lab นั้น (ไม่บอกว่ามี draft อยู่)
+    # ผู้สอนวิชานั้น / admin เห็นทุก lab, คนที่ลงทะเบียนวิชาเห็นเฉพาะ published, คนนอกวิชาไม่เห็นเลย
+    # lab ที่ซ่อนตอบเหมือนไม่มี lab นั้น (ไม่บอกว่ามี draft อยู่)
     def get_lab_by_course(
         self, course_id: UUID, user, status: LabStatus | None = None
     ) -> list[LabResponse]:
         if not self.service.can_manage(user, course_id):
+            if not self.service.is_enrolled(user, course_id):
+                raise ForbiddenError("ไม่ได้ลงทะเบียนวิชานี้")
             if status not in (None, LabStatus.PUBLISHED):
                 return []
             status = LabStatus.PUBLISHED
@@ -35,7 +37,9 @@ class LabController:
 
     def _get_visible_lab(self, lab_id: UUID, user):
         lab = self.service.get_lab_by_id(lab_id)
-        if lab.status != LabStatus.PUBLISHED and not self.service.can_manage(user, lab.course_id):
+        if self.service.can_manage(user, lab.course_id):
+            return lab
+        if lab.status != LabStatus.PUBLISHED or not self.service.is_enrolled(user, lab.course_id):
             raise LabNotFoundError(f"Lab {lab_id} not found")
         return lab
 

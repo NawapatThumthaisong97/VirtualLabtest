@@ -103,6 +103,10 @@ class LabService:
             return
         raise ForbiddenError("ไม่ได้เป็นผู้สอนของวิชานี้")
 
+    def is_enrolled(self, user: User, course_id: UUID) -> bool:
+        """ลงทะเบียนวิชานี้ (นักศึกษา / TA / ผู้สอน) — คนที่ไม่ได้ลงไม่ควรเห็น lab ของวิชา"""
+        return RBACRepository(self.db).is_enrolled(user.id, course_id)
+
     def can_manage(self, user: User, course_id: UUID) -> bool:
         """แบบไม่ raise — ใช้ตัดสินว่าจะให้เห็น lab ที่ยังไม่ published ไหม"""
         try:

@@ -200,3 +200,10 @@ def test_draft_lab_detail_and_doc_hidden_from_student(client, world, auth, creat
     assert client.get(f"/api/labs/{lab['id']}/doc", headers=auth(world.student)).status_code == 404
     assert client.get(f"/api/labs/{lab['id']}", headers=auth(world.co_instructor)).status_code == 200
     assert client.get(f"/api/labs/{lab['id']}/doc", headers=auth(world.admin)).status_code == 200
+
+
+def test_outsider_cannot_list_or_open_labs_of_course_they_are_not_in(client, world, auth, create_lab):
+    lab = create_lab(status="published")
+    listing = client.get(f"/api/labs?courseId={world.course.id}", headers=auth(world.outsider))
+    detail = client.get(f"/api/labs/{lab['id']}", headers=auth(world.outsider))
+    assert (listing.status_code, detail.status_code) == (403, 404)
