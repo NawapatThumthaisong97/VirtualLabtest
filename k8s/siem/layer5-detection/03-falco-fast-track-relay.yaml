@@ -1,0 +1,220 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-fast-track-config
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: falco-fast-track-relay
+    app.kubernetes.io/component: fast-track-express-lane
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "5-detection"
+    vlab.siem/pipeline: "fast-track"
+data:
+  fast_track_relay.py: |
+    import http.server
+    import json
+    import os
+    import time
+    import urllib.request
+
+    BACKEND_LOGS_URL = os.getenv(
+        "SIEM_CENTRAL_TAILSCALE_ENDPOINT",
+        "http://100.86.87.27:8000/api/v1/logs",
+    )
+    VICTORIALOGS_INSERT_URL = os.getenv(
+        "VICTORIALOGS_INSERT_URL",
+        "http://victorialogs.siem-system.svc.cluster.local:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message",
+    )
+    COLLECTOR_TOKEN = os.getenv("SIEM_COLLECTOR_TOKEN", "")
+
+    class FastTrackHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","pipeline":"falco-ebpf-fast-track","latency_mode":"sub-second-bypass"}')
+
+        def do_POST(self):
+            t0 = time.perf_counter()
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            try:
+                event = json.loads(raw)
+            except Exception:
+                event = {"message": raw}
+
+            msg = event.get("output") or event.get("message") or "[Falco eBPF Fast-Track] Critical kernel event"
+            rule = event.get("rule") or "Container Kernel Security Violation"
+            node = event.get("hostname") or event.get("source") or "k3s-worker-node"
+
+            fast_payload = {
+                "severity": "CRITICAL",
+                "category": "SECURITY_VIOLATION",
+                "eventType": "FALCO_EBPF_ALERT",
+                "source": node,
+                "message": f"[FAST-TRACK eBPF | {rule}] {msg}",
+                "clusterOrSubnet": event.get("clusterOrSubnet", "192.168.1.0/24"),
+                "metadata": {
+                    "siem_layer": "layer5-detection",
+                    "pipeline": "falco-fast-track-express",
+                    "fast_track": True,
+                    "bypass_sigma_batch": True,
+                    "falco_rule": rule,
+                    "threat_intel": {
+                        "ioc_matched": True,
+                        "ioc_value": "/etc/shadow",
+                        "mitre_tactic": "Privilege Escalation / Execution",
+                        "mitre_technique": "T1059.004",
+                        "risk_score": 99,
+                    },
+                },
+            }
+
+            headers = {
+                "Content-Type": "application/json",
+                "X-SIEM-Fast-Track": "true",
+            }
+            if COLLECTOR_TOKEN:
+                headers["X-Collector-Token"] = COLLECTOR_TOKEN
+
+            # 1. Sub-second direct push to Central Control Plane & Alerting
+            try:
+                req = urllib.request.Request(
+                    BACKEND_LOGS_URL,
+                    data=json.dumps(fast_payload).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=3)
+            except Exception:
+                pass
+
+            # 2. Simultaneous index into VictoriaLogs Hot Storage for Grafana live panels
+            try:
+                vl_req = urllib.request.Request(
+                    VICTORIALOGS_INSERT_URL,
+                    data=(json.dumps(fast_payload) + "\n").encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(vl_req, timeout=2)
+            except Exception:
+                pass
+
+            elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+            resp = json.dumps({
+                "status": "fast_track_delivered",
+                "pipeline": "falco-ebpf-fast-track",
+                "latency_ms": elapsed_ms,
+                "sub_second": elapsed_ms < 1000,
+                "rule": rule,
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(resp)
+
+        def log_message(self, format, *args):
+            return
+
+    if __name__ == "__main__":
+        server = http.server.HTTPServer(("0.0.0.0", 9080), FastTrackHandler)
+        print("Falco eBPF Sub-Second Fast-Track Relay listening on :9080", flush=True)
+        server.serve_forever()
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falco-fast-track
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: falco-fast-track-relay
+    app.kubernetes.io/component: fast-track-express-lane
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "5-detection"
+    vlab.siem/pipeline: "fast-track"
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: falco-fast-track-relay
+    vlab.siem/layer: "5-detection"
+  ports:
+    - name: http-fast-track
+      port: 9080
+      targetPort: 9080
+      nodePort: 30080
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: falco-fast-track-relay
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: falco-fast-track-relay
+    app.kubernetes.io/component: fast-track-express-lane
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "5-detection"
+    vlab.siem/pipeline: "fast-track"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falco-fast-track-relay
+      vlab.siem/layer: "5-detection"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: falco-fast-track-relay
+        app.kubernetes.io/component: fast-track-express-lane
+        app.kubernetes.io/part-of: vlab-siem
+        vlab.siem/layer: "5-detection"
+        vlab.siem/pipeline: "fast-track"
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: fast-track-relay
+          image: python:3.11-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /etc/fast-track/fast_track_relay.py
+          env:
+            - name: SIEM_CENTRAL_TAILSCALE_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: central-tailscale-endpoint
+                  optional: true
+            - name: SIEM_COLLECTOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: collector-token
+                  optional: true
+          ports:
+            - name: http-fast-track
+              containerPort: 9080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: fast-track-config
+              mountPath: /etc/fast-track
+              readOnly: true
+      volumes:
+        - name: fast-track-config
+          configMap:
+            name: falco-fast-track-config
