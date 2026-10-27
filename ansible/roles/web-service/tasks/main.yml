@@ -98,6 +98,8 @@
       - "--exclude=dist"
       - "--exclude=kubeconfig.yaml"
       - "--exclude=aws-credentials"
+      # backup DB ก่อน migrate (pg_dump) — delete: yes จะลบทิ้งถ้าไม่ exclude
+      - "--exclude=backups"
 
 - name: Ensure storage directory exists (ไฟล์เอกสารแลป — ห้ามถูก rsync ลบ)
   ansible.builtin.file:
