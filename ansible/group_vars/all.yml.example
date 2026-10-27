@@ -56,3 +56,12 @@ ecr_sync_enabled: false
 ecr_sync_registry: <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
 vault_ecr_sync_aws_access_key_id: <ECR_SYNC_ACCESS_KEY_ID>
 vault_ecr_sync_aws_secret_access_key: <ECR_SYNC_SECRET_ACCESS_KEY>
+
+# --- R2 (lab image .tar) — ไม่ตั้ง = อัป image ไม่ได้ ส่วนอื่นของเว็บใช้ได้ปกติ
+# bucket ต้องตั้ง CORS ให้ origin ของเว็บ PUT ได้ (AllowedMethods PUT, AllowedHeaders *)
+vault_r2_account_id: <R2_ACCOUNT_ID>
+vault_r2_bucket_name: <R2_BUCKET_NAME>
+vault_r2_access_key_id: <R2_ACCESS_KEY_ID>
+vault_r2_secret_access_key: <R2_SECRET_ACCESS_KEY>
+# สุ่มเอง (openssl rand -hex 32) ต้องตรงกับ secret WEBHOOK_SECRET ของ Cloudflare Worker
+vault_r2_webhook_secret: <WEBHOOK_SECRET>
