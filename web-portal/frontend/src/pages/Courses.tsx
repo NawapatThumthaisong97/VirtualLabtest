@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { coursesService } from '../services/courses';
 import type { Courses } from '../services/courses';
 import styles from './Courses.module.css';
-import labLogo from '../assets/lab.png';
+import DashboardHeader from '../components/admin/DashboardHeader';
 import { BACKGROUND_PRESETS, ICON_KEYS, ICON_PRESETS } from '../constants/coursePresets';
 
 // ไฟล์ที่อัปเองมาก่อน ถ้าไม่มีค่อยใช้ preset ที่เลือกไว้ ถ้าไม่มีอีกก็ปล่อยเป็น gradient ใน CSS
@@ -36,12 +36,12 @@ export default function CoursesPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <div className={styles.headerInner}>
-          <img src={labLogo} alt="" className={styles.headerLogo} />
-          <h1>Lab work</h1>
-        </div>
-      </div>
+      {/* กว้างเท่า .grid ใน .content — ขอบซ้ายชื่อหน้าตรงกับขอบการ์ด */}
+      <DashboardHeader
+        title="My Laboratory"
+        features={[]}
+        inner={{ width: 'min(1120px, calc(100% - 2 * clamp(1.25rem, 5vw, 4rem)))', margin: '0 auto', padding: 0 }}
+      />
 
       <div className={styles.content}>
         {courses.length === 0 ? (
