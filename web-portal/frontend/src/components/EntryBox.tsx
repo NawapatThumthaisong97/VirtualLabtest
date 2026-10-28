@@ -15,9 +15,10 @@ type EntryBoxProps = {
 
 export default function EntryBox({ heading, entries }: EntryBoxProps) {
   return (
-    <div className="flex flex-col gap-3.5">
+    // h-full + การ์ด flex-1: สองกล่องใน grid เดียวกันสูงเท่ากันเสมอ แม้จำนวนบรรทัดไม่เท่ากัน
+    <div className="flex h-full flex-col gap-3.5">
       <div className="text-[15px] font-semibold text-white">{heading}</div>
-      <div className="rounded-xl bg-[#FAF7F1] p-6 shadow-[0_8px_24px_rgba(10,30,60,0.15)]">
+      <div className="flex-1 rounded-xl bg-[#FAF7F1] p-6 shadow-[0_8px_24px_rgba(10,30,60,0.15)]">
         {entries.map((e, i) => (
           <div
             key={i}

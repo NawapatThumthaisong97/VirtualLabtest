@@ -16,13 +16,11 @@ import type { Tab } from '../components/TabNav.tsx';
 import ServiceCard from '../components/ServiceCard.tsx';
 import type { Service } from '../components/ServiceCard.tsx';
 import EntryBox from '../components/EntryBox.tsx';
+import { activityService, toEntry } from '../services/activity.ts';
 import type { Entry } from '../components/EntryBox.tsx';
 import styles from './Home.module.css';
 import heroBg from '../assets/B1.jpg';
 
-// Placeholder copy — swap for real data once the endpoints exist.
-const LOREM =
-  'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nunc quis nisi ac tortor';
 
 const TABS: Tab[] = [
   { id: 'recent', label: 'Recent' },
@@ -59,10 +57,8 @@ const INSTRUCTOR_CONSOLE: Service = {
 const STUDENT_SERVICES: Service[] = [LAB_WORK, COMPUTE];
 const INSTRUCTOR_SERVICES: Service[] = [COMPUTE, INSTRUCTOR_CONSOLE];
 
-const ACTIVITY_LOG: Entry[] = [
-  { name: 'Virtual Lab team', text: LOREM },
-  { name: 'CS102 : Prof.Jose Matt', text: LOREM },
-];
+// สองกล่องแสดงจำนวนเท่ากัน + สูงเท่ากัน (Pete ขอ "สองข้างเท่ากัน")
+const ENTRY_LIMIT = 3;
 
 const NO_ANNOUNCEMENT: Entry[] = [
   { name: 'Virtual Lab team', text: 'ยังไม่มีประกาศจากวิชาที่คุณลงเรียน' },
@@ -121,15 +117,33 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
     },
   });
 
+  const { data: activities } = useQuery({
+    queryKey: ['home-activity'],
+    enabled: Boolean(currentUser),
+    queryFn: () => activityService.getMine(ENTRY_LIMIT),
+  });
+
   // ชื่อจริงอาจยาว หัวเรื่องเอาแค่ชื่อต้น
   const displayName = studentName ?? greetingName(currentUser?.name ?? '');
   const displayGreeting = greeting ?? greetingFor(new Date().getHours());
-  const announcementEntries =
-    announcements && announcements.length > 0 ? announcements : NO_ANNOUNCEMENT;
+  const announcementEntries = (
+    announcements && announcements.length > 0 ? announcements : NO_ANNOUNCEMENT
+  ).slice(0, ENTRY_LIMIT);
 
   const isService = tab === 'service';
   const isInstructor = currentUser?.role === 'instructor' || currentUser?.role === 'admin';
   const services = isInstructor ? INSTRUCTOR_SERVICES : STUDENT_SERVICES;
+  const activityEntries: Entry[] =
+    activities && activities.length > 0
+      ? activities.map(toEntry)
+      : [
+          {
+            name: 'Virtual Lab team',
+            text: isInstructor
+              ? 'ยังไม่มีความเคลื่อนไหวในวิชาที่สอน'
+              : 'ยังไม่มีกิจกรรม — เริ่มจาก Lab work ด้านบน',
+          },
+        ];
 
   const handleServiceSelect = (serviceId: string) => {
     if (serviceId === 'labwork') {
@@ -193,7 +207,7 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
           key={tab}
           className={`relative z-[2] mx-auto -mt-[60px] grid w-full max-w-[1230px] grid-cols-2 gap-5 px-10 ${styles.fadeUp}`}
         >
-          <EntryBox heading="Activity Logging" entries={ACTIVITY_LOG} />
+          <EntryBox heading="Activity Logging" entries={activityEntries} />
           <EntryBox heading="Announcement" entries={announcementEntries} />
         </div>
       )}
