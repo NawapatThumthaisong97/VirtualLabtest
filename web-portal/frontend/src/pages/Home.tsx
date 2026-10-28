@@ -58,7 +58,7 @@ const STUDENT_SERVICES: Service[] = [LAB_WORK, COMPUTE];
 const INSTRUCTOR_SERVICES: Service[] = [COMPUTE, INSTRUCTOR_CONSOLE];
 
 // สองกล่องแสดงจำนวนเท่ากัน + สูงเท่ากัน (Pete ขอ "สองข้างเท่ากัน")
-const ENTRY_LIMIT = 3;
+const ENTRY_LIMIT = 2;
 
 const NO_ANNOUNCEMENT: Entry[] = [
   { name: 'Virtual Lab team', text: 'ยังไม่มีประกาศจากวิชาที่คุณลงเรียน' },

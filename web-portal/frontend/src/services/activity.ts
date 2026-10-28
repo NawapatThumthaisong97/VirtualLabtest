@@ -29,7 +29,7 @@ export interface Activity {
 }
 
 export const activityService = {
-  getMine: async (limit = 3): Promise<Activity[]> => {
+  getMine: async (limit = 2): Promise<Activity[]> => {
     const response = (await apiClient.get('/v1/me/activity', { params: { limit } })) as unknown as { data: Activity[] };
     return response.data ?? [];
   },
