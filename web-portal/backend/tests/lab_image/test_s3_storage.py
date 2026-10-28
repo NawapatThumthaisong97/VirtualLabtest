@@ -140,8 +140,25 @@ def test_course_document_on_s3(s3, client, world, auth):
     assert "filename*=UTF-8''%E0%B8%9A" in s3.presigned[-1]["ResponseContentDisposition"]
 
 
+@pytest.mark.parametrize("who", ["owner", "co_instructor", "admin"])
+def test_course_staff_can_upload_cover(s3, client, world, auth, who):
+    # owner = ผู้สร้างวิชาที่ไม่ได้ enroll (สร้างจาก Instructor Console) — เดิมได้ 403
+    response = client.post(
+        f"/api/courses/{world.course.id}/image", files={"image": ("c.png", b"\x89PNG", "image/png")},
+        headers=auth(getattr(world, who)),
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_outsider_and_student_cannot_upload_cover(s3, client, world, auth):
+    for user in (world.outsider, world.student):
+        response = client.post(
+            f"/api/courses/{world.course.id}/image", files={"image": ("c.png", b"\x89PNG", "image/png")}, headers=auth(user)
+        )
+        assert response.status_code == 403
+
+
 def test_course_image_upload_open_and_delete(s3, client, world, auth):
-    # สิทธิ์ storage:images:push:course ต้อง enroll เป็นผู้สอน (ผู้สร้างวิชาเฉย ๆ ไม่พอ — พฤติกรรม RBAC เดิม)
     png = b"\x89PNG\r\n\x1a\nfake"
     uploaded = client.post(
         f"/api/courses/{world.course.id}/image", files={"image": ("cover.png", png, "image/png")},
