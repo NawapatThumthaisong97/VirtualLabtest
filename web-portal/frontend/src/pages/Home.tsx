@@ -53,9 +53,9 @@ const INSTRUCTOR_CONSOLE: Service = {
   iconWidth: 48,
 };
 
-// อาจารย์ / admin ไม่มีงานแลปให้ทำเอง การ์ดแรกเลยเป็นหน้าจัดการวิชาแทน (เรียงตาม mockup)
+// อาจารย์ / admin ไม่มีงานแลปให้ทำเอง การ์ดแรกเลยเป็นหน้าจัดการวิชา (Pete ให้ Instructor Console ขึ้นก่อน)
 const STUDENT_SERVICES: Service[] = [LAB_WORK, COMPUTE];
-const INSTRUCTOR_SERVICES: Service[] = [COMPUTE, INSTRUCTOR_CONSOLE];
+const INSTRUCTOR_SERVICES: Service[] = [INSTRUCTOR_CONSOLE, COMPUTE];
 
 // สองกล่องแสดงจำนวนเท่ากัน + สูงเท่ากัน (Pete ขอ "สองข้างเท่ากัน")
 const ENTRY_LIMIT = 2;
