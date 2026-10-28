@@ -3,7 +3,7 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
-from app.adapters.local_storage import local_storage
+from app.adapters.storage import get_storage
 from app.exceptions.domain import (
     ConflictError,
     CourseNotFoundError,
@@ -275,9 +275,13 @@ class CourseService:
                 raise ValidationError("Invalid filename")
 
             key = f"courses/{course_id}/{safe_filename}"
-            local_storage.save(key, source.file)
+            previous = course.image_url
+            get_storage().save(key, source.file, getattr(source, "content_type", None))
             course.image_url = key
             self.course_repository.db.commit()
+            # รูปเดิมชื่ออื่น = ขยะใน storage (URL ภายนอก http(s) ไม่ใช่ไฟล์ของเรา ไม่แตะ)
+            if previous and previous != key and not _is_external(previous):
+                get_storage().delete(previous)
             return course
         except (CourseNotFoundError, ValidationError):
             raise
@@ -286,6 +290,18 @@ class CourseService:
             raise InternalServerError(
                 f"Failed to save course image: {str(e)}"
             ) from e
+
+    def delete_course_image(self, course_id: UUID) -> Course:
+        """ลบรูปปกที่อัปเอง กลับไปใช้ preset (background_key) — URL ภายนอกแค่ล้างค่า ไม่ลบไฟล์"""
+        course = self.course_repository.find_by_id(course_id)
+        if not course:
+            raise CourseNotFoundError(f"Course {course_id} not found")
+        previous = course.image_url
+        course.image_url = None
+        self.course_repository.db.commit()
+        if previous and not _is_external(previous):
+            get_storage().delete(previous)
+        return course
 
     def update_announcement_ids(
         self, course_id: UUID, announcement_ids: list[UUID]
@@ -470,3 +486,7 @@ class CourseService:
                 f"Failed to delete announcement: {str(e)}"
             ) from e
     
+
+
+def _is_external(image_url: str) -> bool:
+    return image_url.startswith(("http://", "https://"))

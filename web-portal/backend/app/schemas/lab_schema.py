@@ -81,3 +81,8 @@ class LabUpdateRequest(CamelModel):
 
 
 # Delete don't require schemas implementation
+
+
+class LabDocUrlResponse(CamelModel):
+    """URL ไว้ fetch เอกสาร — null = storage เป็น disk ให้ใช้ GET /labs/{id}/doc"""
+    url: str | None = None

@@ -17,7 +17,7 @@ PDF = b"%PDF-1.4\n%course-doc\n"
 @pytest.fixture(autouse=True)
 def tmp_storage(tmp_path, monkeypatch):
     storage = LocalStorage(str(tmp_path))
-    monkeypatch.setattr("app.services.course_document_service.local_storage", storage)
+    monkeypatch.setattr("app.adapters.storage._storage", storage)
     return storage
 
 
