@@ -9,11 +9,23 @@ import { apiErrorMessage } from '../../services/labImage';
 import { BACKGROUND_KEYS, BACKGROUND_PRESETS, ICON_KEYS, ICON_PRESETS } from '../../constants/coursePresets';
 import type { BackgroundKey, IconKey } from '../../constants/coursePresets';
 
+/** วิชาที่จะแก้ (ไม่ส่ง = สร้างใหม่) */
+export interface EditableCourse {
+  id: string;
+  code: string;
+  name: string;
+  imageUrl: string | null;
+  iconKey: IconKey | null;
+  backgroundKey: BackgroundKey | null;
+}
+
 /**
- * Create Course — สร้างวิชาจริง (POST /courses) ไอคอน / พื้นหลังเลือกจากรูปที่มีในระบบ (coursePresets)
- * ผู้สร้าง (created_by จาก JWT) เป็นเจ้าของวิชา ชื่ออาจารย์ใช้ชื่อคนที่ login (backend บังคับ แต่ mockup ไม่มีช่อง)
+ * Create Course / Course appearance — modal เดียวใช้ทั้งสร้างและแก้ (ปุ่ม appearance ในหน้าวิชาอาจารย์)
+ * - สร้าง: POST /courses ผู้สร้าง (created_by จาก JWT) เป็นเจ้าของ ชื่ออาจารย์ใช้ชื่อคนที่ login (backend บังคับ แต่ mockup ไม่มีช่อง)
+ * - แก้: PATCH /courses/{id} ส่งเฉพาะค่าที่เปลี่ยน
+ * ไอคอน / พื้นหลังเลือกจากรูปที่มีในระบบ (coursePresets)
  */
-export default function CreateCourseModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+export default function CreateCourseModal({ open, onClose, onCreated, course }: { open: boolean; onClose: () => void; onCreated: () => void; course?: EditableCourse }) {
   const { user } = useAuth();
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
@@ -25,38 +37,51 @@ export default function CreateCourseModal({ open, onClose, onCreated }: { open: 
 
   useEffect(() => {
     if (open) {
-      setCode('');
-      setName('');
-      setIconKey(ICON_KEYS[0]);
-      setBackgroundKey(BACKGROUND_KEYS[0]);
+      setCode(course?.code ?? '');
+      setName(course?.name ?? '');
+      setIconKey(course?.iconKey ?? ICON_KEYS[0]);
+      setBackgroundKey(course?.backgroundKey ?? BACKGROUND_KEYS[0]);
       setPickingIcon(false);
       setError(null);
     }
-  }, [open]);
+  }, [open, course]);
 
   const approve = async () => {
     if (!code.trim() || !name.trim()) return setError('ใส่ Course code และ Course name ก่อน');
     setBusy(true);
     setError(null);
     try {
-      await coursesService.create({
-        code: code.trim(),
-        name: name.trim(),
-        lecturerName: user?.name || user?.email || 'Instructor',
-        iconKey,
-        backgroundKey,
-      });
+      if (course) {
+        const changes: Parameters<typeof coursesService.update>[1] = {};
+        if (code.trim() !== course.code) changes.code = code.trim();
+        if (name.trim() !== course.name) changes.name = name.trim();
+        if (iconKey !== course.iconKey) changes.iconKey = iconKey;
+        if (backgroundKey !== course.backgroundKey) {
+          changes.backgroundKey = backgroundKey;
+          // การ์ดใช้รูปที่อัปเองก่อน preset — เลือก preset ใหม่ต้องล้างรูปที่อัปไว้ ไม่งั้นการ์ดไม่เปลี่ยน
+          if (course.imageUrl) changes.imageUrl = null;
+        }
+        if (Object.keys(changes).length > 0) await coursesService.update(course.id, changes);
+      } else {
+        await coursesService.create({
+          code: code.trim(),
+          name: name.trim(),
+          lecturerName: user?.name || user?.email || 'Instructor',
+          iconKey,
+          backgroundKey,
+        });
+      }
       onCreated();
       onClose();
     } catch (e) {
-      setError(apiErrorMessage(e, 'สร้างวิชาไม่สำเร็จ'));
+      setError(apiErrorMessage(e, course ? 'บันทึกไม่สำเร็จ' : 'สร้างวิชาไม่สำเร็จ'));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <GradientModal open={open} onClose={busy ? () => {} : onClose} icon="/lab-builder/book.png" title="Create Course">
+    <GradientModal open={open} onClose={busy ? () => {} : onClose} icon="/lab-builder/book.png" title={course ? 'Course appearance' : 'Create Course'}>
       <div style={{ padding: '28px 74px 36px', display: 'flex', flexDirection: 'column', gap: 22, fontSize: 13 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20 }}>
           <label style={label}>
@@ -125,7 +150,7 @@ export default function CreateCourseModal({ open, onClose, onCreated }: { open: 
 
         {error && <FormNote tone="error">{error}</FormNote>}
         <PrimaryButton onClick={approve} disabled={busy} style={{ alignSelf: 'flex-end', width: 188, height: 40, opacity: busy ? 0.6 : 1 }}>
-          {busy ? 'Creating...' : 'Approve'}
+          {busy ? 'Saving...' : 'Approve'}
         </PrimaryButton>
       </div>
     </GradientModal>
