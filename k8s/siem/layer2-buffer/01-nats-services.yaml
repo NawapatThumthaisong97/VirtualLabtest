@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-jetstream-headless
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: nats-jetstream
+    app.kubernetes.io/component: message-queue-buffer
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "2-buffer"
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: nats-jetstream
+    vlab.siem/layer: "2-buffer"
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+      protocol: TCP
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-jetstream
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: nats-jetstream
+    app.kubernetes.io/component: message-queue-buffer
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "2-buffer"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nats-jetstream
+    vlab.siem/layer: "2-buffer"
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+      protocol: TCP
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+      protocol: TCP

@@ -6,9 +6,6 @@
     name: docker.io
     state: present
     update_cache: true
-    # ถ้าไม่ใส่ cache_valid_time จะบังคับดึง index ใหม่ทุกครั้งที่รัน playbook
-    # ความเร็วเน็ตไป archive.ubuntu.com แกว่งระหว่าง 5 MB/s กับ 2 KB/s
-    # ตกจังหวะช้าเมื่อไหร่ก็ค้างสิบกว่านาทีทั้งที่ไม่มีอะไรต้องติดตั้ง
     cache_valid_time: 3600
 
 - name: Ensure Docker service is running
@@ -17,22 +14,32 @@
     state: started
     enabled: true
 
-- name: Ensure docker SDK for Ansible
-  ansible.builtin.apt:
-    name: python3-docker
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
+- name: Ensure registry storage directory exists
+  ansible.builtin.file:
+    path: /srv/camp-registry
+    state: directory
+    mode: "0755"
+
+- name: Check if camp-registry container exists
+  ansible.builtin.command: docker inspect camp-registry
+  register: camp_registry_inspect
+  failed_when: false
+  changed_when: false
 
 - name: Camp private registry (port 5001)
-  community.docker.docker_container:
-    name: camp-registry
-    image: registry:2
-    restart_policy: always
-    published_ports: ["5001:5001"]
-    env:
-      REGISTRY_HTTP_ADDR: "0.0.0.0:5001"
-      REGISTRY_STORAGE_DELETE_ENABLED: "true"
-    volumes:
-      - "/srv/camp-registry:/var/lib/registry"
+  ansible.builtin.command: >-
+    docker run -d
+    --name camp-registry
+    --restart always
+    -p 5001:5001
+    -e REGISTRY_HTTP_ADDR=0.0.0.0:5001
+    -e REGISTRY_STORAGE_DELETE_ENABLED=true
+    -v /srv/camp-registry:/var/lib/registry
+    registry:2
+  when: camp_registry_inspect.rc != 0
 
+- name: Ensure camp-registry container is running
+  ansible.builtin.command: docker start camp-registry
+  register: camp_registry_start
+  changed_when: "'camp-registry' in camp_registry_start.stdout"
+  when: camp_registry_inspect.rc == 0
