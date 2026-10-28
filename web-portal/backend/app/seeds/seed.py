@@ -12,10 +12,12 @@ Seed ข้อมูลตั้งต้นให้ตรง persona "Sophia D
    ที่ storage/labs/{lab_id}/doc.pdf บน disk อยู่แล้ว ถ้าสุ่ม id ใหม่ทุกครั้ง
    doc_url จะชี้ไปโฟลเดอร์ที่ไม่มีไฟล์ แล้วหน้า lab จะขึ้น 404 ตลอด
 
-   storage/** ถูก gitignore ไว้ ไฟล์ PDF เลยไม่ติดมากับ repo — เครื่องใหม่ต้อง
-   วางไฟล์เองก่อน (ต้นฉบับ commit ไว้ที่ script/assets/):
+   ไฟล์ PDF ไม่ได้อยู่ใน DB — seed แค่ชี้ doc_url เครื่องใหม่ต้องวางไฟล์เองก่อน
+   (ต้นฉบับ commit ไว้ที่ script/assets/ สคริปต์วางลง disk หรือ S3 ตาม STORAGE_BACKEND):
        python script/setup_lab_doc.py script/assets/OOP_SpringBoot_workbook.pdf \
            --lab-id 03a18386-1558-4bcf-9399-4b79cc1ae22b
+       python script/setup_lab_doc.py script/assets/kubernetes-intro.pdf \
+           --lab-id 213f2122-1e9f-465c-8602-87c1a6985017
 
 2. CS102 ใส่ไว้ตั้งใจให้ Sophia "ไม่ได้" ลงเรียน — เอาไว้พิสูจน์ว่า
    GET /api/courses กรองตามคนล็อกอินจริง ไม่ใช่คืนทุกวิชาในระบบ
