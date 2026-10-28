@@ -51,10 +51,6 @@
   register: clock_step
   changed_when: "'stepped' in clock_step.stdout"
 
-- name: Ensure NTP service is active
-  ansible.builtin.command: timedatectl set-ntp true
-  changed_when: false
-
 - name: Check system clock is synchronized (EC2 / ECR ต้องการเวลาที่ตรง)
   ansible.builtin.command: timedatectl show -p NTPSynchronized --value
   register: clock_synced

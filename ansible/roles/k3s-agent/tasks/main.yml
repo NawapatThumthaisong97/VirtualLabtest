@@ -74,9 +74,7 @@
   ansible.builtin.systemd:
     name: k3s-agent
     state: restarted
-  when:
-    - registries_yaml.changed or k3s_resolv.changed or k3s_config.changed
-    - inventory_hostname not in groups['master']
+  when: registries_yaml.changed or k3s_resolv.changed or k3s_config.changed
   ignore_errors: true # ครั้งแรกสุด service ยังไม่มี ก็ข้ามไป (agent จะอ่านไฟล์นี้ตอนติดตั้งเองอยู่แล้ว)
 
 - name: Install K3s agent
@@ -90,7 +88,6 @@
       --flannel-iface {{ flannel_iface }}
   args:
     creates: /usr/local/bin/k3s-agent
-  when: inventory_hostname not in groups['master']
 
 #เช็กว่า host status ขึ้น ready หรือยัง
 - name: Check current Ready status of this node in the cluster

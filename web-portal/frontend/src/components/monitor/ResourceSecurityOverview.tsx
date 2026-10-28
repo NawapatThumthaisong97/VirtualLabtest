@@ -60,7 +60,6 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
   const squidEgressAllowed = rawSec.squidEgressAllowed ?? 0;
   const kyvernoBlocks = rawSec.kyvernoPolicyBlocks ?? rawSec.kyvernoBlocks ?? 0;
   const tailscaleDenies = rawSec.tailscaleCrossClusterAttempts ?? rawSec.tailscaleDenies ?? 0;
-  const falcoEbpfAlerts = rawSec.falcoEbpfAlerts ?? 0;
   const totalViolations = rawSec.totalViolations ?? (squidEgressDrops + kyvernoBlocks + tailscaleDenies);
 
   // Prepare chart data
@@ -87,11 +86,6 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
       category: 'Tailscale Mesh',
       Allowed: 0,
       Blocked: tailscaleDenies,
-    },
-    {
-      category: 'Falco eBPF',
-      Allowed: 0,
-      Blocked: falcoEbpfAlerts,
     },
   ];
 
@@ -174,7 +168,6 @@ export const ResourceSecurityOverview: React.FC<ResourceSecurityOverviewProps> =
             <span>Squid: {squidEgressDrops}</span>
             <span>Kyverno: {kyvernoBlocks}</span>
             <span>Tailscale: {tailscaleDenies}</span>
-            <span>Falco eBPF: {falcoEbpfAlerts}</span>
           </div>
         </div>
       </div>

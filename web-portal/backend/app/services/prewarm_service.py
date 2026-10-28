@@ -35,8 +35,7 @@ def k8s_image_ref(lab_image) -> str:
 
     ต้องตรงกันทุกตัวอักษร ไม่งั้น pull ไว้คนละชื่อ cache ไม่ช่วยอะไร
     """
-    from app.configs.settings import settings
-    registry = os.getenv("DOCKER_REGISTRY_HOST") or settings.DOCKER_REGISTRY_HOST or "100.127.74.48:5001"
+    registry = os.getenv("DOCKER_REGISTRY_HOST", "100.127.74.48:5001")
     return f"{registry}/{lab_image.full_image_name}"
 
 

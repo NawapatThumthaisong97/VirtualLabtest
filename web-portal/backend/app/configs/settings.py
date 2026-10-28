@@ -153,9 +153,6 @@ class Settings(BaseSettings):
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
 
-    # Default Run Target
-    DEFAULT_RUN_TARGET: str = "aws"
-    DEV_DEFAULT_NODE: Optional[str] = None
     # Lab image scan (docs/LAB_IMAGE_SCAN_ARCHITECTURE.md) ปิดไว้เป็นค่าเริ่มต้น
     # เปิดแล้ว backend จะรัน scan reconciler (ต้องมี K8S_ENABLED ด้วย)
     LAB_IMAGE_SCAN_ENABLED: bool = False

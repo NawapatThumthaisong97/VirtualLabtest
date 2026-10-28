@@ -4,7 +4,7 @@ API Endpoints สำหรับ Cluster Metrics, Critical Logs และ Securi
 จำกัดสิทธิ์เฉพาะ Role Admin ผ่าน RBAC Middleware และทำงานแบบ Read-Only เท่านั้น
 """
 
-from typing import Optional, Union
+from typing import Optional
 from fastapi import APIRouter, Depends, Header, Query, Request, status as http_status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -193,14 +193,10 @@ async def get_critical_logs(
     include_in_schema=False,
 )
 async def ingest_log(
-    body: Union[CreateInfrastructureLogRequest, list[CreateInfrastructureLogRequest]],
+    body: CreateInfrastructureLogRequest,
     controller: MonitorController = Depends(get_monitor_controller),
 ) -> ApiResponse[InfrastructureLogItem]:
-    if isinstance(body, list):
-        items = [controller.create_log(entry) for entry in body]
-        data = items[-1]
-    else:
-        data = controller.create_log(body)
+    data = controller.create_log(body)
     return ApiResponse(
         success=True,
         message="Log ingested and masked successfully",
