@@ -26,7 +26,7 @@ function getProgressMeta(progress: ProgressStatus | null) {
 /** จุดไข่ปลาข้างหัวการ์ด — ตกแต่งอย่างเดียว ยังกดไม่ได้ (Pete ขอ) ไว้ใส่เมนูของการ์ดภายหลัง */
 function CardDots() {
   return (
-    <span aria-hidden="true" className="select-none text-[22px] leading-none tracking-[2px] text-gray-400">
+    <span aria-hidden="true" className="select-none text-[22px] font-bold leading-none tracking-[2px] text-gray-800">
       ⋯
     </span>
   );
