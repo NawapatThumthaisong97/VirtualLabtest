@@ -68,6 +68,19 @@ const NO_ANNOUNCEMENT: Entry[] = [
   { name: 'Virtual Lab team', text: 'ยังไม่มีประกาศจากวิชาที่คุณลงเรียน' },
 ];
 
+// คำนำหน้าที่ถ้าเจอเป็นคำแรก ต้องเอาชื่อต้นมาต่อด้วย (ไม่งั้นทักว่า "Good Afternoon! , Dr.")
+const TITLE_RE = /^(dr|prof|asst|assoc|mr|mrs|ms|miss|อ|อาจารย์|ดร|ผศ|รศ|ศ|นาย|นาง|นางสาว)\.?$/i;
+
+/** ชื่อบนหัวหน้า home: ชื่อต้น — ถ้าขึ้นต้นด้วยคำนำหน้า (Dr. / Asst. Prof. / ผศ.ดร.) เก็บคำนำหน้าไว้คู่ชื่อต้น */
+export function greetingName(fullName: string): string {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  const titles: string[] = [];
+  while (words.length > 1 && words[0].split('.').filter(Boolean).every((part) => TITLE_RE.test(part))) {
+    titles.push(words.shift() as string);
+  }
+  return [...titles, words[0] ?? ''].join(' ').trim();
+}
+
 /** ทักตามเวลาบนเครื่องผู้ใช้ ไม่ใช่เวลา server */
 function greetingFor(hour: number): string {
   if (hour < 12) return 'Good Morning!';
@@ -109,7 +122,7 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
   });
 
   // ชื่อจริงอาจยาว หัวเรื่องเอาแค่ชื่อต้น
-  const displayName = studentName ?? currentUser?.name?.split(' ')[0] ?? '';
+  const displayName = studentName ?? greetingName(currentUser?.name ?? '');
   const displayGreeting = greeting ?? greetingFor(new Date().getHours());
   const announcementEntries =
     announcements && announcements.length > 0 ? announcements : NO_ANNOUNCEMENT;
