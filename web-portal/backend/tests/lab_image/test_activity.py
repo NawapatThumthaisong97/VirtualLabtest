@@ -88,8 +88,8 @@ def test_instructor_feed_for_taught_courses(client, db, world, auth, lab):
     assert activity(client, auth, world.outsider) == []
 
 
-def test_default_limit_is_three(client, db, world, auth, lab):
+def test_default_limit_is_two(client, db, world, auth, lab):
     for n in range(5):
         lab(f"Draft {n}", status=LabStatus.DRAFT)
     response = client.get("/api/v1/me/activity", headers=auth(world.owner))
-    assert len(response.json()["data"]) == 3
+    assert len(response.json()["data"]) == 2
