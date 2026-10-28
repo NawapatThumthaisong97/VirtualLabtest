@@ -10,6 +10,7 @@ credential: default chain ของ boto3 (AWS_PROFILE=skypilot ใน container
 from typing import BinaryIO
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi.responses import RedirectResponse, Response
 
@@ -30,7 +31,14 @@ class S3Storage:
     def __init__(self, bucket: str, region: str, client=None, presign_seconds: int = 300):
         self.bucket = bucket
         self.presign_seconds = presign_seconds
-        self.client = client or boto3.client("s3", region_name=region)
+        # endpoint ของ region ตรง ๆ + SigV4: ถ้าปล่อยให้ boto3 ใช้ s3.amazonaws.com (ส่วนกลาง) presigned URL ของ bucket
+        # นอก us-east-1 (โดยเฉพาะที่เพิ่งสร้าง) ถูก S3 ตอบ 307 ไป host ของ region แล้วลายเซ็นที่ผูก host เดิมใช้ไม่ได้
+        self.client = client or boto3.client(
+            "s3",
+            region_name=region,
+            endpoint_url=f"https://s3.{region}.amazonaws.com",
+            config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+        )
 
     def exists(self, key: str) -> bool:
         try:
