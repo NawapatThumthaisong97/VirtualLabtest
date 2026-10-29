@@ -6,7 +6,11 @@
 
 scan_runner_version: "1.0.0"
 scan_runner_repo: vlab/scan-runner
-scan_runner_registry_port: 5001
+# camp registry (role registry): อ่าน manifest ผ่าน pull port, push ผ่าน push port ที่ต้อง login
+scan_runner_registry_pull_port: "{{ registry_pull_port | default(5001) }}"
+scan_runner_registry_push_port: "{{ registry_push_port | default(5002) }}"
+scan_runner_registry_user: ansible
+scan_runner_registry_password: "{{ registry_users[scan_runner_registry_user].password }}"
 
 # source บนเครื่อง control / ที่วางบนเครื่อง build
 scan_runner_src: "{{ playbook_dir }}/../scan-runner/"

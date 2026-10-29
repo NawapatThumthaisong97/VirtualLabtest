@@ -20,9 +20,15 @@
   gather_facts: yes
 
   vars:
-    registry_port: 5001
     registry_host: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}"
-    registry_endpoint: "{{ registry_host }}:{{ registry_port }}"
+    # ที่ SkyPilot / K3s ดึง (pull port ไม่ต้อง login) — ใช้ใน task.yaml และตรวจผล
+    registry_endpoint: "{{ registry_host }}:{{ registry_pull_port | default(5001) }}"
+    # push port ต้อง login (role registry) build บนเครื่อง registry = push ผ่าน localhost
+    # docker เชื่อ HTTP บน localhost เอง ไม่ต้องเพิ่มใน insecure-registries
+    registry_push_endpoint: >-
+      {{ 'localhost' if inventory_hostname == groups['registry'][0] else registry_host }}:{{ registry_push_port | default(5002) }}
+    registry_push_user: ansible
+    registry_push_password: "{{ registry_users[registry_push_user].password }}"
 
     # ที่วาง source บนเครื่อง build
     build_root: /opt/lab-build
@@ -92,10 +98,15 @@
              if daemon_json_raw.content is defined else {} }}
 
     # merge เข้าไปในของเดิม ไม่เขียนทับทั้งไฟล์
-    # เผื่อมี setting อื่น (data-root, log-driver) ที่ตั้งไว้แล้วจะได้ไม่หาย
+    # เผื่อมี setting อื่น (data-root, log-driver, registry อื่น) ที่ตั้งไว้แล้วจะได้ไม่หาย
     - name: Trust the private registry as insecure
       ansible.builtin.copy:
-        content: "{{ daemon_json | combine({'insecure-registries': [registry_endpoint]}) | to_nice_json }}\n"
+        content: >-
+          {{ daemon_json | combine({'insecure-registries':
+               ((daemon_json['insecure-registries'] | default([]))
+                + [registry_endpoint]
+                + ([registry_push_endpoint] if not registry_push_endpoint.startswith('localhost:') else []))
+               | unique}) | to_nice_json }}
         dest: /etc/docker/daemon.json
         mode: "0644"
       become: yes
@@ -147,11 +158,12 @@
 
     # ---------- build & push ----------
 
+    # tag ด้วยชื่อ push endpoint (storage เดียวกับ pull endpoint ที่ SkyPilot ดึง)
     - name: Build image
       ansible.builtin.command:
         cmd: >-
           docker build
-          -t {{ registry_endpoint }}/{{ item.repo }}:{{ lab_image_tag }}
+          -t {{ registry_push_endpoint }}/{{ item.repo }}:{{ lab_image_tag }}
           -f {{ item.dockerfile }} .
         chdir: "{{ build_root }}/{{ item.name }}"
       loop: "{{ lab_images_selected }}"
@@ -159,13 +171,35 @@
         label: "{{ item.name }}"
       changed_when: true
 
-    - name: Push image to registry
-      ansible.builtin.command:
-        cmd: "docker push {{ registry_endpoint }}/{{ item.repo }}:{{ lab_image_tag }}"
-      loop: "{{ lab_images_selected }}"
-      loop_control:
-        label: "{{ item.name }}"
-      changed_when: true
+    # login เฉพาะช่วง push แล้ว logout เสมอ ไม่ทิ้ง credential ไว้ใน ~/.docker/config.json
+    - name: Push images to registry
+      block:
+        - name: Log in to registry push port
+          ansible.builtin.command:
+            argv:
+              - docker
+              - login
+              - "{{ registry_push_endpoint }}"
+              - --username
+              - "{{ registry_push_user }}"
+              - --password-stdin
+            stdin: "{{ registry_push_password }}"
+          changed_when: false
+          no_log: true
+
+        - name: Push image to registry
+          ansible.builtin.command:
+            cmd: "docker push {{ registry_push_endpoint }}/{{ item.repo }}:{{ lab_image_tag }}"
+          loop: "{{ lab_images_selected }}"
+          loop_control:
+            label: "{{ item.name }}"
+          changed_when: true
+      always:
+        - name: Log out of registry push port
+          ansible.builtin.command:
+            argv: [docker, logout, "{{ registry_push_endpoint }}"]
+          changed_when: false
+          failed_when: false
 
     # ---------- keep task.yaml in sync ----------
     # image_id ใน task.yaml เคยเป็น IP hardcode แล้วค้างชี้ registry เก่าอยู่นาน

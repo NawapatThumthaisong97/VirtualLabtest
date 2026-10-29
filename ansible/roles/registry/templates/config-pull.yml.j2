@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# camp-registry-pull: อ่านอย่างเดียว ไม่มี auth (push / delete ได้ 405)
+# data ถูก mount แบบ :ro อีกชั้น ต่อให้ config นี้ผิดก็เขียนไม่ได้
+version: 0.1
+log:
+  fields:
+    service: camp-registry-pull
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  maintenance:
+    # ตัว push เป็นคนเก็บกวาด upload ค้าง ตัวนี้ห้ามเขียน
+    uploadpurging:
+      enabled: false
+    readonly:
+      enabled: true
+  # ไม่ใช้ cache ในหน่วยความจำ: blob ถูกเขียน / ลบโดยอีก container cache ของตัวนี้จะค้าง
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3
