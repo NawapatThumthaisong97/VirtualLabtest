@@ -30,7 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KUBECONFIG_PATH = REPO_ROOT / "web-portal" / "backend" / "kubeconfig.yaml"
 ENV_PATH = REPO_ROOT / "web-portal" / "backend" / ".env"
-K3S_TAILSCALE_IP = "100.69.137.47"
+K3S_TAILSCALE_IP = os.getenv("K3S_TAILSCALE_IP", "100.69.137.47")
 
 load_dotenv(ENV_PATH)
 

@@ -26,7 +26,7 @@ if hasattr(sys.stdout, "reconfigure"):
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KUBECONFIG_PATH = REPO_ROOT / "web-portal" / "backend" / "kubeconfig.yaml"
 LAYER5_DIR = REPO_ROOT / "k8s" / "siem" / "layer5-detection"
-K3S_TAILSCALE_IP = "100.69.137.47"
+K3S_TAILSCALE_IP = os.getenv("K3S_TAILSCALE_IP", "100.69.137.47")
 
 
 def apply_layer5_manifests(v1: client.CoreV1Api, apps_v1: client.AppsV1Api, batch_v1: client.BatchV1Api):

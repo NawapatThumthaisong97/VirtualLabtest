@@ -42,6 +42,7 @@ send_siem_log() {
     local response
     response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${INGEST_ENDPOINT}" \
         -H "Content-Type: application/json" \
+        -H "X-Collector-Token: ${SIEM_COLLECTOR_TOKEN:-vlab-tailscale-collector-secret}" \
         -d "${payload}")
 
     local http_code

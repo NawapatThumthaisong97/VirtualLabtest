@@ -16,13 +16,13 @@ data:
         uid: siem-postgres-ds
         type: postgres
         access: proxy
-        url: 100.86.87.27:5432
+        url: ${SIEM_POSTGRES_HOST:100.86.87.27:5432}
         user: postgres
         database: virtual_lab
         isDefault: true
         editable: true
         secureJsonData:
-          password: "password"
+          password: "${SIEM_POSTGRES_PASSWORD:password}"
         jsonData:
           sslmode: "disable"
           postgresVersion: 1500
@@ -121,6 +121,16 @@ spec:
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+                  - key: node-role.kubernetes.io/master
+                    operator: DoesNotExist
       containers:
         - name: grafana
           image: grafana/grafana:11.2.0
@@ -135,11 +145,23 @@ spec:
             - name: GF_AUTH_ANONYMOUS_ENABLED
               value: "true"
             - name: GF_AUTH_ANONYMOUS_ORG_ROLE
-              value: "Admin"
+              value: "Viewer"
             - name: GF_USERS_DEFAULT_THEME
               value: "dark"
             - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
               value: "/var/lib/grafana/dashboards/vlab-siem-visual-analytics.json"
+            - name: SIEM_POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: postgres-host
+                  optional: true
+            - name: SIEM_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: postgres-password
+                  optional: true
           ports:
             - name: http-grafana
               containerPort: 3000
