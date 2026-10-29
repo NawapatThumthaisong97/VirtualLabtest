@@ -1,4 +1,4 @@
-"""step_push: credential ของ push port (docs/REGISTRY_AUTH_PLAN.md Phase 3) ไม่เรียก skopeo จริง
+"""step_push: credential ของ push port ไม่เรียก skopeo จริง
 
 รัน: python3 -m pytest scan-runner/tests
 """

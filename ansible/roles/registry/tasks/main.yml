@@ -1,5 +1,5 @@
 ---
-# camp registry 2 container ใช้ storage ร่วมกัน (docs/REGISTRY_AUTH_PLAN.md)
+# camp registry 2 container ใช้ storage ร่วมกัน
 #   camp-registry-pull :5001  read-only ไม่มี auth  ← K3s node / ecr-sync pull
 #   camp-registry-push :5002  htpasswd              ← scan Job (user scanner) / Ansible (user ansible)
 # เครื่อง registry ต้องติดตั้ง Docker Engine เองก่อน

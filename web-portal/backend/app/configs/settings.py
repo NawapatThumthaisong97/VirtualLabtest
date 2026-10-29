@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     # ที่ role Ansible scan-runner-image push ไว้ (tag นั้น immutable) ตั้งเองได้ถ้าอยากอ้างด้วย digest
     SCAN_RUNNER_IMAGE: Optional[str] = None
     SCAN_RUNNER_VERSION: str = "1.1.0"  # ต้องตรงกับ scan_runner_version ใน ansible/roles/scan-runner-image/defaults
-    # camp registry แยก pull (DOCKER_REGISTRY_HOST, ไม่มี auth) กับ push (ต้อง login) docs/REGISTRY_AUTH_PLAN.md
+    # camp registry แยก pull (DOCKER_REGISTRY_HOST, ไม่มี auth) กับ push (ต้อง login)
     # ไม่ตั้ง REGISTRY_PUSH_HOST = host ของ DOCKER_REGISTRY_HOST + REGISTRY_PUSH_PORT
     REGISTRY_PUSH_HOST: Optional[str] = None
     REGISTRY_PUSH_PORT: int = 5002

@@ -12,7 +12,7 @@
 // backend รันบน WSL ของเครื่องคนในทีม (ไม่ติด tag) ใช้สิทธิ์ของ autogroup:member
 // เครื่องที่ติด tag จะไม่ใช่ของ user อีกต่อไป → ได้สิทธิ์เฉพาะที่เขียนไว้ข้างล่าง
 //
-// registry แยก pull / push (docs/REGISTRY_AUTH_PLAN.md):
+// registry แยก pull / push:
 //   worker pull ได้อย่างเดียว (5001) / master push ได้ (5002 ต้องมีรหัส) Job สแกนจึงต้องรันบน master
 //   เพราะ traffic ของ Pod ออกไปด้วย IP ของ node
 //

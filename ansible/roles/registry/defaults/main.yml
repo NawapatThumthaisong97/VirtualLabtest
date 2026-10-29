@@ -1,5 +1,5 @@
 ---
-# camp registry แบบ 2 container ใช้ storage ร่วมกัน (docs/REGISTRY_AUTH_PLAN.md)
+# camp registry แบบ 2 container ใช้ storage ร่วมกัน
 #   pull :5001 read-only ไม่มี auth  ← K3s node, ecr-sync
 #   push :5002 htpasswd              ← scan Job บน master (user scanner), Ansible บน rn (user ansible)
 
