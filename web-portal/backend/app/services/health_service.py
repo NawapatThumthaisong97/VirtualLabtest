@@ -7,6 +7,7 @@ job ใน backend ตรวจ backend / k8s / registry / SkyPilot / AWS ทุ
 """
 import asyncio
 import json
+import re
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -48,12 +49,39 @@ class CheckResult:
     detail: Optional[str]
 
 
+_HOST_PORT = re.compile(r"host='([^']+)', port=(\d+)")
+
+
+def describe_error(e: Exception) -> str:
+    """exception → ข้อความสั้นบนหน้า admin (ตัวเต็มอยู่ใน log ของ backend)
+    เช่น urllib3 MaxRetryError ยาวหลายบรรทัด → ต่อ 100.125.244.48:6443 ไม่ได้ (timeout ...)"""
+    raw = f"{type(e).__name__}: {e}"
+    low = raw.lower()
+    m = _HOST_PORT.search(raw)
+    target = f"ต่อ {m.group(1)}:{m.group(2)} ไม่ได้" if m else "ต่อไม่ได้"
+    if "timed out" in low or "timeout" in low:
+        return f"{target} (timeout {HTTP_TIMEOUT} วินาที) — เครื่องปิดอยู่หรือ network หลุด"
+    if "refused" in low:
+        return f"{target} (connection refused) — เครื่องเปิดอยู่แต่ service ไม่ได้รัน"
+    if "name or service not known" in low or "nodename nor servname" in low or "getaddrinfo" in low:
+        return "หาชื่อเครื่องไม่เจอ (DNS)"
+    if "nocredentials" in low or "unable to locate credentials" in low:
+        return "ไม่มี AWS credential"
+    if type(e).__name__ == "ClientError":
+        code = getattr(e, "response", {}).get("Error", {}).get("Code")
+        return f"AWS ปฏิเสธ: {code}" if code else raw[:120]
+    if "kubeconfig" in low or type(e).__name__ == "ConfigException":
+        return "โหลด kubeconfig ไม่ได้"
+    return raw[:120]
+
+
 def run_check(service: str, checker: Checker) -> CheckResult:
     start = time.monotonic()
     try:
         version, detail, degraded = checker()
     except Exception as e:
-        return CheckResult(service, "down", None, None, f"{type(e).__name__}: {e}"[:500])
+        logger.warning(f"Health check {service} down: {type(e).__name__}: {e}")
+        return CheckResult(service, "down", None, None, describe_error(e))
     latency_ms = int((time.monotonic() - start) * 1000)
     if latency_ms > settings.HEALTH_CHECK_SLOW_MS:
         degraded = True
