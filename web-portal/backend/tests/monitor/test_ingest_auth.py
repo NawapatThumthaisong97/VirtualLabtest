@@ -35,3 +35,45 @@ class TestIngestAuth:
         with pytest.raises(DomainError):
             verify_log_ingest_permission(request("127.0.0.1"), credentials=None,
                                          x_collector_token=settings.SECRET_KEY, db=db)
+
+
+COLLECTOR = "c" * 40
+
+
+class TestCollectorToken:
+    """SIEM_COLLECTOR_TOKEN: Vector / Falco / Sigma send logs without an admin JWT"""
+
+    def test_collector_token_accepted(self, db, monkeypatch):
+        """X-Collector-Token equal to SIEM_COLLECTOR_TOKEN -> allowed"""
+        monkeypatch.setattr(settings, "SIEM_COLLECTOR_TOKEN", COLLECTOR)
+        assert verify_log_ingest_permission(request("100.83.96.97"), credentials=None,
+                                            x_collector_token=COLLECTOR, db=db) is True
+
+    def test_collector_token_as_bearer_accepted(self, db, monkeypatch):
+        """Same token as Authorization: Bearer -> allowed"""
+        monkeypatch.setattr(settings, "SIEM_COLLECTOR_TOKEN", COLLECTOR)
+        assert verify_log_ingest_permission(request("100.83.96.97"), credentials=_ns(credentials=COLLECTOR),
+                                            x_collector_token=None, db=db) is True
+
+    def test_wrong_collector_token_rejected(self, db, monkeypatch):
+        """Different token -> rejected"""
+        monkeypatch.setattr(settings, "SIEM_COLLECTOR_TOKEN", COLLECTOR)
+        with pytest.raises(DomainError):
+            verify_log_ingest_permission(request("100.83.96.97"), credentials=None,
+                                         x_collector_token="x" * 40, db=db)
+
+    def test_not_set_rejects_everything_but_admin(self, db, monkeypatch):
+        """Not set -> any collector token rejected"""
+        monkeypatch.setattr(settings, "SIEM_COLLECTOR_TOKEN", None)
+        with pytest.raises(DomainError):
+            verify_log_ingest_permission(request("100.83.96.97"), credentials=None,
+                                         x_collector_token=COLLECTOR, db=db)
+
+    @pytest.mark.parametrize("bad", ["short", None])
+    def test_short_or_secret_key_collector_token_ignored(self, db, monkeypatch, bad):
+        """Short token, or token equal to SECRET_KEY -> not accepted as collector token"""
+        value = bad or settings.SECRET_KEY
+        monkeypatch.setattr(settings, "SIEM_COLLECTOR_TOKEN", value)
+        with pytest.raises(DomainError):
+            verify_log_ingest_permission(request("100.83.96.97"), credentials=None,
+                                         x_collector_token=value, db=db)

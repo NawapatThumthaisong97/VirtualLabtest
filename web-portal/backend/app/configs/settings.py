@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # token ของตัวส่ง log SIEM (Vector / Falco / Sigma ใน namespace siem-system) ใช้ได้กับ POST /api/v1/logs อย่างเดียว
+    # ว่าง = ปิด (ส่งได้เฉพาะ JWT admin) ต้องยาว ≥ 32 ตัว ไม่ใช่ SECRET_KEY — หลุดไปแย่สุดคือยิง log ปลอม
+    SIEM_COLLECTOR_TOKEN: Optional[str] = None
 
     # Cookie Security Settings
     AUTH_COOKIE_SECURE: bool = False  # True ใน Production (HTTPS) / False ใน Dev (HTTP/Tailscale)
