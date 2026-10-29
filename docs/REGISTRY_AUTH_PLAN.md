@@ -2,7 +2,7 @@
 
 แก้ช่องโหว่ข้อ 8.1 ใน `docs/archive/LAB_IMAGE_SCAN_GUIDE.md`: camp registry ไม่มี auth ใครเข้า `:5001` ได้ก็ push image ข้ามการสแกนได้ แล้ว `ecr-sync` จะพาขึ้น ECR ให้ด้วย
 
-สถานะ: Phase 1-2 เสร็จ (รันบน rn ผ่าน 2026-10-29) / Phase 3 deploy แล้ว รอทดสอบสแกนจริงพร้อม Phase 5 / Phase 4-6 ยังไม่เริ่ม
+สถานะ: Phase 1-2 เสร็จ (รันบน rn ผ่าน 2026-10-29) / Phase 3 deploy แล้ว รอทดสอบสแกนจริงพร้อม Phase 5 / Phase 4 เสร็จ (apply + ตรวจด้วย curl 2026-10-29) / Phase 5-6 ยังไม่เริ่ม
 
 ## เครื่องที่มี (ansible/inventory.yml)
 
@@ -71,11 +71,19 @@ rn: camp-registry-pull :5001  read-only ไม่มี auth   ← worker / mast
   ถ้าไม่ผ่าน: `kubectl -n vlab-scan logs <pod> -c publish` ต่อไม่ติด/timeout = ACL, `unauthorized` = credential
 - test DB: `virtual_lab_test` สร้างไว้ใน Postgres ของ WSL แล้ว (conftest ไม่สร้างให้เอง)
 
-### Phase 4: Tailscale ACL
-- `tailscale/vlab-tags.tsv`: 3 เครื่องตามตารางข้างบน
-- `tailscale/vlab-acl.hujson`: worker → server เหลือ `6443` (+ `8472/udp`), worker → registry `5001` เท่านั้น, tests: worker deny `registry:5002`, server accept `registry:5002`, อัปเดตคอมเมนต์ IP
-- `script/tailscale-acl.sh check()`: อ่าน IP/ชื่อเครื่องจาก `vlab-tags.tsv` แทน hardcode, ใช้ image `vlab/acl-probe` (alpine + nc, push ใน `build-images.yml`), probe worker → registry 5001 open / 5002 closed
-- token: admin console → Settings → Keys → API access tokens ตั้งอายุ 1 วันให้ revoke เอง
+### Phase 4: Tailscale ACL  ✅
+- [x] `tailscale/vlab-tags.tsv`: mn / wn1 / rn ลบ thinkpad, vlab-web
+- [x] `tailscale/vlab-acl.hujson`: worker → server เหลือ `6443` (ลบ 8000 / 5173 / 80 / 443), `8472/udp` เหมือนเดิม, worker → registry `5001` เท่านั้น
+  tests: worker deny `registry:5002` / `registry:22` / `server:10250`, server accept `registry:5001,5002`, registry เริ่มคุยกับใครไม่ได้
+- [x] `script/tailscale-acl.sh check [node ...]`: อ่าน IP จาก `vlab-tags.tsv`, หาชื่อ node จาก InternalIP, ทดสอบทุก server + worker
+  image ทดสอบ = `<registry>:5001/vlab/scan-runner:1.1.0` (มี python3 ต่อ TCP / DNS แทน nc) ไม่ต้องทำ `vlab/acl-probe`
+  worker: 6443 open, 10250/22 closed, registry 5001 open / 5002 closed / 22 closed, DNS / server: registry 5001 + 5002 open, worker 10250 open, DNS
+- [x] token: หัว script บอกให้ตั้งอายุ 1 วัน
+- [x] apply 2026-10-29 (backup `tailscale/backup/acl-20261029-233315.hujson`) policy เดิมแยก 5001/5002 ไว้แล้วและ tag ติดครบอยู่แล้ว
+  ที่เปลี่ยนจริง: worker → server เหลือ 6443, เพิ่ม tests ฝั่ง registry / server:10250
+  คืนได้: `./script/tailscale-acl.sh rollback tailscale/backup/acl-20261029-233315.hujson`
+- [x] ตรวจด้วย curl บนเครื่องจริง (WSL ไม่มี kubectl จึงไม่ได้ใช้ `check`):
+  worker → rn:5001 = 200, rn:5002 = timeout, mn:6443 = 401 / master → rn:5002 = 401 / ทั้งสอง node Ready
 
 ### Phase 5: รันและทดสอบ
 ```bash

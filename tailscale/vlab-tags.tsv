@@ -1,9 +1,7 @@
-# เครื่องไหนได้ tag อะไร (script/tailscale-acl.sh tag / apply อ่านไฟล์นี้)
-# ผูกด้วย Tailscale IP เพราะไม่ซ้ำและไม่เปลี่ยน (hostname ซ้ำกันได้)
+# เครื่องไหนได้ tag อะไร (script/tailscale-acl.sh plan / apply / check อ่านไฟล์นี้)
+# ผูกด้วย Tailscale IP เพราะไม่ซ้ำและไม่เปลี่ยน (hostname ซ้ำกันได้) ต้องตรงกับ ansible/inventory.yml
+# thinkpad / vlab-web เลิกใช้แล้ว backend รันบน WSL ของเครื่องคนในทีม (ไม่ติด tag = autogroup:member)
 # <Tailscale IP>    <tag>               # ชื่อเครื่อง
-100.125.244.48      tag:vlab-server     # master (K3s server)
-100.93.121.17       tag:vlab-server     # thinkpad (เครื่องสั่งงาน / dev ไม่ใช่ worker แล้ว 2026-10-20)
-100.102.72.39       tag:vlab-server     # vlab-web / webservice (role web-service: backend + frontend + DB)
-100.83.96.97        tag:vlab-worker     # worker-pete (เครื่องแลป)
-100.97.13.122       tag:vlab-worker     # workerfilm (เครื่องแลป)
-100.127.74.48       tag:vlab-registry   # register (registry :5001)
+100.99.154.106      tag:vlab-server     # mn (K3s server)
+100.68.15.113       tag:vlab-worker     # wn1 (K3s agent)
+100.119.124.73      tag:vlab-registry   # rn (camp registry: 5001 pull / 5002 push)
