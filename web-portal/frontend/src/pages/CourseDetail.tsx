@@ -23,6 +23,15 @@ function getProgressMeta(progress: ProgressStatus | null) {
   return { label: 'not started', tone: 'grey' };
 }
 
+/** จุดไข่ปลาข้างหัวการ์ด — ตกแต่งอย่างเดียว ยังกดไม่ได้ (Pete ขอ) ไว้ใส่เมนูของการ์ดภายหลัง */
+function CardDots() {
+  return (
+    <span aria-hidden="true" className="select-none text-[22px] font-bold leading-none tracking-[2px] text-gray-800">
+      ⋯
+    </span>
+  );
+}
+
 export default function CourseDetailPage() {
   const { courseId = '' } = useParams<{ courseId: string }>();
   const [tab, setTab] = useState<LabTab>('all');
@@ -103,9 +112,10 @@ export default function CourseDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr] gap-6 mb-6">
           {/* Documents Card */}
           <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-            <h2 className="m-0 px-5 py-5 text-lg font-bold text-gray-800 border-b border-gray-200">
-              Documents
-            </h2>
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-5">
+              <h2 className="m-0 text-lg font-bold text-gray-800">Documents</h2>
+              <CardDots />
+            </div>
             <ul className="list-none p-0 m-0 px-5 max-h-[280px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100">
               {documents.length > 0 ? (
                 documents.map((doc: DocumentRow) => (
@@ -136,9 +146,10 @@ export default function CourseDetailPage() {
 
           {/* Announcements Card */}
           <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-            <h2 className="m-0 px-5 py-5 text-lg font-bold text-gray-800 border-b border-gray-200">
-              Announcement
-            </h2>
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-5">
+              <h2 className="m-0 text-lg font-bold text-gray-800">Announcement</h2>
+              <CardDots />
+            </div>
             <div className="px-5 max-h-[280px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100">
               {course.announcements.length > 0 ? (
                 <>
@@ -170,8 +181,9 @@ export default function CourseDetailPage() {
 
         {/* Lab Table */}
         <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-          <div className="px-5 py-5 border-b border-gray-200">
+          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-5">
             <h2 className="m-0 text-lg font-bold text-gray-800">My Lab work</h2>
+            <CardDots />
           </div>
 
           <div className="flex">

@@ -19,10 +19,11 @@ import { courseDocumentService, documentRows } from '../services/courseDocument'
 import DashboardHeader from '../components/admin/DashboardHeader';
 import ScanStatusBadge from '../components/instructor/ScanStatusBadge';
 import CreateLabModal from '../components/lab-builder/CreateLabModal';
+import CreateCourseModal from '../components/lab-builder/CreateCourseModal';
 import DocumentModal from '../components/lab-builder/DocumentModal';
 import AnnouncementModal from '../components/lab-builder/AnnouncementModal';
 
-type ModalKind = 'lab' | 'document' | 'announcement' | null;
+type ModalKind = 'lab' | 'document' | 'announcement' | 'appearance' | null;
 
 type LabTab = 'all' | 'reviewing';
 
@@ -114,12 +115,12 @@ export default function InstructorCoursePage() {
   return (
     <div className="min-h-screen w-full bg-gray-50">
       {/* แถบฟ้าแบบหน้า course ของนักศึกษา — กว้างเท่าเนื้อหาใน <main> + padding 20px เท่าหัวการ์ด
-          Member / appearance ยังไม่มีหน้า เป็นปุ่มจางไว้ก่อน */}
+          Member ยังไม่มีหน้า เป็นปุ่มจางไว้ก่อน / appearance เปิด modal แก้วิชา (PATCH) */}
       <DashboardHeader
         title={`${course.code} : ${course.name}`}
         features={[
           { label: 'Member', note: 'เร็ว ๆ นี้' },
-          { label: 'appearance', note: 'เร็ว ๆ นี้' },
+          { label: 'appearance', onClick: () => setModal('appearance') },
         ]}
         inner={{ width: 'calc(min(1250px, 100%) - 48px)', margin: '0 auto', padding: '0 20px' }}
       />
@@ -293,6 +294,15 @@ export default function InstructorCoursePage() {
         </section>
       </main>
 
+      <CreateCourseModal
+        open={modal === 'appearance'}
+        onClose={() => setModal(null)}
+        onCreated={() => {
+          refresh();
+          queryClient.invalidateQueries({ queryKey: ['courses'] });
+        }}
+        course={course}
+      />
       <CreateLabModal open={modal === 'lab'} onClose={() => setModal(null)} onCreated={refresh} courseId={course.id} courseCode={course.code} />
       <DocumentModal open={modal === 'document'} onClose={() => setModal(null)} onUploaded={refresh} labs={sortedLabs} courseId={course.id} />
       <AnnouncementModal open={modal === 'announcement'} onClose={() => setModal(null)} onPosted={refresh} courseId={course.id} />

@@ -21,10 +21,5 @@ export const eventColors: Record<EventColor, { color: string; bg: string }> = {
   blue: { color: '#5E81AC', bg: '#E7EDF5' },
 };
 
-/** Soft pastel mesh (blue / violet / pink / mint) used on modal headers. */
-export const pastelMesh = [
-  'radial-gradient(60% 90% at 8% 0%, #BFE3FF 0%, rgba(191,227,255,0) 70%)',
-  'radial-gradient(50% 80% at 42% 10%, #D9CCFF 0%, rgba(217,204,255,0) 70%)',
-  'radial-gradient(45% 80% at 75% 0%, #FFD3EC 0%, rgba(255,211,236,0) 70%)',
-  'radial-gradient(45% 90% at 100% 30%, #C6F4E4 0%, rgba(198,244,228,0) 70%)',
-].join(',');
+/** หัว modal ใช้ mesh ฟ้าตัวเดียวกับ modal ของอาจารย์ (lab-builder) — Pete ขอให้ทุก modal โทนเดียวกัน */
+export { blueMesh as pastelMesh } from '../lab-builder/theme';
