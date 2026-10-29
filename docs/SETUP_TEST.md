@@ -93,6 +93,23 @@ ansible-playbook -i inventory.home.yml build-images.yml -K -e lab_image_filter=m
 curl http://<registry-ip>:5001/v2/_catalog          # ต้องเห็น skypilot/music-lab
 ```
 
+### ขั้น 5.5 — เปิดระบบ SIEM & Monitor (5-Layer Pipeline)
+หากต้องการเปิดระบบตรวจจับความปลอดภัย (SIEM) และดูกราฟ Grafana ในหน้า `/admin`:
+```bash
+# บนเครื่อง master (หรือเครื่องที่มี kubeconfig):
+kubectl apply -f k8s/siem/layer1-collector/00-namespace-rbac.yaml
+# สร้าง token ลับสำหรับให้ตัวส่ง log (Vector Agent) ส่งเข้า NATS Buffer
+kubectl create secret generic siem-collector-token -n siem-system --from-literal=token="vlab-tailscale-collector-secret" --dry-run=client -o yaml | kubectl apply -f -
+
+# Deploy Layer 2 (NATS Buffer) -> Layer 4 (VictoriaLogs) -> Layer 3 (Vector Aggregator) -> Layer 1 & 5
+kubectl apply -f k8s/siem/layer2-buffer/
+kubectl apply -f k8s/siem/layer4-storage/00-victorialogs-hot-storage.yaml
+kubectl apply -f k8s/siem/layer3-processing/
+kubectl apply -f k8s/siem/layer1-collector/
+kubectl apply -f k8s/siem/layer5-detection/
+```
+*(ดูรายละเอียดเจาะลึกการตั้งค่า Cold Storage S3 และสถาปัตยกรรม 5 Layers ทั้งหมดได้ที่ `docs/SIEM.md`)*
+
 ### ขั้น 6 — เช็กว่าใช้ได้
 | เปิด | ต้องได้ |
 |---|---|
