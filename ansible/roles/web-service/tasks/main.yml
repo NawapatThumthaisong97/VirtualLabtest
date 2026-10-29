@@ -217,6 +217,29 @@
   register: init_db
   changed_when: "'Database initialized' in init_db.stdout"
 
+# Grafana ของ SIEM (k8s/siem/layer5-detection บน master) อ่าน infrastructure_logs — ให้ user อ่านอย่างเดียว
+# ไม่ใช้ POSTGRES_USER (superuser) ใน datasource ส่ง SQL ทาง stdin รหัสไม่ไปอยู่ใน argument ของ process
+- name: SIEM read-only DB user for Grafana (grafana_ro)
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f docker-compose.prod.yml exec -T db
+      psql -v ON_ERROR_STOP=1 -U {{ webservice_postgres_user }} -d {{ webservice_postgres_db }}
+    stdin: |
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_ro') THEN
+          CREATE ROLE grafana_ro LOGIN PASSWORD '{{ webservice_siem_grafana_ro_password }}';
+        ELSE
+          ALTER ROLE grafana_ro LOGIN PASSWORD '{{ webservice_siem_grafana_ro_password }}';
+        END IF;
+      END $$;
+      GRANT CONNECT ON DATABASE {{ webservice_postgres_db }} TO grafana_ro;
+      GRANT USAGE ON SCHEMA public TO grafana_ro;
+      GRANT SELECT ON infrastructure_logs TO grafana_ro;
+    chdir: "{{ webservice_dir }}"
+  when: webservice_siem_grafana_ro_password | length > 0
+  no_log: true
+  changed_when: false
+
 # seed เป็น optional เพราะทับข้อมูลเดิมได้ สั่งเปิดด้วย -e webservice_seed=true
 - name: Seed initial data (ต้องสั่งเปิดเอง)
   ansible.builtin.command:
