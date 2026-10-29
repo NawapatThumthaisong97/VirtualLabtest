@@ -440,3 +440,33 @@ class FakeR2:
 
             raise R2DeleteError(f"Failed to delete {key} from R2")
         self.deleted.append(key)
+
+
+class FakeS3Client:
+    """แทน boto3 s3 client ของ S3Storage — เก็บ object ใน dict ไม่ต่อ AWS จริง
+
+    objects: {key: (bytes, content_type)}, presigned: params ที่ถูกขอ presign (ไว้เช็ก header ที่ให้ S3 ตอบ)
+    """
+
+    def __init__(self):
+        self.objects: dict[str, tuple[bytes, str | None]] = {}
+        self.presigned: list[dict] = []
+        self.deleted: list[str] = []
+
+    def upload_fileobj(self, source, bucket, key, ExtraArgs=None):
+        self.objects[key] = (source.read(), (ExtraArgs or {}).get("ContentType"))
+
+    def head_object(self, Bucket, Key):
+        from botocore.exceptions import ClientError
+
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject")
+        return {"ContentLength": len(self.objects[Key][0])}
+
+    def delete_object(self, Bucket, Key):
+        self.deleted.append(Key)
+        self.objects.pop(Key, None)
+
+    def generate_presigned_url(self, operation, Params, ExpiresIn):
+        self.presigned.append({"operation": operation, "expires_in": ExpiresIn, **Params})
+        return f"https://{Params['Bucket']}.s3.example.test/{Params['Key']}?X-Amz-Signature=fake"

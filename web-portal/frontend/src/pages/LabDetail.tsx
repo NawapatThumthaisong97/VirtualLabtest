@@ -37,7 +37,9 @@ function readError(err: unknown): string {
 }
 
 // pdf.js parses the file off the main thread; Vite resolves the bundled worker via ?url.
-pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+// ?mime=js: ไฟล์ worker เคยถูก nginx ส่งเป็น application/octet-stream พร้อม Cache-Control immutable 1 ปี
+// เบราว์เซอร์ที่ cache ตัวเสียไว้จะไม่ขอใหม่เอง (Ctrl+Shift+R ไม่ช่วยเพราะ worker ถูกโหลดจากใน JS) — เปลี่ยน URL บังคับโหลดใหม่
+pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?mime=js`;
 
 function DocMessage({ children }: { children: ReactNode }) {
   return (

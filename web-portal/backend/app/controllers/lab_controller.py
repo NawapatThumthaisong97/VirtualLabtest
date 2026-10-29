@@ -1,4 +1,3 @@
-from pathlib import Path
 from uuid import UUID
 
 from app.exceptions.domain import ForbiddenError, LabNotFoundError
@@ -46,9 +45,12 @@ class LabController:
     def get_lab(self, lab_id: UUID, user) -> LabDetailResponse:
         return LabDetailResponse.model_validate(self._get_visible_lab(lab_id, user))
 
-    def get_lab_doc_path(self, lab_id: UUID, user) -> Path:
+    def get_lab_doc_key(self, lab_id: UUID, user) -> str:
         self._get_visible_lab(lab_id, user)
-        return self.service.get_lab_doc_path(lab_id)
+        return self.service.get_lab_doc_key(lab_id)
+
+    def delete_lab_doc(self, lab_id: UUID, user) -> LabResponse:
+        return LabResponse.model_validate(self.service.delete_lab_doc(lab_id, user))
 
     # สร้าง / แก้ / ลบ lab ได้เฉพาะผู้สอนวิชานั้นหรือ admin (เดิมแค่ login ก็ทำได้ นักศึกษาแก้ lab ได้)
     def create_lab(self, payload: LabCreateRequest, user) -> LabResponse:

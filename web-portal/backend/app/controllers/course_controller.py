@@ -118,6 +118,9 @@ class CourseController:
         """
         return self.course_service.update_announcement_ids(course_id, announcement_ids)
 
+    def delete_course_image(self, course_id: UUID) -> Course:
+        return self.course_service.delete_course_image(course_id)
+
     def save_course_image(self, course_id: UUID, filename: str, source) -> Course:
         """
         บันทึกรูปภาพของ course
