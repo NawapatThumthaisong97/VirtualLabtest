@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     # ใช้ object key แบบเดียวกับ bucket (labs/{lab_id}/doc.pdf) ตั้งแต่ตอนนี้
     # วันที่ย้ายขึ้น S3/R2 จะได้ก๊อปไฟล์ขึ้นไปเฉย ๆ ไม่ต้องแตะ DB
     STORAGE_ROOT: str = "storage"
+    # ไฟล์ของเว็บ (รูปปกวิชา / เอกสาร lab / เอกสารวิชา): local = disk ใต้ STORAGE_ROOT, s3 = bucket ของ terraform/storage
+    STORAGE_BACKEND: str = "local"
+    STORAGE_S3_BUCKET: Optional[str] = None
+    # ว่าง = ใช้ AWS_REGION
+    STORAGE_S3_REGION: Optional[str] = None
+    # อายุ presigned GET ที่ backend ออกหลังเช็กสิทธิ์ (สั้นไว้ ลิงก์หลุดไปก็ใช้ได้ไม่นาน)
+    STORAGE_PRESIGN_SECONDS: int = 300
     
     # Cloudflare R2
     R2_ACCOUNT_ID: Optional[str] = None
@@ -153,9 +160,6 @@ class Settings(BaseSettings):
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
 
-    # Default Run Target
-    DEFAULT_RUN_TARGET: str = "aws"
-    DEV_DEFAULT_NODE: Optional[str] = None
     # Lab image scan (docs/LAB_IMAGE_SCAN_ARCHITECTURE.md) ปิดไว้เป็นค่าเริ่มต้น
     # เปิดแล้ว backend จะรัน scan reconciler (ต้องมี K8S_ENABLED ด้วย)
     LAB_IMAGE_SCAN_ENABLED: bool = False

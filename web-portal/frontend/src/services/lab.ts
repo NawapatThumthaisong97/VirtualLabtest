@@ -1,4 +1,5 @@
 /** Lab API Service */
+import axios from 'axios';
 import apiClient, { API_URL } from './api';
 
 export type LabStatus = 'draft' | 'published' | 'archived';
@@ -208,8 +209,19 @@ export const labService = {
    */
   docUrl: (labId: string): string => `${API_URL}/labs/${labId}/doc`,
 
-  /** ดึงไฟล์เอกสารมาเป็น ArrayBuffer ผ่าน apiClient แล้วส่งเข้า <Document file={{ data }} /> */
+  /**
+   * ดึงไฟล์เอกสารมาเป็น ArrayBuffer แล้วส่งเข้า <Document file={{ data }} />
+   * storage เป็น S3: ขอ presigned URL (backend เช็กสิทธิ์แล้ว) แล้วโหลดตรงจาก S3 — ห้ามตาม redirect ของ /doc
+   * เพราะ fetch ข้าม origin ตาม redirect แล้ว Origin กลายเป็น null CORS ของ bucket ไม่ผ่าน
+   * storage เป็น disk (url = null): ใช้ /doc เดิมผ่าน apiClient
+   */
   fetchDoc: async (labId: string): Promise<ArrayBuffer> => {
+    const signed = unwrap<{ url: string | null }>(await apiClient.get(`/labs/${labId}/doc-url`));
+    if (signed?.url) {
+      // axios เปล่า: ไม่ส่ง cookie / Authorization ไป S3 (presigned URL พอแล้ว) และไม่ผ่าน interceptor ของ backend
+      const response = await axios.get(signed.url, { responseType: 'arraybuffer', withCredentials: false });
+      return response.data as ArrayBuffer;
+    }
     const response = await apiClient.get(`/labs/${labId}/doc`, { responseType: 'arraybuffer' });
     return response as unknown as ArrayBuffer;
   },

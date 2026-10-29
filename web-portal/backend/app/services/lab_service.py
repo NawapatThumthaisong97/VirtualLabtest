@@ -4,7 +4,9 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from app.adapters.local_storage import local_storage
+from sqlalchemy import func, select
+
+from app.adapters.storage import get_storage
 from app.exceptions.domain import (
     CourseNotFoundError,
     DuplicateOrderNoError,
@@ -47,9 +49,9 @@ class LabService:
             raise LabNotFoundError(f"Lab {lab_id} not found")
         return lab
 
-    def get_lab_doc_path(self, lab_id: UUID) -> Path:
+    def get_lab_doc_key(self, lab_id: UUID) -> str:
         """
-        คืน path ของไฟล์เอกสารแลปบน disk
+        คืน storage key ของเอกสารแลป (disk หรือ S3 ตาม STORAGE_BACKEND)
 
         แยก 2 กรณีที่ต่างกันแต่ตอบ 404 เหมือนกัน: แลปยังไม่ได้แนบเอกสาร
         กับแนบไว้แล้วแต่ไฟล์หายไปจาก storage — ข้อความ error ต่างกันเพื่อให้
@@ -60,12 +62,11 @@ class LabService:
         if not lab.doc_url:
             raise LabDocNotFoundError(f"Lab {lab_id} has no document attached")
 
-        path = local_storage.resolve(lab.doc_url)
-        if not path.is_file():
+        if not get_storage().exists(lab.doc_url):
             raise LabDocNotFoundError(
                 f"Document file missing from storage: {lab.doc_url}"
             )
-        return path
+        return lab.doc_url
 
     def _ensure_image_in_course(self, image_id: UUID | None, course_id: UUID) -> None:
         """image ต้องมีอยู่และเป็นของวิชาเดียวกับ lab
@@ -166,7 +167,7 @@ class LabService:
     DOC_MAX_BYTES = 50 * 1024 * 1024
 
     def save_lab_doc(self, lab_id: UUID, user: User, filename: str, source) -> Lab:
-        """บันทึกเอกสาร PDF ของ lab ลง local storage แล้วชี้ doc_url ไปที่ไฟล์นั้น
+        """บันทึกเอกสาร PDF ของ lab ลง storage (disk / S3) แล้วชี้ doc_url ไปที่ไฟล์นั้น
 
         key มี lab_id อยู่แล้ว ไฟล์ชื่อเดียวกันของคนละ lab จึงไม่ทับกัน
         อัปไฟล์ใหม่ซ้ำ = แทนของเดิม (doc_url มีได้ไฟล์เดียว)
@@ -187,10 +188,33 @@ class LabService:
             raise ValidationError("Document is larger than 50 MB")
 
         key = f"labs/{lab.id}/{safe_filename}"
-        local_storage.save(key, source.file)
+        previous = lab.doc_url
+        get_storage().save(key, source.file, "application/pdf")
         lab.doc_url = key
         self.db.commit()
+        # ไฟล์เดิมชื่ออื่น = ขยะใน storage ลบทิ้ง (ชื่อเดิม = ถูกเขียนทับไปแล้ว)
+        if previous and previous != key:
+            self._delete_if_unused(previous)
         return lab
+
+    def delete_lab_doc(self, lab_id: UUID, user: User) -> Lab:
+        """ถอดเอกสารออกจาก lab (doc_url = null) แล้วลบไฟล์ถ้าไม่มี lab อื่นใช้"""
+        lab = self.get_lab_by_id(lab_id)
+        self.ensure_can_manage(user, lab.course_id)
+        previous = lab.doc_url
+        if previous is None:
+            raise LabDocNotFoundError(f"Lab {lab_id} has no document attached")
+        lab.doc_url = None
+        self.db.commit()
+        self._delete_if_unused(previous)
+        return lab
+
+    def _delete_if_unused(self, key: str) -> None:
+        """lab หลายตัวชี้ไฟล์เดียวกันได้ (seed SE301 สาม lab ใช้ workbook เดียว) ลบเมื่อไม่มีใครใช้แล้วเท่านั้น
+        นับรวม lab ที่ soft delete ด้วย เผื่อกู้ lab กลับมาแล้วเอกสารยังอยู่"""
+        in_use = self.db.execute(select(func.count()).select_from(Lab).where(Lab.doc_url == key)).scalar()
+        if not in_use:
+            get_storage().delete(key)
 
     # DELETE
     def delete_lab(self, lab_id: UUID) -> None:

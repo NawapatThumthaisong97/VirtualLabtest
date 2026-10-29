@@ -58,7 +58,6 @@ class SecurityCountersResponse(CamelModel):
     squid_egress_drops: int = Field(default=0, description="จำนวนครั้งที่ Squid Proxy ดรอป Traffic นอก Allowlist")
     kyverno_policy_blocks: int = Field(default=0, description="จำนวนครั้งที่ OPA/Kyverno บล็อกการตั้งค่าอันตราย")
     tailscale_cross_cluster_attempts: int = Field(default=0, description="จำนวนการพยายามเชื่อมต่อข้าม Cluster ใน Tailscale")
-    falco_ebpf_alerts: int = Field(default=0, description="จำนวนครั้งที่ Falco eBPF ดักจับพฤติกรรมผิดปกติระดับ Kernel ใน Container")
     total_violations: int = Field(default=0, description="จำนวนรวมการละเมิดความปลอดภัยทั้งหมด")
     last_violation_timestamp: Optional[datetime] = Field(None, description="เวลาที่เกิดการละเมิดล่าสุด")
 

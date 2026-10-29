@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import GradientModal from './GradientModal';
 import PrimaryButton from './PrimaryButton';
 import { FileDrop, FormNote, IconInput, IllustratedTextarea, inputBox, label } from './fields';
-import { UsersIcon } from './icons';
+import { BookIcon } from './icons';
 import { labService } from '../../services/lab';
 import { MAX_ARCHIVE_BYTES, apiErrorMessage, labImageService } from '../../services/labImage';
 
@@ -121,7 +121,7 @@ export default function CreateLabModal({ open, onClose, onCreated, courseId, cou
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <label style={label}>
             <span style={{ paddingLeft: 6 }}>Lab name</span>
-            <IconInput icon={<UsersIcon size={20} width={1.6} />} value={form.name} onChange={(v) => set('name', v)} placeholder="Lab name" />
+            <IconInput icon={<BookIcon size={20} width={1.6} />} value={form.name} onChange={(v) => set('name', v)} placeholder="Lab name" />
           </label>
 
           <div style={label}>

@@ -121,6 +121,11 @@ class ResourceContextPolicy:
             if resource_domain == "storage":
                 if _parse_uuid(resource_id) != course_id:
                     return False
+                # ผู้สร้างวิชา (created_by) ก็อัปรูป / ไฟล์ของวิชาได้ — สร้างวิชาจาก Instructor Console ไม่ได้ enroll ตัวเองเป็นผู้สอน
+                # เทียบด้วย id เท่านั้น ไม่ใช้ lecturer_name (ชื่อแสดงผล ซ้ำกันได้)
+                course = repo.find_active_course(course_id)
+                if course is not None and course.created_by == user.id:
+                    return True
                 return repo.is_enrolled_instructor_of_active_course(user.id, course_id)
             if action == "create":
                 return repo.is_enrolled_instructor_of_active_course(user.id, course_id)

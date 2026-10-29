@@ -1,3 +1,4 @@
+import mimetypes
 from uuid import UUID
 
 from fastapi import (
@@ -9,7 +10,6 @@ from fastapi import (
     UploadFile,
     status as http_status,
 )
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.configs.db import get_db
@@ -33,7 +33,7 @@ from app.services.courses_service import CourseService
 from app.services.course_document_service import CourseDocumentService
 from app.controllers.course_controller import CourseController
 from app.middlewares.request_validation import require_non_empty_body
-from app.adapters.local_storage import local_storage
+from app.adapters.storage import content_disposition, get_storage
 from app.exceptions.domain import NotFoundError, ValidationError
 from app.services.rbac_service import ResourceContextPolicy
 
@@ -167,14 +167,34 @@ def get_course_image(
     current_user: User = Depends(get_current_user),
     controller: CourseController = Depends(get_course_controller),
 ):
-    """ดึงรูปภาพของ course (ต้อง login)"""
+    """ดึงรูปปกของ course (ต้อง login) — disk: ส่งไฟล์ตรง / S3: 307 ไป presigned URL (<img> ตาม redirect ได้)"""
     course = controller.get_course(course_id)
     if not course.image_url or course.image_url.startswith(("http://", "https://")):
         raise NotFoundError(f"Course image {course_id} not found")
-    path = local_storage.resolve(course.image_url)
-    if not path.is_file():
+    storage = get_storage()
+    if not storage.exists(course.image_url):
         raise NotFoundError(f"Course image {course_id} not found")
-    return FileResponse(path)
+    filename = course.image_url.rsplit("/", 1)[-1]
+    media_type, _ = mimetypes.guess_type(filename)
+    return storage.response(
+        course.image_url,
+        media_type=media_type or "application/octet-stream",
+        disposition=content_disposition(filename),
+    )
+
+
+@router.delete(
+    "/{course_id}/image",
+    response_model=CourseResponse,
+    dependencies=[Depends(verify_permission("storage:images:push:course", context_policy=course_policy))],
+)
+def delete_course_image(
+    course_id: UUID,
+    request: Request,
+    controller: CourseController = Depends(get_course_controller),
+):
+    """ลบรูปปกที่อัปเอง (ผู้สอนวิชานี้ / admin) การ์ดกลับไปใช้พื้นหลัง preset"""
+    return course_response(controller.delete_course_image(course_id), request)
 
 
 @router.post(
@@ -482,10 +502,11 @@ def get_course_document_file(
     document_id: UUID,
     service: CourseDocumentService = Depends(get_course_document_service),
 ):
-    doc, path = service.file_path(course_id, document_id)
-    # ชื่อไฟล์ตอนดาวน์โหลด = ชื่อเอกสาร (ตัดอักขระที่ใส่ใน header ไม่ได้)
-    safe = "".join(ch for ch in doc.title if ch.isascii() and ch not in '"\\\r\n') or "document"
-    return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{safe}.pdf"'})
+    doc = service.get_existing(course_id, document_id)
+    # ชื่อไฟล์ตอนดาวน์โหลด = ชื่อเอกสาร (รองรับภาษาไทยผ่าน filename*)
+    return get_storage().response(
+        doc.file_key, media_type="application/pdf", disposition=content_disposition(f"{doc.title}.pdf")
+    )
 
 
 @router.delete(

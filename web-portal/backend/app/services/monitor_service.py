@@ -233,14 +233,12 @@ class MonitorService:
         squid_drops = int(counters.get("squid_egress_drops", 0))
         kyverno_blocks = int(counters.get("kyverno_policy_blocks", 0))
         tailscale_attempts = int(counters.get("tailscale_cross_cluster_attempts", 0))
-        falco_alerts = int(counters.get("falco_ebpf_alerts", 0))
         total = squid_drops + kyverno_blocks + tailscale_attempts
 
         return SecurityCountersResponse(
             squid_egress_drops=squid_drops,
             kyverno_policy_blocks=kyverno_blocks,
             tailscale_cross_cluster_attempts=tailscale_attempts,
-            falco_ebpf_alerts=falco_alerts,
             total_violations=total,
             last_violation_timestamp=counters.get("last_violation_timestamp"),
         )

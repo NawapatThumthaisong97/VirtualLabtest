@@ -1,5 +1,6 @@
 /** Course API Service */
 import apiClient, { API_URL } from './api';
+import type { BackgroundKey, IconKey } from '../constants/coursePresets';
 
 export interface CourseDetail {
   id: string;
@@ -7,6 +8,9 @@ export interface CourseDetail {
   name: string;
   lecturerName: string;
   imageUrl: string | null;
+  /** preset ของการ์ดวิชา — ใช้กรอกค่าเดิมใน modal appearance */
+  backgroundKey: BackgroundKey | null;
+  iconKey: IconKey | null;
   announcements: Announcement[];
 }
 
@@ -26,6 +30,10 @@ interface CourseApiResponse {
   lecturerName?: string;
   image_url?: string | null;
   imageUrl?: string | null;
+  background_key?: BackgroundKey | null;
+  backgroundKey?: BackgroundKey | null;
+  icon_key?: IconKey | null;
+  iconKey?: IconKey | null;
   announcements?: Array<{
     id: string;
     message: string;
@@ -47,6 +55,8 @@ export const courseService = {
       name: data.name,
       lecturerName: data.lecturerName ?? data.lecturer_name ?? '',
       imageUrl: data.imageUrl ?? data.image_url ?? null,
+      backgroundKey: data.backgroundKey ?? data.background_key ?? null,
+      iconKey: data.iconKey ?? data.icon_key ?? null,
       announcements: (data.announcements ?? []).map((a) => ({
         id: a.id,
         message: a.message,
