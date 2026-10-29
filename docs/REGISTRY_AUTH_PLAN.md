@@ -2,7 +2,7 @@
 
 แก้ช่องโหว่ข้อ 8.1 ใน `docs/archive/LAB_IMAGE_SCAN_GUIDE.md`: camp registry ไม่มี auth ใครเข้า `:5001` ได้ก็ push image ข้ามการสแกนได้ แล้ว `ecr-sync` จะพาขึ้น ECR ให้ด้วย
 
-สถานะ: Phase 1-2 เสร็จ (รันบน rn ผ่าน 2026-10-29) / Phase 3-6 ยังไม่เริ่ม
+สถานะ: Phase 1-2 เสร็จ (รันบน rn ผ่าน 2026-10-29) / Phase 3 deploy แล้ว รอทดสอบสแกนจริงพร้อม Phase 5 / Phase 4-6 ยังไม่เริ่ม
 
 ## เครื่องที่มี (ansible/inventory.yml)
 
@@ -53,15 +53,23 @@ rn: camp-registry-pull :5001  read-only ไม่มี auth   ← worker / mast
   ได้ `SCAN_RUNNER_IMAGE=100.119.124.73:5001/vlab/scan-runner@sha256:da714405a71a5cbe7eeb467d74b01edce47bf15b7d18a0faeb8c47de975b3afc`
 - [x] ตรวจ: `curl http://100.119.124.73:5001/v2/_catalog` ต้องมี `vlab/scan-runner`
 
-### Phase 3: scan Job push แบบมี auth
-- role `k3s-server`: สร้าง Secret `registry-push` (username/password ของ `registry_users.scanner`) ใน namespace `vlab-scan` (`no_log`)
-- `k8s/scan-namespace.yaml`: egress ไป `REGISTRY_IP/32` เปิด 5001 และ 5002
-- `scan_job_service.py`: mount `registry-push` เฉพาะ container `publish` ที่ `/secrets/push` (0400), `REGISTRY` = push host, `nodeSelector` control-plane
-- `settings.py`: `REGISTRY_PUSH_HOST` (default = host ของ `DOCKER_REGISTRY_HOST` + `:5002`), `SCAN_NODE_SELECTOR`
-- `runner.py` `step_push`: อ่าน credential จากไฟล์ เขียน authfile 0600 ใน `/work/tmp` ส่ง `--dest-authfile` ลบทิ้งหลัง push ไม่มีไฟล์ = `ERROR` ไม่ retry
-- unit test ของ runner (push credential + `evaluate_report`) และ test ของ backend
-- bump `scan_runner_version` → `1.1.0`
-- ลบ `REGISTRY_SCANNER_PASSWORD` ออกจาก `.env` ของ backend
+### Phase 3: scan Job push แบบมี auth  (เขียนเสร็จ test ผ่าน รอ deploy)
+- [x] role `k3s-server` (tag `scan`): Secret `registry-push` แบบ `kubernetes.io/basic-auth` จาก `registry_users.scanner` ใน `vlab-scan`
+  apply `--server-side` (ไม่เก็บรหัสซ้ำใน annotation last-applied) เทียบค่าเดิมก่อน apply, `no_log` ค่าใน `roles/k3s-server/defaults/main.yml`
+- [x] `k8s/scan-namespace.yaml`: egress ไป `REGISTRY_IP/32` เปิด 5001 และ 5002
+- [x] `scan_job_service.py`: mount `registry-push` เฉพาะ container `publish` ที่ `/secrets/push` (0400), `REGISTRY` = `settings.registry_push_host`, `nodeSelector` จาก `SCAN_NODE_SELECTOR`
+- [x] `settings.py`: `REGISTRY_PUSH_HOST` (ว่าง = host ของ `DOCKER_REGISTRY_HOST` + `REGISTRY_PUSH_PORT` 5002), `SCAN_PUSH_SECRET`, `SCAN_NODE_SELECTOR` (default `node-role.kubernetes.io/control-plane: "true"`)
+- [x] `runner.py` `step_push`: อ่าน `/secrets/push/{username,password}` เขียน authfile 0600 ใน `TMPDIR` ส่ง `--dest-authfile` ลบใน `finally` ไม่มีไฟล์ / รูปแบบผิด = `ERROR` ไม่ retry
+- [x] test: `scan-runner/tests/test_push.py` (9 ข้อ) + `tests/lab_image/test_scan_launch.py` (backend ทั้งชุด 533 ผ่าน)
+  ยังไม่มี test ของ `evaluate_report` (guide ข้อ 8.2) ทำแยกทีหลัง
+- [x] bump runner → `1.1.0` (`runner.py`, `Dockerfile`, role default, `SCAN_RUNNER_VERSION`)
+- [x] ลบ `REGISTRY_SCANNER_USER/PASSWORD` ออกจาก `.env` ของ backend (เหลือ `REGISTRY_PUSH_PORT`)
+- [x] deploy: rn `--tags scan-runner` (build 1.1.0, `sha256:8565ed4af32ff004e982d3f840211fbea124a85a7bbd99942e23c8003981b2ea`) → mn `--tags scan` (Secret + NetworkPolicy)
+  ตรวจบน mn แล้ว: egress มี 5001 + 5002, node มี `control-plane=true`, Secret ไม่มี annotation
+- [x] แก้ `changed_when` ของ task apply `scan-namespace.yaml` (หลาย resource: มีตัวเดียว unchanged ก็รายงาน ok ทั้งที่ตัวอื่นเปลี่ยน)
+- [ ] ทดสอบสแกนจริง: **เลื่อนไปทำพร้อม Phase 5 หลังตั้ง ACL** (restart backend บน WSL → อัป tar → Pod ลง mn → PASS + digest → `:5001/v2/_catalog`)
+  ถ้าไม่ผ่าน: `kubectl -n vlab-scan logs <pod> -c publish` ต่อไม่ติด/timeout = ACL, `unauthorized` = credential
+- test DB: `virtual_lab_test` สร้างไว้ใน Postgres ของ WSL แล้ว (conftest ไม่สร้างให้เอง)
 
 ### Phase 4: Tailscale ACL
 - `tailscale/vlab-tags.tsv`: 3 เครื่องตามตารางข้างบน

@@ -13,7 +13,7 @@ FROM ${TRIVY_IMAGE} AS trivy
 
 FROM ${BASE_IMAGE}
 
-ARG RUNNER_VERSION=1.0.0
+ARG RUNNER_VERSION=1.1.0
 ARG TRIVY_VERSION=0.76.1
 LABEL org.opencontainers.image.title="vlab-scan-runner" \
       org.opencontainers.image.description="Scans uploaded lab image archives (Trivy + skopeo) before they reach the camp registry" \

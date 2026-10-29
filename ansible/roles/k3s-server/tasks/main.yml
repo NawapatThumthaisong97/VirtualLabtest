@@ -157,5 +157,41 @@
     {{ lookup('file', playbook_dir + '/../k8s/scan-namespace.yaml') | replace('REGISTRY_IP', registry_ip) }}
     YAML
   register: scan_namespace
-  changed_when: "'unchanged' not in scan_namespace.stdout"
+  # ไฟล์มีหลาย resource: ดูว่ามีตัวไหนเปลี่ยน ไม่ใช่ว่ามีตัวไหน unchanged
+  changed_when: scan_namespace.stdout is search('(configured|created)$', multiline=true)
+  tags: [scan]
+
+# credential ที่ container publish ของ Job สแกนใช้ push เข้า camp registry :5002 (role registry)
+# อยู่ใน cluster ที่เดียว backend ไม่ต้องรู้รหัส manifest ส่งทาง stdin (ไม่อยู่ใน argv / log)
+# --server-side: apply แบบปกติเก็บ manifest ทั้งก้อน (รวมรหัส) ซ้ำใน annotation last-applied-configuration
+- name: Read current registry push credentials
+  ansible.builtin.command:
+    argv: [k3s, kubectl, -n, vlab-scan, get, secret, "{{ scan_push_secret }}", -o, json]
+  register: scan_push_secret_current
+  failed_when: false
+  changed_when: false
+  no_log: true
+  tags: [scan]
+
+- name: Store registry push credentials for scan Jobs
+  when: >-
+    scan_push_secret_current.rc != 0
+    or (scan_push_secret_current.stdout | from_json).data | default({}, true)
+       != {'username': scan_push_user | b64encode,
+           'password': registry_users[scan_push_user].password | b64encode}
+  ansible.builtin.command:
+    argv: [k3s, kubectl, apply, --server-side, --field-manager=ansible, -f, -]
+    stdin: >-
+      {{ {
+        'apiVersion': 'v1',
+        'kind': 'Secret',
+        'type': 'kubernetes.io/basic-auth',
+        'metadata': {'name': scan_push_secret, 'namespace': 'vlab-scan'},
+        'stringData': {
+          'username': scan_push_user,
+          'password': registry_users[scan_push_user].password,
+        },
+      } | to_json }}
+  changed_when: true
+  no_log: true
   tags: [scan]
