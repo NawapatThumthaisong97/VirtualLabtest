@@ -46,7 +46,7 @@
     creates: /etc/apt/sources.list.d/timber-vector.list
 
 - name: Install Vector Agent and Falco (no kernel module compilation required with modern_ebpf)
-  ansible.builtin.Environment:
+  environment:
     FALCO_FRONTEND: noninteractive
     FALCO_DRIVER_CHOICE: modern_ebpf
   ansible.builtin.apt:
