@@ -128,17 +128,16 @@ spec:
         - key: "node-role.kubernetes.io/master"
           operator: "Exists"
           effect: "NoSchedule"
+      # Pin Grafana strictly to control-plane / master so it inherits tag:vlab-server
+      # and can reach the backend database on port 5432 through Tailscale ACL
       affinity:
         nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: Exists
-            - weight: 50
-              preference:
-                matchExpressions:
+              - matchExpressions:
                   - key: node-role.kubernetes.io/master
                     operator: Exists
       containers:
