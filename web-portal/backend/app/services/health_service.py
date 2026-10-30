@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.configs.db import SessionLocal
 from app.configs.settings import settings
 from app.models.health_check import HealthCheck
+from app.models.infrastructure_log import InfrastructureLog
 from app.schemas.admin_monitor_schema import ServiceStatus, SystemStatusResponse
 from app.services.admin_log_service import collect, log_health_changes
 from app.services.prewarm_service import CONTROL_PLANE_LABEL
@@ -173,7 +174,17 @@ def check_once(db: DbSession, checks: Optional[list[tuple[str, Checker]]] = None
     log_health_changes(db, previous, rows)
     cutoff = now - timedelta(days=settings.HEALTH_CHECK_RETENTION_DAYS)
     db.query(HealthCheck).filter(HealthCheck.checked_at < cutoff).delete(synchronize_session=False)
+
     db.commit()
+
+    # Garbage Collector: ลบ infrastructure_logs ที่เก่ากว่า INFRASTRUCTURE_LOG_RETENTION_DAYS (เช่น 30 วัน)
+    try:
+        infra_cutoff = now - timedelta(days=settings.INFRASTRUCTURE_LOG_RETENTION_DAYS)
+        db.query(InfrastructureLog).filter(InfrastructureLog.timestamp < infra_cutoff).delete(synchronize_session=False)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Failed to prune old infrastructure logs: {exc}")
     return rows
 
 

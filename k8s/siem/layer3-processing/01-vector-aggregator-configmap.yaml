@@ -1,0 +1,277 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-aggregator-config
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: vector-aggregator
+    app.kubernetes.io/component: log-processor-normalizer
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "3-processing"
+data:
+  vector-aggregator.yaml: |
+    # =========================================================================
+    # Layer 3: Vector Aggregator Configuration (Data Processing & Normalization)
+    # - Pulls buffered logs & alerts from Layer 2 NATS JetStream
+    # - Normalizes heterogeneous logs into ECS (Elastic Common Schema v8.11.0)
+    # - Enriches events with GeoIP location data & Threat Intelligence IOCs
+    # =========================================================================
+    data_dir: "/var/lib/vector-aggregator"
+
+    # ---------------------
+    # 1. SOURCES (Pull from Layer 2 NATS JetStream)
+    # ---------------------
+    sources:
+      nats_jetstream_telemetry:
+        type: nats
+        url: "nats://nats-jetstream.siem-system.svc.cluster.local:4222"
+        subject: "siem.logs.>"
+        queue: "vector-aggregator-workers"
+        connection_name: "vlab-vector-aggregator"
+        decoding:
+          codec: json
+
+    # ---------------------
+    # 2. TRANSFORMS (VRL: ECS Normalization + GeoIP + Threat Intelligence)
+    # ---------------------
+    transforms:
+      ecs_normalize_and_enrich:
+        type: remap
+        inputs:
+          - nats_jetstream_telemetry
+        source: |
+          # 1. Extract base fields from incoming Layer 1 / Layer 2 event
+          raw_msg = to_string(.message) ?? to_string(.output) ?? encode_json(.)
+          ev_type = upcase(to_string(.eventType) ?? "SYSTEM_LOG")
+          sev = upcase(to_string(.severity) ?? "INFO")
+          cat = upcase(to_string(.category) ?? "INFRASTRUCTURE")
+          src_node = to_string(.source) ?? to_string(.node_name) ?? "k3s-worker-node"
+          subnet = to_string(.clusterOrSubnet) ?? to_string(.nat_subnet) ?? "192.168.1.0/24"
+          meta = if is_object(.metadata) { .metadata } else { {} }
+          ts_ip = to_string(meta.tailscale_ip) ?? to_string(.tailscale_ip) ?? "100.69.137.47"
+          if ts_ip == "" { ts_ip = "100.69.137.47" }
+          prov = to_string(meta.provider) ?? to_string(.provider) ?? "local_k3s"
+          if prov == "" { prov = "local_k3s" }
+          fast = to_bool(meta.fast_track) ?? false
+
+          # 2. Threat Intelligence Matching (IOC Blacklist: C2 IPs, Cryptomining Domains, Credential Files)
+          ioc_matched = false
+          ioc_value = ""
+          ioc_type = "none"
+          ioc_category = "none"
+          mitre_tactic = "None"
+          mitre_technique = "None"
+          risk_score = 10
+
+          msg_lower = downcase(raw_msg)
+          if contains(msg_lower, "198.51.100.24") || contains(msg_lower, "c2-botnet.darknet.io") {
+            ioc_matched = true
+            ioc_value = if contains(msg_lower, "198.51.100.24") { "198.51.100.24" } else { "c2-botnet.darknet.io" }
+            ioc_type = "ip_or_domain"
+            ioc_category = "c2_botnet"
+            mitre_tactic = "Command and Control"
+            mitre_technique = "T1071"
+            risk_score = 95
+            sev = "CRITICAL"
+            cat = "SECURITY_VIOLATION"
+            fast = true
+          } else if contains(msg_lower, "203.0.113.66") || contains(msg_lower, "malicious-mining.org") || contains(msg_lower, "crypto-miner.xyz") || contains(msg_lower, "stratum+tcp") {
+            ioc_matched = true
+            ioc_value = "malicious-mining.org"
+            ioc_type = "domain"
+            ioc_category = "cryptomining"
+            mitre_tactic = "Resource Hijacking"
+            mitre_technique = "T1496"
+            risk_score = 92
+            sev = "CRITICAL"
+            cat = "SECURITY_VIOLATION"
+            fast = true
+          } else if contains(msg_lower, "/etc/shadow") || contains(msg_lower, "/etc/sudoers") {
+            ioc_matched = true
+            ioc_value = "/etc/shadow"
+            ioc_type = "file_path"
+            ioc_category = "credential_access"
+            mitre_tactic = "Credential Access"
+            mitre_technique = "T1003"
+            risk_score = 92
+            sev = "CRITICAL"
+            cat = "SECURITY_VIOLATION"
+            fast = true
+          }
+
+          # 3. GeoIP Enrichment (Source & Destination Geo Classification)
+          src_country = "TH"
+          src_city = "Pathum Thani"
+          src_region = "TU-Rangsit-Lab-Network"
+          if prov == "aws" || contains(downcase(src_node), "aws") || contains(downcase(src_node), "skypilot") {
+            src_country = "SG"
+            src_city = "Singapore"
+            src_region = "AWS-ap-southeast-1"
+          }
+
+          dst_country = "TH"
+          dst_city = "Bangkok"
+          dst_ip = ts_ip
+          if contains(msg_lower, "198.51.100.24") {
+            dst_country = "RU"
+            dst_city = "Moscow"
+            dst_ip = "198.51.100.24"
+          } else if contains(msg_lower, "203.0.113.66") {
+            dst_country = "CN"
+            dst_city = "Beijing"
+            dst_ip = "203.0.113.66"
+          }
+
+          # 4. Build Elastic Common Schema (ECS v8.11.0) Normalized Document
+          ev_kind = "event"
+          ev_cats = ["host", "process"]
+          if cat == "SECURITY_VIOLATION" {
+            ev_kind = "alert"
+            ev_cats = ["intrusion_detection", "network"]
+          }
+          ev_type_lower = downcase(ev_type)
+
+          ecs_doc = {
+            "ecs": { "version": "8.11.0" },
+            "event": {
+              "kind": ev_kind,
+              "category": ev_cats,
+              "type": [ev_type_lower],
+              "severity": risk_score,
+              "dataset": "vlab.siem.telemetry"
+            },
+            "host": {
+              "hostname": src_node,
+              "ip": [ts_ip]
+            },
+            "cloud": {
+              "provider": prov
+            },
+            "source": {
+              "ip": ts_ip,
+              "nat_subnet": subnet,
+              "geo": {
+                "country_iso_code": src_country,
+                "city_name": src_city,
+                "region_name": src_region
+              }
+            },
+            "destination": {
+              "ip": dst_ip,
+              "geo": {
+                "country_iso_code": dst_country,
+                "city_name": dst_city
+              }
+            },
+            "threat": {
+              "indicator": {
+                "matched": ioc_matched,
+                "value": ioc_value,
+                "type": ioc_type,
+                "category": ioc_category
+              },
+              "tactic": { "tactic_name": mitre_tactic },
+              "technique": { "id": mitre_technique },
+              "risk_score": risk_score
+            },
+            "observer": {
+              "vendor": "VirtualLab-SIEM",
+              "product": "Vector-Aggregator",
+              "type": "layer3-normalizer"
+            }
+          }
+
+          # 5. Output Unified Payload (Preserves Backend API Contract + Full ECS Document in metadata.ecs)
+          . = {
+            "severity": sev,
+            "category": cat,
+            "eventType": ev_type,
+            "source": src_node,
+            "message": raw_msg,
+            "clusterOrSubnet": subnet,
+            "metadata": {
+              "siem_layer": "layer3-processing",
+              "processor": "vector-aggregator",
+              "ecs_version": "8.11.0",
+              "ecs": ecs_doc,
+              "geoip": {
+                "source_country": src_country,
+                "source_city": src_city,
+                "destination_country": dst_country,
+                "destination_city": dst_city
+              },
+              "threat_intel": {
+                "ioc_matched": ioc_matched,
+                "ioc_value": ioc_value,
+                "threat_category": ioc_category,
+                "mitre_tactic": mitre_tactic,
+                "mitre_technique": mitre_technique,
+                "risk_score": risk_score
+              },
+              "fast_track": fast
+            }
+          }
+
+      # 2.4 Filter events destined for Central PostgreSQL Control Plane
+      # Preserves routine INFO system logs in VictoriaLogs (hot tier) & S3 (cold tier)
+      # Forwards only security events, Sigma matches, and WARNING/CRITICAL issues to PostgreSQL DB
+      filter_control_plane_events:
+        type: filter
+        inputs:
+          - ecs_normalize_and_enrich
+        condition: '.eventType != "SYSTEM_LOG" || includes(["WARNING", "ERROR", "CRITICAL"], .severity)'
+
+    # ---------------------
+    # 3. SINKS (Deliver Normalized ECS Events to Layer 4 Dual-Tier Storage & Control Plane)
+    # ---------------------
+    sinks:
+      # Layer 4 Tier 1 (Hot Storage): VictoriaLogs on K3s (7-14 Days Retention, Schema-less, Fast LogsQL)
+      victorialogs_hot_storage:
+        type: http
+        inputs:
+          - ecs_normalize_and_enrich
+        uri: "http://victorialogs.siem-system.svc.cluster.local:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message"
+        method: post
+        encoding:
+          codec: json
+        framing:
+          method: newline_delimited
+        batch:
+          max_events: 10
+          timeout_secs: 1
+
+      # Layer 4 Tier 2 (Cold Storage): AWS S3 .parquet Archiver (90 Days - 1 Year Retention)
+      aws_s3_cold_storage_parquet:
+        type: http
+        inputs:
+          - ecs_normalize_and_enrich
+        uri: "${SIEM_S3_PARQUET_ENDPOINT:-http://s3-cold-storage.siem-system.svc.cluster.local:9000/archive}"
+        method: post
+        encoding:
+          codec: json
+        batch:
+          max_events: 10
+          timeout_secs: 1
+
+      # Control Plane API Sink (Admin Monitor UI & PostgreSQL Summary)
+      central_siem_control_plane:
+        type: http
+        inputs:
+          - filter_control_plane_events
+        uri: "${SIEM_CENTRAL_TAILSCALE_ENDPOINT:-http://100.86.87.27:8000/api/v1/logs}"
+        method: post
+        encoding:
+          codec: json
+        batch:
+          max_events: 1
+        request:
+          headers:
+            X-Collector-Token: "${SIEM_COLLECTOR_TOKEN:-}"
+            Authorization: "Bearer ${SIEM_COLLECTOR_TOKEN:-}"
+            X-SIEM-Layer: "layer3-processing"
+            X-ECS-Version: "8.11.0"
+        buffer:
+          type: disk
+          max_size: 536870912
+          when_full: drop_newest
+

@@ -24,14 +24,31 @@ echo -e "${BLUE}================================================================
 echo -e "${BLUE}   SIEM-Ready Log Forwarding & Infrastructure Metrics Test Suite   ${NC}"
 echo -e "${BLUE}==================================================================${NC}"
 
-# Check API Connectivity
-echo -e "\n${YELLOW}[1/4] Checking Backend API Connectivity...${NC}"
+# Check API Connectivity & Admin Authentication (Issue #111)
+echo -e "\n${YELLOW}[1/4] Checking Backend API Connectivity & Admin Auth...${NC}"
 if ! curl -s -f -o /dev/null "${API_BASE_URL}/../health" && ! curl -s -f -o /dev/null "${API_BASE_URL}/../docs"; then
     echo -e "${RED}ERROR: Backend API is not responding at ${API_BASE_URL}.${NC}"
     echo -e "${YELLOW}Please start backend server: uvicorn app.main:app --port 8000${NC}"
     exit 1
 fi
 echo -e "${GREEN}✓ Backend is active and reachable.${NC}"
+
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@dome.tu.ac.th}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-labpass123}"
+ADMIN_TOKEN="${ADMIN_TOKEN:-}"
+
+if [[ -z "${ADMIN_TOKEN}" ]]; then
+    LOGIN_RESP=$(curl -s -X POST "${API_BASE_URL}/auth/login"         -H "Content-Type: application/x-www-form-urlencoded"         -d "username=${ADMIN_EMAIL}&password=${ADMIN_PASSWORD}" || true)
+    ADMIN_TOKEN=$(echo "${LOGIN_RESP}" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4 || true)
+fi
+
+if [[ -n "${ADMIN_TOKEN}" ]]; then
+    AUTH_HEADER="Authorization: Bearer ${ADMIN_TOKEN}"
+    echo -e "${GREEN}✓ Acquired Admin Bearer Token successfully.${NC}"
+else
+    AUTH_HEADER="X-Collector-Token: ${SIEM_COLLECTOR_TOKEN:-vlab-tailscale-collector-secret}"
+    echo -e "${YELLOW}! Admin login skipped, falling back to X-Collector-Token.${NC}"
+fi
 
 # Define Mock Payload Generator
 send_siem_log() {
@@ -42,6 +59,7 @@ send_siem_log() {
     local response
     response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${INGEST_ENDPOINT}" \
         -H "Content-Type: application/json" \
+        -H "${AUTH_HEADER}" \
         -d "${payload}")
 
     local http_code
@@ -146,7 +164,7 @@ send_siem_log "Kernel OOM Killer & Code Redaction Event" "${OOM_PAYLOAD}"
 
 # Check Metrics Status
 echo -e "\n${YELLOW}[3/4] Verifying Cluster Metrics & Security Counters...${NC}"
-METRICS_DATA=$(curl -s "${METRICS_ENDPOINT}" || echo "{}")
+METRICS_DATA=$(curl -s -H "${AUTH_HEADER}" "${METRICS_ENDPOINT}" || echo "{}")
 echo -e "Live Metrics Summary: ${METRICS_DATA}"
 
 # Validate Plane Separation

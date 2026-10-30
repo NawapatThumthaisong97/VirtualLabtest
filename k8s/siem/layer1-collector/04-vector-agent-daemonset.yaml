@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vector-agent-collector
+  namespace: siem-system
+  labels:
+    app.kubernetes.io/name: vector-agent
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: vlab-siem
+    vlab.siem/layer: "1-collector"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector-agent
+      vlab.siem/layer: "1-collector"
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector-agent
+        app.kubernetes.io/component: log-collector
+        app.kubernetes.io/part-of: vlab-siem
+        vlab.siem/layer: "1-collector"
+    spec:
+      serviceAccountName: vector-agent-sa
+      # Use hostNetwork so Vector routes directly over node's tailscale0 interface
+      # without exposing any public NodePort/LoadBalancer
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      containers:
+        - name: vector-agent
+          image: timberio/vector:0.42.0-debian
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/vector/vector.yaml
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NODE_TAILSCALE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: VLAB_PROVIDER
+              value: "local_k3s"
+            - name: VLAB_NAT_SUBNET
+              value: "192.168.1.0/24"
+            - name: SIEM_CENTRAL_TAILSCALE_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: central-tailscale-endpoint
+                  optional: true
+            - name: SIEM_COLLECTOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: collector-token
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          # Strictly NO hostPort exposed — binds only 127.0.0.1:8687 for local Falco webhook
+          # and sends outbound over tailscale0
+          volumeMounts:
+            - name: vector-config
+              mountPath: /etc/vector/
+              readOnly: true
+            - name: vector-data
+              mountPath: /var/lib/vector
+            - name: etc-machine-id
+              mountPath: /etc/machine-id
+              readOnly: true
+            - name: var-log-journal
+              mountPath: /var/log/journal
+              readOnly: true
+            - name: var-log-syslog
+              mountPath: /var/log/syslog
+              readOnly: true
+            - name: var-log-auth
+              mountPath: /var/log/auth.log
+              readOnly: true
+            - name: var-log-kern
+              mountPath: /var/log/kern.log
+              readOnly: true
+            - name: var-log-squid
+              mountPath: /var/log/squid
+              readOnly: true
+            - name: var-log-kyverno
+              mountPath: /var/log/kyverno
+              readOnly: true
+            - name: var-log-tailscale
+              mountPath: /var/log/tailscale
+              readOnly: true
+            - name: var-log-falco
+              mountPath: /var/log/falco
+              readOnly: true
+      volumes:
+        - name: vector-config
+          configMap:
+            name: vector-agent-config
+        - name: vector-data
+          hostPath:
+            path: /var/lib/vector-agent
+            type: DirectoryOrCreate
+        - name: etc-machine-id
+          hostPath:
+            path: /etc/machine-id
+            type: FileOrCreate
+        - name: var-log-journal
+          hostPath:
+            path: /var/log/journal
+            type: DirectoryOrCreate
+        - name: var-log-syslog
+          hostPath:
+            path: /var/log/syslog
+            type: FileOrCreate
+        - name: var-log-auth
+          hostPath:
+            path: /var/log/auth.log
+            type: FileOrCreate
+        - name: var-log-kern
+          hostPath:
+            path: /var/log/kern.log
+            type: FileOrCreate
+        - name: var-log-squid
+          hostPath:
+            path: /var/log/squid
+            type: DirectoryOrCreate
+        - name: var-log-kyverno
+          hostPath:
+            path: /var/log/kyverno
+            type: DirectoryOrCreate
+        - name: var-log-tailscale
+          hostPath:
+            path: /var/log/tailscale
+            type: DirectoryOrCreate
+        - name: var-log-falco
+          hostPath:
+            path: /var/log/falco
+            type: DirectoryOrCreate

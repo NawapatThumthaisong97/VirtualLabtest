@@ -35,7 +35,7 @@ RUN mkdir -p /root/.local/share/code-server/User
 COPY ide/settings.json /root/.local/share/code-server/User/settings.json
 
 COPY skypilot/run.sh /run.sh
-RUN chmod +x /run.sh
+RUN sed -i 's/\r$//' /run.sh && chmod +x /run.sh
 
 EXPOSE 8080 5173 8443
 CMD ["/run.sh"]

@@ -90,3 +90,12 @@ vault_r2_access_key_id: <R2_ACCESS_KEY_ID>
 vault_r2_secret_access_key: <R2_SECRET_ACCESS_KEY>
 # สุ่มเอง (openssl rand -hex 32) ต้องตรงกับ secret WEBHOOK_SECRET ของ Cloudflare Worker
 vault_r2_webhook_secret: <WEBHOOK_SECRET>
+
+# --- SIEM 5-Layer Observability Pipeline ---
+# เปิดใช้งาน role siem-layer1-collector บน Worker Nodes / EC2
+enable_siem_layer1: false
+# Token สำหรับ Vector Agent ส่ง Log เข้า NATS JetStream (ต้องตรงกับ Secret ใน K8s และ .env backend)
+siem_collector_token: <SIEM_COLLECTOR_TOKEN_OR_DEFAULT>
+# S3 Bucket สำหรับเก็บ Cold Storage Logs (.parquet)
+siem_s3_bucket: <SIEM_S3_BUCKET_NAME>
+siem_s3_region: ap-southeast-1

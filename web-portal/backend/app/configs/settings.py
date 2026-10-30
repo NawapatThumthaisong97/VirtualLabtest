@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     # ทุกกี่วินาทีให้ backend เช็กว่าเครื่องของ session ที่ RUNNING ยังอยู่ไหม (0 = ปิด)
     SESSION_RECONCILE_INTERVAL_SECONDS: int = 60
 
+    # Default Run Target
+    DEFAULT_RUN_TARGET: str = "aws"
+    DEV_DEFAULT_NODE: Optional[str] = None
     # Lab image scan (docs/LAB_IMAGE_SCAN_ARCHITECTURE.md) ปิดไว้เป็นค่าเริ่มต้น
     # เปิดแล้ว backend จะรัน scan reconciler (ต้องมี K8S_ENABLED ด้วย)
     LAB_IMAGE_SCAN_ENABLED: bool = False
@@ -200,6 +203,8 @@ class Settings(BaseSettings):
     HEALTH_CHECK_INTERVAL_SECONDS: int = 300
     # เก็บผลตรวจย้อนหลังกี่วัน (job ลบของเก่าทุกรอบ ตารางไม่บวม)
     HEALTH_CHECK_RETENTION_DAYS: int = 7
+    # เก็บ Log ในตาราง infrastructure_logs ย้อนหลังกี่วัน (job ช่วยเคลียร์ของเก่าทุกรอบ)
+    INFRASTRUCTURE_LOG_RETENTION_DAYS: int = 30
     # ตอบช้ากว่านี้ (ms) = degraded
     HEALTH_CHECK_SLOW_MS: int = 2000
 
