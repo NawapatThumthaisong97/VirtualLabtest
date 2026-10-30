@@ -175,13 +175,16 @@ def check_once(db: DbSession, checks: Optional[list[tuple[str, Checker]]] = None
     cutoff = now - timedelta(days=settings.HEALTH_CHECK_RETENTION_DAYS)
     db.query(HealthCheck).filter(HealthCheck.checked_at < cutoff).delete(synchronize_session=False)
 
+    db.commit()
+
     # Garbage Collector: ลบ infrastructure_logs ที่เก่ากว่า INFRASTRUCTURE_LOG_RETENTION_DAYS (เช่น 30 วัน)
     try:
         infra_cutoff = now - timedelta(days=settings.INFRASTRUCTURE_LOG_RETENTION_DAYS)
         db.query(InfrastructureLog).filter(InfrastructureLog.timestamp < infra_cutoff).delete(synchronize_session=False)
+        db.commit()
     except Exception as exc:
+        db.rollback()
         logger.warning(f"Failed to prune old infrastructure logs: {exc}")
-    db.commit()
     return rows
 
 

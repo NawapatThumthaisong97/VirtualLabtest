@@ -16,13 +16,13 @@ data:
         uid: siem-postgres-ds
         type: postgres
         access: proxy
-        url: ${POSTGRES_HOST:-100.86.87.27:5432}
-        user: ${POSTGRES_USER:-postgres}
+        url: ${POSTGRES_HOST}
+        user: ${POSTGRES_USER}
         database: virtual_lab
         isDefault: true
         editable: true
         secureJsonData:
-          password: "${POSTGRES_PASSWORD:-postgres}"
+          password: "${POSTGRES_PASSWORD}"
         jsonData:
           sslmode: "disable"
           postgresVersion: 1500
