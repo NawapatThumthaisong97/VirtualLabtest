@@ -155,6 +155,8 @@ spec:
               value: "dark"
             - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
               value: "/var/lib/grafana/dashboards/vlab-siem-visual-analytics.json"
+            - name: GF_INSTALL_PLUGINS
+              value: "victoriametrics-logs-datasource"
             - name: POSTGRES_HOST
               valueFrom:
                 secretKeyRef:
