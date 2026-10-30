@@ -4,6 +4,7 @@ API Endpoints สำหรับ Cluster Metrics, Critical Logs และ Securi
 จำกัดสิทธิ์เฉพาะ Role Admin ผ่าน RBAC Middleware และทำงานแบบ Read-Only เท่านั้น
 """
 
+import hmac
 from typing import Optional, Union
 from fastapi import APIRouter, Depends, Header, Query, Request, status as http_status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,7 +38,7 @@ def verify_log_ingest_permission(
     x_collector_token: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """ส่ง log เข้าได้เฉพาะ token ของ user role admin
+    """ส่ง log เข้าได้เฉพาะ token ของ user role admin หรือ SIEM_COLLECTOR_TOKEN (ตัวส่ง log ของ SIEM)
 
     เดิมยอมรับ SECRET_KEY ตรง ๆ เป็น token (คนที่รู้ key ของเซิร์ฟเวอร์ยิงได้โดยไม่มี user) และยอมให้
     request จาก localhost ผ่านโดยไม่ต้องมี token เลย — ปิดทั้งสองทาง (2026-10-24)
@@ -51,6 +52,13 @@ def verify_log_ingest_permission(
         token = request.cookies[settings.ACCESS_TOKEN_COOKIE_NAME]
     if not token:
         raise InvalidTokenError("ต้องแนบ Authorization: Bearer <token> สำหรับ Ingestion")
+
+    # ตัวส่ง log ของ SIEM ใช้ token นี้แทน JWT admin (JWT หมดอายุ 15 นาที collector ส่งได้แป๊บเดียว)
+    # ไม่รับ token สั้นหรือเท่ากับ SECRET_KEY กันตั้งค่าผิดแล้วเปิดทางเดิมที่ปิดไปเมื่อ 2026-10-24
+    collector = settings.SIEM_COLLECTOR_TOKEN
+    if (collector and len(collector) >= 32 and collector != settings.SECRET_KEY
+            and hmac.compare_digest(token.encode(), collector.encode())):
+        return True
 
     from app.services.auth_service import AuthService
     from app.repositories.user_repository import UserRepository

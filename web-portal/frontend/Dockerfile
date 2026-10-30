@@ -15,6 +15,9 @@ COPY . .
 # เปลี่ยนค่านี้ทีหลังต้อง rebuild image ใหม่เท่านั้น แก้ .env แล้ว restart ไม่พอ
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
+# Grafana SIEM (หน้า /admin/security) ว่าง = หน้านั้นบอกว่ายังไม่ได้ตั้ง
+ARG VITE_SIEM_GRAFANA_URL=
+ENV VITE_SIEM_GRAFANA_URL=${VITE_SIEM_GRAFANA_URL}
 
 RUN npm run build
 

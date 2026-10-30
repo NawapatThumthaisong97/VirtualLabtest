@@ -22,10 +22,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
 
-    # loopback เท่านั้น — backend (host network) ต่อผ่าน 127.0.0.1 ข้างนอกเครื่องเข้าไม่ได้
+    # loopback — backend (host network) ต่อผ่าน 127.0.0.1
     # ถ้าต้อง debug จากข้างนอกใช้ `docker compose exec db psql` แทนการเปิด port
+    # ตัวที่สอง: Grafana ของ SIEM บน master อ่าน infrastructure_logs ด้วย user grafana_ro
+    # ansible ตั้ง DB_SIEM_BIND_IP = Tailscale IP เมื่อเปิด SIEM ไม่งั้น 127.0.0.2 (ข้างนอกเข้าไม่ได้)
+    # ใครถึงพอร์ตนี้ได้คุมด้วย Tailscale ACL: tag:vlab-server เข้าได้ tag:vlab-worker (เครื่องแลป) เข้าไม่ได้
     ports:
       - "127.0.0.1:5432:5432"
+      - "${DB_SIEM_BIND_IP:-127.0.0.2}:5432:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -81,6 +85,7 @@ services:
       args:
         # ค่านี้ถูกฝังลง bundle ตอน build — เปลี่ยนแล้วต้อง --build ใหม่
         VITE_API_URL: ${VITE_API_URL}
+        VITE_SIEM_GRAFANA_URL: ${VITE_SIEM_GRAFANA_URL:-}
     container_name: virtual_lab_frontend
     restart: unless-stopped
 

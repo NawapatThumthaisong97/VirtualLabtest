@@ -2,9 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { colors } from './theme';
 import { useAuth } from '../../contexts/AuthContext';
 
-const link = { color: 'rgba(255,255,255,0.75)', fontSize: 13, textDecoration: 'none' } as const;
-
-/** Navbar หน้า admin (ตาม Design system) — admin ยังกลับไปหน้านักศึกษา / วิชา / อาจารย์ได้ */
+/** Navbar หน้า admin (ตาม Design system) — โลโก้ (กลับ /admin) + ชื่อผู้ใช้ ไม่มีลิงก์ไปหน้านักศึกษา / อาจารย์ */
 export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -32,12 +30,6 @@ export default function Navbar() {
           <img src="/virtual-lab-logo-white@2x.png" alt="Virtual Lab" style={{ height: 22, width: 'auto', display: 'block' }} />
         </Link>
       </div>
-
-      <nav style={{ display: 'flex', alignItems: 'center', gap: 22, flex: 1, justifyContent: 'center' }}>
-        <Link to="/" style={link}>Home</Link>
-        <Link to="/courses" style={link}>Courses</Link>
-        <Link to="/instructor" style={link}>Instructor</Link>
-      </nav>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
         {/* แบบเดียวกับ Navigation ของนักศึกษา / อาจารย์: รูปโปรไฟล์ + ชื่อ ไม่มีกรอบ — กดแล้ว logout เหมือนเดิม */}

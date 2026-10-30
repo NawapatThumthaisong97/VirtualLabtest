@@ -70,7 +70,10 @@ export default function SystemTable({ data }: { data: SystemStatus | undefined }
               </td>
               <td style={{ ...td, borderRight: 'none' }}>
                 {s.latencyMs === null ? (
-                  <span style={{ color: colors.error }}>{s.detail ?? 'unreachable'}</span>
+                  // ผลเก่าก่อนแก้ข้อความ error อาจยาวมาก — ตัดเหลือ 2 บรรทัด ชี้ดูเต็มได้ (title ของแถว)
+                  <span style={{ color: colors.error, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                    {s.detail ?? 'unreachable'}
+                  </span>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ whiteSpace: 'nowrap', minWidth: 52 }}>{s.latencyMs} ms</span>

@@ -48,6 +48,29 @@ class TestRunCheck:
         assert (r.status, r.latency_ms) == ("down", None)
         assert "connection refused" in r.detail
 
+    def test_down_timeout_is_short(self):
+        """urllib3 MaxRetryError (long, multi-part) -> short message with host:port"""
+        r = run_check("k8s", boom(
+            "HTTPSConnectionPool(host='100.125.244.48', port=6443): Max retries exceeded with url: /version/ "
+            "(Caused by ConnectTimeoutError(<HTTPSConnection(host='100.125.244.48', port=6443) at 0x75>, "
+            "'Connection to 100.125.244.48 timed out. (connect timeout=None)'))"))
+        assert r.status == "down"
+        assert r.detail.startswith("ต่อ 100.125.244.48:6443 ไม่ได้ (timeout")
+        assert "MaxRetry" not in r.detail and "0x75" not in r.detail
+
+    def test_down_urlerror_timeout(self):
+        """urllib URLError timed out (registry / SkyPilot) -> timeout message"""
+        import urllib.error
+        def _check():
+            raise urllib.error.URLError("timed out")
+        r = run_check("registry", _check)
+        assert r.detail.startswith("ต่อไม่ได้ (timeout")
+
+    def test_down_unknown_error_is_truncated(self):
+        """Unknown error -> type: message, cut to 120 chars"""
+        r = run_check("aws", boom("x" * 500))
+        assert r.detail.startswith("RuntimeError: x") and len(r.detail) == 120
+
     def test_slow(self, monkeypatch):
         """Slower than HEALTH_CHECK_SLOW_MS -> degraded"""
         monkeypatch.setattr(settings, "HEALTH_CHECK_SLOW_MS", -1)

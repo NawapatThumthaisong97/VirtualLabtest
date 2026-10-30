@@ -70,3 +70,13 @@ webservice_lab_isolation_enabled: true
 # กดจากเครื่องแลปแต่ไม่มี warm pod: pod = สร้าง pod ตรง (ค่าเริ่ม) / skypilot = ทางเดิม SkyPilot in-cluster (สำรอง)
 # ดู docs/archive/LAB_DIRECT_POD.md สลับตอนรัน: -e webservice_lab_machine_launch=skypilot
 webservice_lab_machine_launch: pod
+
+# ---------- SIEM (k8s/siem ของ Nawapat ใน namespace siem-system) ----------
+# token ของตัวส่ง log (Vector / Falco / Sigma) ใช้ได้กับ POST /api/v1/logs อย่างเดียว ว่าง = ปิด
+# สร้าง: python3 -c 'import secrets;print(secrets.token_urlsafe(48))' ใส่ค่าเดียวกันใน Secret siem-collector-secrets
+webservice_siem_collector_token: "{{ vault_siem_collector_token | default('') }}"
+# รหัสของ user grafana_ro (SELECT infrastructure_logs อย่างเดียว) ให้ Grafana บน master อ่าน DB
+# ตั้งค่า = เปิด DB ที่ Tailscale IP ของเครื่องด้วย (ACL: server เข้าได้ / worker เข้าไม่ได้) ว่าง = DB อยู่แค่ 127.0.0.1
+webservice_siem_grafana_ro_password: "{{ vault_siem_grafana_ro_password | default('') }}"
+# Grafana SIEM (k8s/siem/layer5-detection, NodePort 30300 บน master) ที่หน้า /admin/security ฝังไว้ ว่าง = หน้านั้นบอกว่ายังไม่ได้ตั้ง
+webservice_siem_grafana_url: "{{ siem_grafana_url | default('') }}"

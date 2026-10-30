@@ -22,6 +22,7 @@ import pytest
 
 from app.configs.db import get_db
 from app.configs.settings import settings
+from app.models.infrastructure_log import InfrastructureLog
 from app.exceptions.domain import DomainError
 from app.main import STATUS_MAP
 from app.models.courses import Course
@@ -656,3 +657,20 @@ class TestLogIngestion:
         )
         assert resp_i.status_code == http_status.HTTP_403_FORBIDDEN
 
+
+    def test_collector_token_ingests_batch(self, db, client, monkeypatch):
+        """SIEM collector (Vector) posts a JSON list with X-Collector-Token -> 201, every entry stored"""
+        token = "siem-collector-" + "t" * 32
+        monkeypatch.setattr(settings, "SIEM_COLLECTOR_TOKEN", token)
+        source = "vector-agent-batch-test"
+        batch = [
+            {"severity": "CRITICAL", "category": "SECURITY_VIOLATION", "eventType": "FALCO_EBPF_ALERT",
+             "source": source, "message": f"read /etc/shadow #{i}"}
+            for i in range(3)
+        ]
+        resp = client.post("/api/v1/logs", json=batch, headers={"X-Collector-Token": token})
+        assert resp.status_code == http_status.HTTP_201_CREATED
+        assert db.query(InfrastructureLog).filter(InfrastructureLog.source == source).count() == 3
+
+        resp_bad = client.post("/api/v1/logs", json=batch, headers={"X-Collector-Token": "x" * 47})
+        assert resp_bad.status_code in (http_status.HTTP_401_UNAUTHORIZED, http_status.HTTP_403_FORBIDDEN)
