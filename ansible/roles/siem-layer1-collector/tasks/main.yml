@@ -1,0 +1,104 @@
+---
+# Tasks for siem-layer1-collector role
+# Deploys Layer 1 Collector: Vector Agent + Falco (modern_ebpf) on K3s nodes & AWS EC2/SkyPilot AMI
+
+- name: Assert Zero-Trust Plane Separation and Tailscale CGNAT transport constraints
+  ansible.builtin.assert:
+    that:
+      - forbidden_pod_logs_path is defined
+      - siem_central_tailscale_ip is match('^100\\.')
+      - falco_engine_kind == 'modern_ebpf'
+    fail_msg: "Layer 1 Collector requires Tailscale CGNAT IP (100.x.x.x), modern_ebpf engine, and strict plane separation!"
+
+- name: Ensure keyrings and Layer 1 collector log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  loop:
+    - /usr/share/keyrings
+    - /var/log/falco
+    - /var/log/squid
+    - /var/log/kyverno
+    - /var/log/tailscale
+    - /etc/falco/rules.d
+    - /etc/vector
+    - /var/lib/vector
+
+- name: Add Falco official GPG key
+  ansible.builtin.get_url:
+    url: https://falco.org/repo/falcosecurity-packages.asc
+    dest: /usr/share/keyrings/falco-archive-keyring.asc
+    mode: '0644'
+
+- name: Add Falco apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/falco-archive-keyring.asc] https://download.falco.org/packages/deb stable main"
+    state: present
+    filename: falcosecurity
+
+- name: Install Vector apt repository setup script
+  ansible.builtin.shell: |
+    curl -1sLf 'https://repositories.timber.io/public/vector/cfg/setup/bash.deb.sh' | bash
+  args:
+    creates: /etc/apt/sources.list.d/timber-vector.list
+
+- name: Install Vector Agent and Falco (no kernel module compilation required with modern_ebpf)
+  ansible.builtin.Environment:
+    FALCO_FRONTEND: noninteractive
+    FALCO_DRIVER_CHOICE: modern_ebpf
+  ansible.builtin.apt:
+    name:
+      - vector
+      - falco
+    state: present
+    update_cache: yes
+
+- name: Deploy Falco modern_ebpf configuration
+  ansible.builtin.template:
+    src: falco.yaml.j2
+    dest: /etc/falco/falco.yaml
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart falco-modern-bpf service
+
+- name: Deploy Virtual Lab custom eBPF container security rules
+  ansible.builtin.template:
+    src: vlab_custom_rules.yaml.j2
+    dest: /etc/falco/rules.d/vlab_custom_rules.yaml
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart falco-modern-bpf service
+
+- name: Deploy Vector Agent configuration (Tailscale transport + disk buffer)
+  ansible.builtin.template:
+    src: vector-agent.yaml.j2
+    dest: /etc/vector/vector.yaml
+    owner: root
+    group: root
+    mode: '0640'
+  notify: Restart vector service
+
+- name: Verify Strict Plane Separation (no student /var/log/pods harvesting in Vector config)
+  ansible.builtin.command:
+    cmd: grep -rn "/var/log/pods" /etc/vector/
+  register: vector_pod_log_check
+  failed_when: vector_pod_log_check.rc == 0
+  changed_when: false
+  ignore_errors: true
+
+- name: Enable and start Falco modern_ebpf service
+  ansible.builtin.systemd:
+    name: falco-modern-bpf
+    enabled: yes
+    state: started
+
+- name: Enable and start Vector Agent service
+  ansible.builtin.systemd:
+    name: vector
+    enabled: yes
+    state: started

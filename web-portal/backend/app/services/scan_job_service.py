@@ -21,6 +21,7 @@ SCAN_LABEL = "vlab/scan"
 RUNNER_UID = 10001
 SECRET_KEY = "download_url"
 SECRET_MOUNT = "/secrets/fetch"
+PUSH_SECRET_MOUNT = "/secrets/push"   # ต้องตรงกับ PUSH_CREDENTIALS_DIR ใน scan-runner/runner.py
 WORK_MOUNT = "/work"
 
 _NON_HEX = re.compile(r"[^0-9a-f]")
@@ -71,7 +72,7 @@ def build_scan_job(image: LabImage, job_name: str) -> dict:
     """manifest ของ Job (dict) — แยกเป็นฟังก์ชันล้วนให้ทดสอบได้โดยไม่ต้องมี cluster"""
     if not settings.scan_runner_image:
         raise ScanJobConfigError("DOCKER_REGISTRY_HOST is not set (needed to locate the scan runner image)")
-    if not settings.DOCKER_REGISTRY_HOST:
+    if not settings.registry_push_host:
         raise ScanJobConfigError("DOCKER_REGISTRY_HOST is not set")
 
     labels = _labels(image, job_name)
@@ -95,11 +96,13 @@ def build_scan_job(image: LabImage, job_name: str) -> dict:
         {**common, "POLICY_FAIL_SEVERITY": settings.SCAN_FAIL_SEVERITY, "POLICY_IGNORE_UNFIXED": "true"},
         requests={"cpu": "500m", "memory": "1Gi"}, limits={"cpu": "2", "memory": "4Gi"},
     )
+    # push ผ่าน push port ที่ต้อง login (credential mount เข้า publish ตัวเดียว)
     publish = _container(
         "publish", "publish",
-        {**common, "REGISTRY": settings.DOCKER_REGISTRY_HOST,
+        {**common, "REGISTRY": settings.registry_push_host,
          "REPOSITORY": image.repository, "TAG": image.tag},
         requests={"cpu": "100m", "memory": "256Mi"}, limits={"cpu": "1", "memory": "1Gi"},
+        extra_mounts=[{"name": "push-credentials", "mountPath": PUSH_SECRET_MOUNT, "readOnly": True}],
     )
 
     pod_spec: dict[str, Any] = {
@@ -122,10 +125,17 @@ def build_scan_job(image: LabImage, job_name: str) -> dict:
                 "secretName": job_name, "defaultMode": 0o400,
                 "items": [{"key": SECRET_KEY, "path": SECRET_KEY}],
             }},
+            # Secret ถาวรที่ Ansible สร้าง (ไม่ผูกกับ Job) mount เข้าเฉพาะ publish
+            {"name": "push-credentials", "secret": {
+                "secretName": settings.SCAN_PUSH_SECRET, "defaultMode": 0o400,
+                "items": [{"key": "username", "path": "username"}, {"key": "password", "path": "password"}],
+            }},
         ],
     }
     if settings.SCAN_PRIORITY_CLASS:
         pod_spec["priorityClassName"] = settings.SCAN_PRIORITY_CLASS
+    if settings.SCAN_NODE_SELECTOR:
+        pod_spec["nodeSelector"] = dict(settings.SCAN_NODE_SELECTOR)
 
     return {
         "apiVersion": "batch/v1",

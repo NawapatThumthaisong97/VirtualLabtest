@@ -122,6 +122,39 @@ class TestHistory:
             ("aws", "down", NOW),
         ]
 
+    def test_infrastructure_log_retention(self, clean, monkeypatch):
+        """Old infrastructure_logs older than INFRASTRUCTURE_LOG_RETENTION_DAYS are purged by check_once"""
+        from app.models.infrastructure_log import InfrastructureLog
+        import uuid
+
+        monkeypatch.setattr(settings, "INFRASTRUCTURE_LOG_RETENTION_DAYS", 30)
+        old_log = InfrastructureLog(
+            id=uuid.uuid4(),
+            timestamp=NOW - timedelta(days=31),
+            severity="INFO",
+            category="SYSTEM_LOG",
+            event_type="SYSTEM_METRIC",
+            source="worker-old",
+            message="Old routine log",
+        )
+        recent_log = InfrastructureLog(
+            id=uuid.uuid4(),
+            timestamp=NOW - timedelta(days=15),
+            severity="WARNING",
+            category="SECURITY_VIOLATION",
+            event_type="FALCO_EBPF_ALERT",
+            source="worker-new",
+            message="Recent alert",
+        )
+        clean.add_all([old_log, recent_log])
+        clean.commit()
+
+        check_once(clean, [("backend", ok())], now=NOW)
+
+        remaining = clean.query(InfrastructureLog).all()
+        assert len(remaining) == 1
+        assert remaining[0].id == recent_log.id
+
     def test_default_checks_skip_unconfigured(self, db, monkeypatch):
         """Services not configured (no registry / SkyPilot / K8S_ENABLED off) are not checked"""
         monkeypatch.setattr(settings, "K8S_ENABLED", False)

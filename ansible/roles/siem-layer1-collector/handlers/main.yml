@@ -1,0 +1,14 @@
+---
+# Handlers for siem-layer1-collector
+
+- name: Restart falco-modern-bpf service
+  ansible.builtin.systemd:
+    name: falco-modern-bpf
+    state: restarted
+    daemon_reload: yes
+
+- name: Restart vector service
+  ansible.builtin.systemd:
+    name: vector
+    state: restarted
+    daemon_reload: yes

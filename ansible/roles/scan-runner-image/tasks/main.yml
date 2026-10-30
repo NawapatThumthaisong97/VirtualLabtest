@@ -1,8 +1,8 @@
 ---
 # Build vlab-scan-runner แล้ว push เข้า camp registry (role registry ต้องรันก่อน: มี docker + camp-registry)
 #
-# push ผ่าน localhost:5001 ไม่ใช่ IP: docker เชื่อ registry HTTP บน localhost โดยไม่ต้องแก้
-# insecure-registries ของเครื่องนี้ storage เดียวกับที่ K3s ดึงผ่าน <registry IP>:5001
+# push ผ่าน localhost:<push port> (ต้อง login) ไม่ใช่ IP: docker เชื่อ registry HTTP บน localhost โดยไม่ต้องแก้
+# insecure-registries ของเครื่องนี้ storage เดียวกับที่ K3s ดึงผ่าน <registry IP>:<pull port> (ไม่ต้อง login)
 
 - name: Validate scan runner inputs
   ansible.builtin.assert:
@@ -21,8 +21,9 @@
 
 - name: Set scan runner facts
   ansible.builtin.set_fact:
-    scan_runner_local_ref: "localhost:{{ scan_runner_registry_port }}/{{ scan_runner_repo }}:{{ scan_runner_version }}"
-    scan_runner_public_ref: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}:{{ scan_runner_registry_port }}/{{ scan_runner_repo }}"
+    scan_runner_local_ref: "localhost:{{ scan_runner_registry_push_port }}/{{ scan_runner_repo }}:{{ scan_runner_version }}"
+    scan_runner_pull_url: "http://localhost:{{ scan_runner_registry_pull_port }}"
+    scan_runner_public_ref: "{{ hostvars[groups['registry'][0]]['ansible_host'] }}:{{ scan_runner_registry_pull_port }}/{{ scan_runner_repo }}"
 
 # ---------- supply chain: ตรวจลายเซ็น Trivy ----------
 
@@ -147,7 +148,7 @@
 
 - name: Ensure camp registry is reachable
   ansible.builtin.uri:
-    url: "http://localhost:{{ scan_runner_registry_port }}/v2/"
+    url: "{{ scan_runner_pull_url }}/v2/"
     status_code: 200
   register: scan_runner_registry_check
   retries: 3
@@ -156,7 +157,7 @@
 
 - name: Read existing manifest for this version
   ansible.builtin.uri:
-    url: "http://localhost:{{ scan_runner_registry_port }}/v2/{{ scan_runner_repo }}/manifests/{{ scan_runner_version }}"
+    url: "{{ scan_runner_pull_url }}/v2/{{ scan_runner_repo }}/manifests/{{ scan_runner_version }}"
     headers:
       Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
     status_code: [200, 404]
@@ -165,7 +166,7 @@
 
 - name: Read existing image config
   ansible.builtin.uri:
-    url: "http://localhost:{{ scan_runner_registry_port }}/v2/{{ scan_runner_repo }}/blobs/{{ (scan_runner_remote.content | from_json).config.digest }}"
+    url: "{{ scan_runner_pull_url }}/v2/{{ scan_runner_repo }}/blobs/{{ (scan_runner_remote.content | from_json).config.digest }}"
     return_content: true
   register: scan_runner_remote_blob
   when:
@@ -192,15 +193,37 @@
     - scan_runner_remote_hash != scan_runner_build_hash
     - not (scan_runner_force_push | bool)
 
+# login เฉพาะช่วง push แล้ว logout เสมอ ไม่ทิ้ง credential ไว้ใน /root/.docker/config.json
 - name: Push scan runner image
-  ansible.builtin.command:
-    argv: [docker, push, "{{ scan_runner_local_ref }}"]
   when: scan_runner_remote_hash != scan_runner_build_hash
-  changed_when: true
+  block:
+    - name: Log in to camp registry push port
+      ansible.builtin.command:
+        argv:
+          - docker
+          - login
+          - "localhost:{{ scan_runner_registry_push_port }}"
+          - --username
+          - "{{ scan_runner_registry_user }}"
+          - --password-stdin
+        stdin: "{{ scan_runner_registry_password }}"
+      changed_when: false
+      no_log: true
+
+    - name: Push scan runner image
+      ansible.builtin.command:
+        argv: [docker, push, "{{ scan_runner_local_ref }}"]
+      changed_when: true
+  always:
+    - name: Log out of camp registry push port
+      ansible.builtin.command:
+        argv: [docker, logout, "localhost:{{ scan_runner_registry_push_port }}"]
+      changed_when: false
+      failed_when: false
 
 - name: Read pushed manifest digest
   ansible.builtin.uri:
-    url: "http://localhost:{{ scan_runner_registry_port }}/v2/{{ scan_runner_repo }}/manifests/{{ scan_runner_version }}"
+    url: "{{ scan_runner_pull_url }}/v2/{{ scan_runner_repo }}/manifests/{{ scan_runner_version }}"
     method: HEAD
     headers:
       Accept: "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json"

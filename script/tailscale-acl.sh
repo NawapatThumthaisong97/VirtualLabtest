@@ -5,13 +5,15 @@
 # backup ของเดิมก่อนเสมอ ให้ Tailscale validate + รัน tests ก่อน แสดง diff แล้วถามยืนยันก่อนเขียนจริง
 #
 # token: ถามทุกครั้ง (พิมพ์แล้วไม่ขึ้นจอ) ไม่เก็บลงไฟล์ / history ถ้าตั้ง TS_API_KEY ไว้จะใช้ค่านั้นแทน
-#   สร้างที่ admin console → Settings → Keys → Generate access token (ตั้งอายุสั้น ๆ พอ)
+#   สร้างที่ admin console → Settings → Keys → API access tokens → Generate access token
+#   ตั้งอายุ 1 วัน ให้หมดอายุ (revoke) เอง ไม่ต้องจำไปลบ
 #
 # ใช้ (รันจาก root ของ repo):
 #   ./script/tailscale-acl.sh plan                  # ดูอย่างเดียว: backup + validate + diff + tag ที่จะติด
 #   ./script/tailscale-acl.sh apply                 # plan แล้วถามยืนยัน → ตั้ง policy → ติด tag
 #   ./script/tailscale-acl.sh rollback <backup>     # คืน policy จากไฟล์ backup (tailscale/backup/...)
-#   ./script/tailscale-acl.sh check [worker]        # ทดสอบจาก worker ด้วย debug pod (ไม่ใช้ token)
+#   ./script/tailscale-acl.sh check [node ...]      # ทดสอบจาก server / worker ทุกเครื่องใน vlab-tags.tsv (ไม่ใช้ token)
+#                                                   # ใส่ชื่อ node เพื่อทดสอบเฉพาะเครื่องนั้น
 #
 # ไฟล์: tailscale/vlab-acl.hujson (policy), tailscale/vlab-tags.tsv (IP → tag), tailscale/backup/ (gitignore)
 
@@ -141,42 +143,101 @@ apply_tags() {
   echo "==> ติด tag ครบแล้ว ทดสอบต่อด้วย: $0 check"
 }
 
-# ทดสอบจากเครื่อง worker ด้วย debug pod hostNetwork (ใช้ตัวตน Tailscale ของเครื่องนั้น = เหมือนนั่งที่เครื่อง)
+# ---------- check: ทดสอบจากเครื่องจริง (ไม่ใช้ token) ----------
+# debug pod แบบ hostNetwork ใช้ตัวตน Tailscale ของ node นั้น = เหมือนนั่งที่เครื่อง
+# image = scanner ใน camp registry (มี python3 อยู่แล้ว) ไม่ต้องดึงจาก Docker Hub และ imagePullPolicy Always
+# พิสูจน์ไปด้วยว่า node นั้น pull จาก :5001 ผ่าน ACL ได้จริง เปลี่ยน image ได้ด้วย VLAB_PROBE_IMAGE
+
+CHECK_POD=vlab-acl-check
+# ต่อ TCP ด้วย python (image ไม่มี nc) argv: host port
+PY_CONNECT='import socket, sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), 3).close()'
+# ถาม coredns ของ cluster (dnsPolicy ClusterFirstWithHostNet) = วิ่งผ่าน VXLAN ไป master
+PY_DNS='import socket; socket.getaddrinfo("kubernetes.default.svc.cluster.local", 443)'
+
+# IP ของเครื่องที่ติด tag นี้ใน vlab-tags.tsv (บรรทัดละเครื่อง)
+tag_ips() { tag_rows | awk -v t="$1" '$2 == t {print $1}'; }
+
+check_result() {  # check_result <ok?> <ข้อความ>
+  if [ "$1" = yes ]; then CHECK_PASS=$((CHECK_PASS + 1)); echo "   ok   $2"
+  else CHECK_FAIL=$((CHECK_FAIL + 1)); echo "   FAIL $2"; fi
+}
+
+probe() {  # probe <ชื่อ> <host> <port> <open|closed>
+  local got
+  if $K exec "$CHECK_POD" -- python3 -I -c "$PY_CONNECT" "$2" "$3" >/dev/null 2>&1; then got=open; else got=closed; fi
+  check_result "$([ "$got" = "$4" ] && echo yes)" "$(printf '%-24s %s:%-5s ต้อง %-6s ได้ %s' "$1" "$2" "$3" "$4" "$got")"
+}
+
+check_node() {  # check_node <node> <tag>
+  local node="$1" role="$2" ip
+  $K delete pod "$CHECK_POD" --ignore-not-found --wait=true >/dev/null
+  $K run "$CHECK_POD" --image="$PROBE_IMAGE" --restart=Never --image-pull-policy=Always \
+    --overrides="{\"spec\":{\"hostNetwork\":true,\"dnsPolicy\":\"ClusterFirstWithHostNet\",\"terminationGracePeriodSeconds\":0,\"nodeSelector\":{\"kubernetes.io/hostname\":\"$node\"}}}" \
+    --command -- python3 -I -c 'import time; time.sleep(600)' >/dev/null
+  echo "==> จาก $node ($role)"
+  if ! $K wait --for=condition=Ready "pod/$CHECK_POD" --timeout=180s >/dev/null 2>&1; then
+    check_result no "pull $PROBE_IMAGE ไม่ขึ้นใน 180 วินาที (ACL ปิด :5001?)"
+    $K describe pod "$CHECK_POD" | sed -n '/^Events:/,$p' | tail -n 5 | sed 's/^/        /'
+    $K delete pod "$CHECK_POD" --wait=false >/dev/null
+    return
+  fi
+  check_result yes "pull $PROBE_IMAGE"
+
+  case "$role" in
+    tag:vlab-worker)
+      for ip in $SERVER_IPS; do
+        probe "server k3s api" "$ip" 6443 open
+        probe "server kubelet" "$ip" 10250 closed
+        probe "server ssh" "$ip" 22 closed
+      done
+      probe "registry pull" "$REGISTRY_IP" 5001 open
+      probe "registry push" "$REGISTRY_IP" 5002 closed
+      probe "registry ssh" "$REGISTRY_IP" 22 closed
+      ;;
+    tag:vlab-server)
+      probe "registry pull" "$REGISTRY_IP" 5001 open
+      probe "registry push" "$REGISTRY_IP" 5002 open
+      for ip in $WORKER_IPS; do probe "worker kubelet" "$ip" 10250 open; done
+      ;;
+  esac
+  if $K exec "$CHECK_POD" -- python3 -I -c "$PY_DNS" >/dev/null 2>&1; then
+    check_result yes "DNS ของ cluster (coredns ผ่าน VXLAN)"
+  else
+    check_result no "DNS ของ cluster (coredns ผ่าน VXLAN)"
+  fi
+  $K delete pod "$CHECK_POD" --wait=false >/dev/null
+}
+
 check() {
   need kubectl
-  local worker="${1:-worker-pete}" K="kubectl --kubeconfig $KUBECONFIG_FILE"
-  $K delete pod vlab-acl-check --ignore-not-found --wait=true >/dev/null
-  # imagePullPolicy Always = ทดสอบว่ายัง pull จาก registry ผ่าน ACL ได้จริง
-  $K run vlab-acl-check --image=100.127.74.48:5001/vlab/hello:v1 --restart=Never --image-pull-policy=Always \
-    --overrides="{\"spec\":{\"hostNetwork\":true,\"terminationGracePeriodSeconds\":0,\"nodeSelector\":{\"kubernetes.io/hostname\":\"$worker\"}}}" \
-    --command -- sleep 600 >/dev/null
-  $K wait --for=condition=Ready pod/vlab-acl-check --timeout=120s >/dev/null || die "debug pod ไม่ขึ้นบน $worker (pull image ไม่ผ่าน?)"
-  echo "==> pull image จาก registry บน $worker ได้"
+  K="kubectl --kubeconfig $KUBECONFIG_FILE"
+  REGISTRY_IP=$(tag_ips tag:vlab-registry | head -n1)
+  SERVER_IPS=$(tag_ips tag:vlab-server)
+  WORKER_IPS=$(tag_ips tag:vlab-worker)
+  [ -n "$REGISTRY_IP" ] || die "ไม่มีเครื่อง tag:vlab-registry ใน ${TAGS#$ROOT/}"
+  PROBE_IMAGE="${VLAB_PROBE_IMAGE:-$REGISTRY_IP:5001/vlab/scan-runner:1.1.0}"
+  CHECK_PASS=0; CHECK_FAIL=0
 
-  local pass=0 fail=0
-  probe() {  # probe <ชื่อ> <host> <port> <open|closed>
-    local got
-    if $K exec vlab-acl-check -- nc -z -w 3 "$2" "$3" 2>/dev/null; then got=open; else got=closed; fi
-    if [ "$got" = "$4" ]; then pass=$((pass + 1)); s="ok  "; else fail=$((fail + 1)); s="FAIL"; fi
-    printf "   %s %-24s %s:%-5s ต้อง %-6s ได้ %s\n" "$s" "$1" "$2" "$3" "$4" "$got"
-  }
-  echo "==> จาก $worker"
-  probe "master k3s api" 100.125.244.48 6443 open
-  probe "registry" 100.127.74.48 5001 open
-  probe "thinkpad backend" 100.93.121.17 8000 open
-  probe "thinkpad kubelet" 100.93.121.17 10250 closed
-  probe "thinkpad ssh" 100.93.121.17 22 closed
-  probe "master ssh" 100.125.244.48 22 closed
-  probe "registry ssh" 100.127.74.48 22 closed
-  if $K exec vlab-acl-check -- nslookup kubernetes.default.svc.cluster.local 10.43.0.10 >/dev/null 2>&1; then
-    pass=$((pass + 1)); echo "   ok   DNS ของ cluster (coredns บน master ผ่าน VXLAN)"
-  else
-    fail=$((fail + 1)); echo "   FAIL DNS ของ cluster (coredns บน master ผ่าน VXLAN)"
-  fi
+  # ชื่อ node หาจาก IP (k3s ตั้ง --node-ip เป็น Tailscale IP) ไม่ต้องจำชื่อเครื่อง
+  local nodes targets=() ip role name
+  nodes=$($K get nodes -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{" "}{.metadata.name}{"\n"}{end}')
+  while read -r ip role; do
+    case "$role" in tag:vlab-server|tag:vlab-worker) ;; *) continue ;; esac
+    name=$(echo "$nodes" | awk -v ip="$ip" '$1 == ip {print $2}')
+    [ -n "$name" ] || { echo "   !! ไม่เจอ node ที่ IP $ip ใน cluster (ข้าม)"; continue; }
+    # ใส่ชื่อ node มา = ทดสอบเฉพาะเครื่องนั้น
+    [ $# -eq 0 ] || printf '%s\n' "$@" | grep -qx "$name" || continue
+    targets+=("$name $role")
+  done < <(tag_rows)
+  [ ${#targets[@]} -gt 0 ] || die "ไม่มี node ให้ทดสอบ"
+
+  # วนจาก array ไม่ใช่ใน while read: kubectl exec อาจกิน stdin ของ loop
+  local item
+  for item in "${targets[@]}"; do check_node $item; done
+
   echo "==> node"; $K get nodes --no-headers | awk '{printf "   %-14s %s\n", $1, $2}'
-  $K delete pod vlab-acl-check --wait=false >/dev/null
-  echo "==> ผ่าน $pass / ไม่ผ่าน $fail"
-  [ "$fail" -eq 0 ]
+  echo "==> ผ่าน $CHECK_PASS / ไม่ผ่าน $CHECK_FAIL"
+  [ "$CHECK_FAIL" -eq 0 ]
 }
 
 cmd="${1:-}"; shift || true
@@ -203,5 +264,5 @@ case "$cmd" in
     echo "==> tag ของเครื่องยังอยู่ (ไม่มีผลถ้า policy เดิมเปิดหมด) แก้ tag ได้ที่ console หรือ vlab-tags.tsv"
     ;;
   check) check "$@" ;;
-  *) sed -n '2,20p' "$0"; exit 1 ;;
+  *) sed -n '2,18p' "$0"; exit 1 ;;
 esac

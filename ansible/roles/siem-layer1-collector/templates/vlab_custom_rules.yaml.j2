@@ -1,0 +1,71 @@
+# Managed by Ansible (siem-layer1-collector)
+# Custom eBPF Kernel Security Rules for Virtual Lab Containers (K3s & AWS EC2 SkyPilot)
+
+- macro: vlab_container
+  condition: (container.id != host and container.name != "")
+
+- list: vlab_shell_binaries
+  items: [bash, sh, zsh, dash, ksh, csh, tcsh, ash]
+
+- list: vlab_sensitive_files
+  items:
+    - /etc/shadow
+    - /etc/sudoers
+    - /etc/pam.d
+    - /root/.ssh/authorized_keys
+    - /var/run/secrets/kubernetes.io/serviceaccount/token
+    - /etc/rancher/k3s/k3s.yaml
+
+- list: vlab_forbidden_net_miner_tools
+  items: [xmrig, minerd, cpuminer, nc, ncat, netcat, nmap, masscan, socat]
+
+- rule: VLab Unauthorized Interactive Shell in Container
+  desc: Detect an unexpected shell spawned by a non-entrypoint service process inside a container
+  condition: >
+    spawned_process and vlab_container
+    and proc.name in (vlab_shell_binaries)
+    and not proc.pname in (vlab_shell_binaries, docker-init, containerd-shim, dumb-init, tini, code-server, node)
+  output: >
+    Unauthorized shell spawned in container (user=%user.name container_id=%container.id
+    container_name=%container.name image=%container.image.repository cmdline=%proc.cmdline
+    parent=%proc.pname pid=%proc.pid)
+  priority: WARNING
+  tags: [container, shell, mitre_execution, T1059, vlab_layer1]
+
+- rule: VLab Sensitive System File Read in Container
+  desc: Detect attempt to read sensitive system files (/etc/shadow, K8s serviceaccount token, k3s.yaml) inside a container
+  condition: >
+    open_read and vlab_container
+    and fd.name in (vlab_sensitive_files)
+    and not proc.name in (login, su, sudo, sshd)
+  output: >
+    Sensitive system file read detected in container (user=%user.name file=%fd.name
+    container_id=%container.id container_name=%container.name image=%container.image.repository
+    cmdline=%proc.cmdline)
+  priority: CRITICAL
+  tags: [container, filesystem, credential_access, mitre_credential_access, T1552, fast_track, vlab_layer1]
+
+- rule: VLab Container Escape Privileged Syscall Attempt
+  desc: Detect dangerous kernel syscalls (ptrace, mount, unshare, setns, init_module, bpf) executed inside a lab container
+  condition: >
+    evt.type in (ptrace, mount, unshare, setns, init_module, finit_module, bpf)
+    and evt.dir = <
+    and vlab_container
+  output: >
+    CRITICAL container escape syscall attempt detected (syscall=%evt.type user=%user.name
+    container_id=%container.id container_name=%container.name image=%container.image.repository
+    cmdline=%proc.cmdline)
+  priority: CRITICAL
+  tags: [container, escape, privilege_escalation, mitre_privilege_escalation, T1611, fast_track, vlab_layer1]
+
+- rule: VLab Cryptomining or Recon Tool Execution in Container
+  desc: Detect execution of cryptominers or network scanners inside a lab container
+  condition: >
+    spawned_process and vlab_container
+    and (proc.name in (vlab_forbidden_net_miner_tools) or proc.cmdline contains "stratum+tcp")
+  output: >
+    Forbidden cryptomining or network scanner executed in container (tool=%proc.name
+    cmdline=%proc.cmdline container_id=%container.id container_name=%container.name
+    image=%container.image.repository)
+  priority: CRITICAL
+  tags: [container, cryptomining, network_recon, mitre_impact, T1496, fast_track, vlab_layer1]

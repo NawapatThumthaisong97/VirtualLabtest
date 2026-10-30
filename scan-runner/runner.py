@@ -8,7 +8,7 @@ vlab-scan-runner: ตรวจไฟล์ image.tar ที่อาจารย
     fetch     (init)  โหลด tar จาก presigned GET  -> /work/image.tar     มี secret (URL) ตัวเดียว
     validate  (init)  ตรวจโครง tar + config ของ image ด้วย skopeo        ไม่มี secret
     scan      (init)  Trivy หาช่องโหว่ / secret แล้วตัดสินตาม policy       ไม่มี secret
-    publish   (main)  PASS -> skopeo copy เข้า registry แล้วเขียนผลสรุป     ไม่มี secret
+    publish   (main)  PASS -> skopeo copy เข้า registry แล้วเขียนผลสรุป     มี secret (user/password ของ push port)
     version           พิมพ์เวอร์ชันของเครื่องมือ (ใช้ตรวจ image หลัง build)
 
 สัญญา (contract):
@@ -20,12 +20,14 @@ vlab-scan-runner: ตรวจไฟล์ image.tar ที่อาจารย
 
 ความปลอดภัย:
 - Python stdlib อย่างเดียว ไม่มี dependency ภายนอก
-- ไม่ log URL ที่เซ็นแล้ว ไม่ log environment
+- ไม่ log URL ที่เซ็นแล้ว ไม่ log environment ไม่ log credential ของ registry
+- credential ของ registry อ่านจากไฟล์ เขียนเป็น authfile 0600 ชั่วคราว ไม่อยู่ใน env / argv
 - เรียก tool ด้วย argv list เสมอ (ไม่ผ่าน shell) และตรวจรูปแบบ input ทุกตัวก่อนใช้
 - ไม่แตก (extract) tar: อ่านแค่ header และให้ skopeo / Trivy อ่านไฟล์เอง
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -39,7 +41,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, NoReturn, Optional
 
-RUNNER_VERSION = "1.0.0"
+RUNNER_VERSION = "1.1.0"
 
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 ARCHIVE_PATH = os.path.join(WORK_DIR, "image.tar")
@@ -47,6 +49,8 @@ STATE_PATH = os.path.join(WORK_DIR, "state.json")
 TRIVY_REPORT_PATH = os.path.join(WORK_DIR, "trivy.json")
 DIGEST_PATH = os.path.join(WORK_DIR, "digest")
 DOWNLOAD_URL_FILE = os.environ.get("DOWNLOAD_URL_FILE", "/secrets/fetch/download_url")
+# Secret แบบ kubernetes.io/basic-auth (key username / password) mount เข้า publish ตัวเดียว
+PUSH_CREDENTIALS_DIR = os.environ.get("PUSH_CREDENTIALS_DIR", "/secrets/push")
 TERMINATION_LOG = os.environ.get("TERMINATION_LOG", "/dev/termination-log")
 SKOPEO_POLICY = os.environ.get("SKOPEO_POLICY", "/etc/vlab-scan/policy.json")
 
@@ -69,6 +73,7 @@ RE_REPOSITORY = re.compile(
 RE_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 RE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 RE_ARCH = re.compile(r"^[a-z0-9]{1,16}$")
+RE_USERNAME = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
 class Verdict(Exception):
@@ -517,6 +522,35 @@ def step_scan(state: dict) -> dict:
 # ------------------------------------------------------------ publish
 
 
+def read_push_credentials() -> tuple[str, str]:
+    """user / password ของ push port จากไฟล์ใน PUSH_CREDENTIALS_DIR (ไม่มี = ตั้งค่าผิด ไม่ retry)"""
+    values = []
+    for key in ("username", "password"):
+        try:
+            with open(os.path.join(PUSH_CREDENTIALS_DIR, key), "r", encoding="utf-8") as handle:
+                values.append(handle.read().rstrip("\r\n"))
+        except OSError:
+            error("registry push credentials are not mounted", retryable=False)
+    username, password = values
+    if not RE_USERNAME.match(username) or not password or "\n" in password:
+        error("registry push credentials have an invalid format", retryable=False)
+    return username, password
+
+
+def write_authfile(registry: str, username: str, password: str) -> str:
+    """authfile ของ skopeo (รูปแบบเดียวกับ ~/.docker/config.json) สิทธิ์ 0600 ผู้เรียกต้องลบเอง"""
+    token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    tmp_dir = os.environ.get("TMPDIR", os.path.join(WORK_DIR, "tmp"))
+    fd, path = tempfile.mkstemp(dir=tmp_dir, prefix=".auth-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"auths": {registry: {"auth": token}}}, handle)
+    except BaseException:
+        os.unlink(path)
+        raise
+    return path
+
+
 def step_push(state: dict) -> dict:
     registry = checked("REGISTRY", RE_REGISTRY)
     repository = checked("REPOSITORY", RE_REPOSITORY)
@@ -525,23 +559,30 @@ def step_push(state: dict) -> dict:
     if transport not in ("docker-archive", "oci-archive"):
         error("validate step did not record the archive format", retryable=True)
     tls_verify = "true" if env_bool("REGISTRY_TLS_VERIFY", False) else "false"
+    username, password = read_push_credentials()
 
     try:
         os.unlink(DIGEST_PATH)
     except FileNotFoundError:
         pass
     # push ทับ tag เดิมได้: (repository, tag) unique ใน DB tag นี้จึงเป็นของแถวนี้แถวเดียว
-    result = run_tool(
-        [
-            "skopeo", "--policy", SKOPEO_POLICY, "copy",
-            "--retry-times", "3",
-            f"--dest-tls-verify={tls_verify}",
-            "--digestfile", DIGEST_PATH,
-            f"{transport}:{ARCHIVE_PATH}",
-            f"docker://{registry}/{repository}:{tag}",
-        ],
-        timeout=1200,
-    )
+    # credential ผ่าน authfile ไม่ใช่ --dest-creds (argv มองเห็นได้ใน /proc)
+    authfile = write_authfile(registry, username, password)
+    try:
+        result = run_tool(
+            [
+                "skopeo", "--policy", SKOPEO_POLICY, "copy",
+                "--retry-times", "3",
+                f"--dest-tls-verify={tls_verify}",
+                "--dest-authfile", authfile,
+                "--digestfile", DIGEST_PATH,
+                f"{transport}:{ARCHIVE_PATH}",
+                f"docker://{registry}/{repository}:{tag}",
+            ],
+            timeout=1200,
+        )
+    finally:
+        os.unlink(authfile)
     if result.returncode != 0:
         error(f"push to registry failed: {tool_error(result)}", retryable=True)
     try:

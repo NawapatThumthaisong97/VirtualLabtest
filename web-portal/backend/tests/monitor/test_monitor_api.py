@@ -42,6 +42,7 @@ def fixed_auth_settings(monkeypatch):
     monkeypatch.setattr(settings, "SECRET_KEY", "test-secret-salt-for-hmac-sha256")
     monkeypatch.setattr(settings, "ALGORITHM", "HS256")
     monkeypatch.setattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 60)
+    monkeypatch.setattr(settings, "K8S_ENABLED", False)
 
 
 @pytest.fixture

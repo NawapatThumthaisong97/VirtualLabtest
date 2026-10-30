@@ -49,6 +49,14 @@ skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 vault_backend_secret_key: <BACKEND_SECRET_KEY>
 vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
 
+# --- camp registry (role registry) 5001 = pull read-only ไม่มี auth / 5002 = push ต้อง login ---
+# รหัสยาว ≥ 12 ตัว ต้องมี user ansible (role ใช้ตรวจ login) user ที่ไม่อยู่ในรายการถูกลบจาก htpasswd
+registry_users:
+  scanner:
+    password: <SCANNER_PASSWORD>   # scan Job บน master push ผลที่ผ่านสแกน
+  ansible:
+    password: <ANSIBLE_PASSWORD>   # role scan-runner-image / build-images.yml
+
 # --- ecr-sync (เครื่อง registry sync camp registry -> ECR ทุก 2 นาที) ---
 # ecr_sync_registry ต้องตรงกับ ECR_REGISTRY_HOST ของ backend
 # key ของ IAM user แยก (เช่น vlab-ecr-sync) สิทธิ์ตาม policy ใน ansible/roles/ecr-sync/files/iam-policy.json
@@ -82,3 +90,12 @@ vault_r2_access_key_id: <R2_ACCESS_KEY_ID>
 vault_r2_secret_access_key: <R2_SECRET_ACCESS_KEY>
 # สุ่มเอง (openssl rand -hex 32) ต้องตรงกับ secret WEBHOOK_SECRET ของ Cloudflare Worker
 vault_r2_webhook_secret: <WEBHOOK_SECRET>
+
+# --- SIEM 5-Layer Observability Pipeline ---
+# เปิดใช้งาน role siem-layer1-collector บน Worker Nodes / EC2
+enable_siem_layer1: false
+# Token สำหรับ Vector Agent ส่ง Log เข้า NATS JetStream (ต้องตรงกับ Secret ใน K8s และ .env backend)
+siem_collector_token: <SIEM_COLLECTOR_TOKEN_OR_DEFAULT>
+# S3 Bucket สำหรับเก็บ Cold Storage Logs (.parquet)
+siem_s3_bucket: <SIEM_S3_BUCKET_NAME>
+siem_s3_region: ap-southeast-1

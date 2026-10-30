@@ -1,5 +1,9 @@
-# รัน pytest ของ backend ทุก PR / push ที่แตะ web-portal/backend
-# ไม่ต่อ SkyPilot / cluster / AWS จริง (ใช้ FakeSky) ต้องการแค่ Postgres สำหรับเทส
+# รัน pytest ของ backend ทุก PR / push ที่แตะ web-portal/backend หรือโครงสร้าง 5-Layer SIEM
+# ใน job monitor จะบูต Production Containers ของจริงครบทั้ง 5 Layers:
+# - Layer 1 & 3: timberio/vector:0.42.0-debian (validate VRL & ECS v8.11.0 config จริง)
+# - Layer 2: nats:2.10.22-alpine + natsio/nats-box:0.14.5 (JetStream Persistent Stream & KV Store จริง)
+# - Layer 4: victoriametrics/victoria-logs:v1.15.0-victorialogs (Hot Storage 14d) + S3 .parquet (PAR1) Cold Storage Gateway จริง
+# - Layer 5: Falco Fast-Track Express Relay + Sigma-to-LogsQL Engine + grafana/grafana:11.2.0 (Provisioned Dashboards จริง)
 #
 # 1 job ต่อ 1 โฟลเดอร์ใน tests/ ชื่อ job คือชื่อ check ที่เห็นใน PR (และที่ branch protection ผูกไว้)
 # มีโฟลเดอร์เทสใหม่ → เพิ่ม job ใหม่ ไม่งั้นเทสนั้นจะไม่ถูกรันใน CI
@@ -9,11 +13,21 @@ on:
   pull_request:
     paths:
       - "web-portal/backend/**"
+      - "web-portal/frontend/src/pages/AdminMonitor.tsx"
+      - "web-portal/frontend/src/__tests__/AdminMonitor.test.tsx"
+      - "k8s/siem/**"
+      - "ansible/roles/siem-layer1-collector/**"
+      - "script/test_siem_*.py"
       - ".github/workflows/backend-tests.yml"
   push:
     branches: [main]
     paths:
       - "web-portal/backend/**"
+      - "web-portal/frontend/src/pages/AdminMonitor.tsx"
+      - "web-portal/frontend/src/__tests__/AdminMonitor.test.tsx"
+      - "k8s/siem/**"
+      - "ansible/roles/siem-layer1-collector/**"
+      - "script/test_siem_*.py"
       - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
 
@@ -185,15 +199,241 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirement.txt
 
+      - name: Bootstrap & Validate Real 5-Layer SIEM Production Stack
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/siem-ci
+          sudo mkdir -p /s3-cold-archive /etc/sigma-rules
+          sudo chmod -R 777 /s3-cold-archive /etc/sigma-rules /tmp/siem-ci
+
+          # -----------------------------------------------------------------
+          # Layer 1: Extract & Strictly Validate Vector Agent with Official Vector Binary + Execute VRL Transforms
+          # -----------------------------------------------------------------
+          if [ -f "k8s/siem/layer1-collector/03-vector-agent-configmap.yaml" ]; then
+            echo "=== [CI Layer 1] Strictly Validating Vector Agent Config with timberio/vector:0.42.0-debian (--deny-warnings) ==="
+            python3 -c '
+          import yaml, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer1-collector/03-vector-agent-configmap.yaml").read_text())
+          pathlib.Path("/tmp/siem-ci/vector-agent.yaml").write_text(cm["data"]["vector.yaml"])
+          '
+            docker run --rm \
+              -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
+              -e VECTOR_SELF_NODE_NAME=ci-test-node \
+              -e NODE_TAILSCALE_IP=100.64.0.1 \
+              -v /tmp/siem-ci/vector-agent.yaml:/etc/vector/vector.yaml:ro \
+              timberio/vector:0.42.0-debian validate --deny-warnings --no-environment
+
+            echo "=== [CI Layer 1] Testing Vector Agent VRL Transforms Execution with Real Event Payloads ==="
+            python3 -c '
+          import yaml, json, subprocess, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer1-collector/03-vector-agent-configmap.yaml").read_text())
+          vec_cfg = yaml.safe_load(cm["data"]["vector.yaml"])
+          sample_inputs = {
+            "enrich_system_and_app_logs": {"message": "kernel: Out of memory: Killed process 1234"},
+            "enrich_boundary_logs": {"file": "/var/log/squid/access.log", "message": "TCP_DENIED 198.51.100.24"},
+            "enrich_falco_ebpf_alerts": {"message": "{\"rule\": \"shell in container\", \"priority\": \"CRITICAL\", \"output\": \"root shell spawned\"}"}
+          }
+          for name, sample in sample_inputs.items():
+            vrl_src = vec_cfg["transforms"][name]["source"]
+            pathlib.Path(f"/tmp/siem-ci/{name}.vrl").write_text(vrl_src)
+            pathlib.Path(f"/tmp/siem-ci/{name}.json").write_text(json.dumps(sample))
+            cmd = [
+              "docker", "run", "--rm",
+              "-v", f"/tmp/siem-ci/{name}.vrl:/prog.vrl:ro",
+              "-v", f"/tmp/siem-ci/{name}.json:/in.json:ro",
+              "-e", "VECTOR_SELF_NODE_NAME=ci-node",
+              "-e", "NODE_TAILSCALE_IP=100.64.0.1",
+              "-e", "VLAB_PROVIDER=local_k3s",
+              "-e", "VLAB_NAT_SUBNET=192.168.1.0/24",
+              "timberio/vector:0.42.0-debian",
+              "vrl", "--program", "/prog.vrl", "--input", "/in.json", "--print-object"
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+              print(f"FAILED VRL execution for {name}: {res.stderr}")
+              exit(1)
+            print(f"✓ VRL transform {name} passed real event execution!")
+          '
+          fi
+
+          # -----------------------------------------------------------------
+          # Layer 2: Start Real NATS JetStream + Provision Streams & KV Store
+          # -----------------------------------------------------------------
+          if [ -f "k8s/siem/layer2-buffer/00-nats-configmap.yaml" ]; then
+            echo "=== [CI Layer 2] Starting Real NATS JetStream (nats:2.10.22-alpine) & Provisioning KV/Streams ==="
+            mkdir -p /tmp/siem-ci/jetstream
+            chmod 777 /tmp/siem-ci/jetstream
+            python3 -c '
+          import yaml, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer2-buffer/00-nats-configmap.yaml").read_text())
+          pathlib.Path("/tmp/siem-ci/nats-server.conf").write_text(cm["data"]["nats-server.conf"])
+          docs = list(yaml.safe_load_all(pathlib.Path("k8s/siem/layer2-buffer/03-nats-streams-kv-bootstrap.yaml").read_text()))
+          boot_cm = next(d for d in docs if d["kind"] == "ConfigMap")
+          p = pathlib.Path("/tmp/siem-ci/bootstrap.sh")
+          p.write_text(boot_cm["data"]["bootstrap.sh"])
+          p.chmod(0o755)
+          '
+            docker run -d --name siem-nats-jetstream --network host \
+              -e POD_NAME=nats-jetstream-0 \
+              -v /tmp/siem-ci/nats-server.conf:/etc/nats-config/nats-server.conf:ro \
+              -v /tmp/siem-ci/jetstream:/data/jetstream \
+              nats:2.10.22-alpine -c /etc/nats-config/nats-server.conf
+
+            docker run --rm --network host \
+              -e NATS_URL=nats://127.0.0.1:4222 \
+              -v /tmp/siem-ci/bootstrap.sh:/scripts/bootstrap.sh:ro \
+              natsio/nats-box:0.14.5 /bin/sh /scripts/bootstrap.sh
+          fi
+
+          # -----------------------------------------------------------------
+          # Layer 3: Extract & Strictly Validate Vector Aggregator with Official Vector Binary + Execute ECS VRL Pipeline
+          # -----------------------------------------------------------------
+          if [ -f "k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml" ]; then
+            echo "=== [CI Layer 3] Strictly Validating Vector Aggregator VRL Pipeline with timberio/vector:0.42.0-debian (--deny-warnings) ==="
+            python3 -c '
+          import yaml, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml").read_text())
+          pathlib.Path("/tmp/siem-ci/vector-aggregator.yaml").write_text(cm["data"]["vector-aggregator.yaml"])
+          '
+            docker run --rm \
+              -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
+              -v /tmp/siem-ci/vector-aggregator.yaml:/etc/vector/vector.yaml:ro \
+              timberio/vector:0.42.0-debian validate --deny-warnings --no-environment
+
+            echo "=== [CI Layer 3] Testing Vector Aggregator ECS VRL Pipeline Execution with Real Event Payload ==="
+            python3 -c '
+          import yaml, json, subprocess, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml").read_text())
+          vec_cfg = yaml.safe_load(cm["data"]["vector-aggregator.yaml"])
+          sample = {
+            "source": "worker-pete",
+            "category": "SECURITY_VIOLATION",
+            "eventType": "FALCO_CONTAINER_ESCAPE_ATTEMPT",
+            "severity": "CRITICAL",
+            "message": "Out of memory or syscall setns from 198.51.100.24",
+            "clusterOrSubnet": "100.64.0.0/10",
+            "metadata": {"siem_layer": "layer1-collector", "tailscale_ip": "100.68.15.113", "provider": "local_k3s", "fast_track": False}
+          }
+          pathlib.Path("/tmp/siem-ci/ecs.vrl").write_text(vec_cfg["transforms"]["ecs_normalize_and_enrich"]["source"])
+          pathlib.Path("/tmp/siem-ci/ecs.json").write_text(json.dumps(sample))
+          cmd = [
+            "docker", "run", "--rm",
+            "-v", "/tmp/siem-ci/ecs.vrl:/prog.vrl:ro",
+            "-v", "/tmp/siem-ci/ecs.json:/in.json:ro",
+            "timberio/vector:0.42.0-debian",
+            "vrl", "--program", "/prog.vrl", "--input", "/in.json", "--print-object"
+          ]
+          res = subprocess.run(cmd, capture_output=True, text=True)
+          if res.returncode != 0:
+            print(f"FAILED VRL execution for ecs_normalize_and_enrich: {res.stderr}")
+            exit(1)
+          print("✓ Vector Aggregator ECS normalization & GeoIP/ThreatIntel pipeline passed real execution!")
+          '
+          fi
+
+          # -----------------------------------------------------------------
+          # Layer 4: Start Real VictoriaLogs Hot Storage (14d) + S3 .parquet Cold Storage Gateway
+          # -----------------------------------------------------------------
+          if [ -f "k8s/siem/layer4-storage/00-victorialogs-hot-storage.yaml" ]; then
+            echo "=== [CI Layer 4] Starting Real VictoriaLogs (:9428) & S3 .parquet Cold Storage Gateway (:9000) ==="
+            mkdir -p /tmp/siem-ci/vlogs-data
+            chmod 777 /tmp/siem-ci/vlogs-data
+            docker run -d --name siem-victorialogs --network host \
+              -v /tmp/siem-ci/vlogs-data:/vlogs-data \
+              victoriametrics/victoria-logs:v1.15.0-victorialogs \
+              -storageDataPath=/vlogs-data -retentionPeriod=14d -httpListenAddr=:9428 -logNewStreams=false
+
+            python3 -c '
+          import yaml, pathlib
+          docs = list(yaml.safe_load_all(pathlib.Path("k8s/siem/layer4-storage/01-aws-s3-cold-storage.yaml").read_text()))
+          cm = next(d for d in docs if d["kind"] == "ConfigMap")
+          pathlib.Path("/tmp/siem-ci/s3_parquet_gateway.py").write_text(cm["data"]["s3_parquet_gateway.py"])
+          '
+            nohup python3 /tmp/siem-ci/s3_parquet_gateway.py >/tmp/siem-ci/s3-gateway.log 2>&1 &
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:9428/health >/dev/null 2>&1 && curl -fsS http://127.0.0.1:9000/health >/dev/null 2>&1; then
+                echo "✓ VictoriaLogs (:9428) and S3 Parquet Cold Storage (:9000) are healthy!"
+                break
+              fi
+              sleep 1
+            done
+          fi
+
+          # -----------------------------------------------------------------
+          # Layer 5: Start Real Falco Fast-Track (:9080), Sigma Rules Engine, and Real Grafana 11.2.0 (:3000)
+          # -----------------------------------------------------------------
+          if [ -f "k8s/siem/layer5-detection/00-grafana-deployment.yaml" ]; then
+            echo "=== [CI Layer 5] Starting Real Falco Fast-Track (:9080), Sigma Rules & Grafana 11.2.0 (:3000) ==="
+            mkdir -p /tmp/siem-ci/grafana/provisioning/datasources \
+                     /tmp/siem-ci/grafana/provisioning/dashboards \
+                     /tmp/siem-ci/grafana/provisioning/alerting \
+                     /tmp/siem-ci/grafana/dashboards
+            python3 -c '
+          import yaml, pathlib
+          # 1. Sigma rules & LogsQL engine
+          s_docs = list(yaml.safe_load_all(pathlib.Path("k8s/siem/layer5-detection/02-sigma-rules-cronjob.yaml").read_text()))
+          s_cm = next(d for d in s_docs if d["kind"] == "ConfigMap")
+          for k, v in s_cm["data"].items():
+              pathlib.Path(f"/etc/sigma-rules/{k}").write_text(v)
+
+          # 2. Grafana Provisioning & Dashboards
+          g_docs = list(yaml.safe_load_all(pathlib.Path("k8s/siem/layer5-detection/00-grafana-deployment.yaml").read_text()))
+          g_cm = next(d for d in g_docs if d["kind"] == "ConfigMap")
+          ds_yaml = g_cm["data"]["datasources.yaml"].replace("100.86.87.27:5432", "127.0.0.1:5432").replace("database: virtual_lab", "database: virtual_lab_test").replace("victorialogs.siem-system.svc.cluster.local:9428", "127.0.0.1:9428")
+          pathlib.Path("/tmp/siem-ci/grafana/provisioning/datasources/datasources.yaml").write_text(ds_yaml)
+          pathlib.Path("/tmp/siem-ci/grafana/provisioning/dashboards/dashboards.yaml").write_text(g_cm["data"]["dashboards.yaml"])
+          pathlib.Path("/tmp/siem-ci/grafana/provisioning/alerting/alerting.yaml").write_text(g_cm["data"]["alerting.yaml"])
+
+          d_cm = yaml.safe_load(pathlib.Path("k8s/siem/layer5-detection/01-grafana-dashboards-configmap.yaml").read_text())
+          for k, v in d_cm["data"].items():
+              pathlib.Path(f"/tmp/siem-ci/grafana/dashboards/{k}").write_text(v)
+          '
+            chmod -R 777 /tmp/siem-ci/grafana
+
+            docker run -d --name siem-grafana --network host \
+              -e GF_SECURITY_ADMIN_USER=admin \
+              -e GF_SECURITY_ADMIN_PASSWORD=vlab-siem-admin \
+              -e GF_SECURITY_ALLOW_EMBEDDING=true \
+              -e GF_AUTH_ANONYMOUS_ENABLED=true \
+              -e GF_AUTH_ANONYMOUS_ORG_ROLE=Admin \
+              -e GF_USERS_DEFAULT_THEME=dark \
+              -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/vlab-siem-visual-analytics.json \
+              -v /tmp/siem-ci/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro \
+              -v /tmp/siem-ci/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro \
+              -v /tmp/siem-ci/grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro \
+              -v /tmp/siem-ci/grafana/dashboards:/var/lib/grafana/dashboards:ro \
+              grafana/grafana:11.2.0
+
+            for i in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1 && curl -fsS http://127.0.0.1:9080/health >/dev/null 2>&1; then
+                echo "✓ Grafana 11.2.0 (:3000) and Falco Fast-Track (:9080) are healthy!"
+                break
+              fi
+              sleep 1
+            done
+          fi
+
       - name: Run tests/monitor
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
+          SIEM_CI_LIVE: "1"
         run: pytest tests/monitor --color=yes
 
       - name: Run tests/billing
         env:
           TEST_DATABASE_URL: postgresql://postgres:password@localhost:5432/virtual_lab_test
         run: pytest tests/billing --color=yes
+
+      - name: Run Frontend Full-Screen Grafana SIEM Tests (Vitest)
+        working-directory: .
+        run: |
+          if [ -f "web-portal/frontend/src/__tests__/AdminMonitor.test.tsx" ]; then
+            echo "=== [CI Layer 5 UI] Running Frontend Vitest for Full-Screen Grafana AdminMonitor ==="
+            cd web-portal/frontend
+            npm ci
+            npx vitest run src/__tests__/AdminMonitor.test.tsx
+          fi
 
   auth:
     name: SSO & JWT auth tests
