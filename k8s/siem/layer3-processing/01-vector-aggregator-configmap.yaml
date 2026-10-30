@@ -266,7 +266,8 @@ data:
           max_events: 1
         request:
           headers:
-            X-Collector-Token: "${SIEM_COLLECTOR_TOKEN}"
+            X-Collector-Token: "${SIEM_COLLECTOR_TOKEN:-}"
+            Authorization: "Bearer ${SIEM_COLLECTOR_TOKEN:-}"
             X-SIEM-Layer: "layer3-processing"
             X-ECS-Version: "8.11.0"
         buffer:

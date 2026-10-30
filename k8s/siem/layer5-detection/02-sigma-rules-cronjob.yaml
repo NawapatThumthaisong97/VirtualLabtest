@@ -137,9 +137,10 @@ data:
         cat = rule.get("category", "SECURITY_VIOLATION")
         keywords = rule.get("keywords", [])
         if not keywords:
-            return f'category:"{cat}"'
-        kw_expr = " OR ".join(f'"{kw}"' for kw in keywords)
-        return f'category:"{cat}" AND ({kw_expr})'
+            return f'_time:2m AND category:"{cat}"'
+        escaped_kws = [kw.replace('"', '\\"') for kw in keywords]
+        kw_expr = " OR ".join(f'"{kw}"' for kw in escaped_kws)
+        return f'_time:2m AND category:"{cat}" AND ({kw_expr})'
 
     def run_sigma_scan():
         results = []
@@ -151,11 +152,14 @@ data:
             matched_lines = []
             try:
                 with urllib.request.urlopen(req, timeout=8) as res:
-                    matched_lines = [
-                        json.loads(line)
-                        for line in res.read().decode("utf-8").splitlines()
-                        if line.strip()
-                    ]
+                    for line in res.read().decode("utf-8").splitlines():
+                        line_str = line.strip()
+                        if not line_str:
+                            continue
+                        try:
+                            matched_lines.append(json.loads(line_str))
+                        except Exception:
+                            continue
             except Exception as exc:
                 print(f"Warning querying VictoriaLogs for {rule.get('id')}: {exc}")
 
@@ -200,6 +204,7 @@ data:
                 headers = {"Content-Type": "application/json"}
                 if COLLECTOR_TOKEN:
                     headers["X-Collector-Token"] = COLLECTOR_TOKEN
+                    headers["Authorization"] = f"Bearer {COLLECTOR_TOKEN}"
                 post_req = urllib.request.Request(
                     BACKEND_LOGS_URL,
                     data=json.dumps(alert_payload).encode("utf-8"),

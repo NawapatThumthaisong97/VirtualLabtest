@@ -144,7 +144,11 @@ spec:
             - name: GF_SECURITY_ADMIN_USER
               value: "admin"
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: "vlab-siem-admin"
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: grafana-admin-password
+                  optional: true
             - name: GF_SECURITY_ALLOW_EMBEDDING
               value: "true"
             - name: GF_AUTH_ANONYMOUS_ENABLED
@@ -162,16 +166,19 @@ spec:
                 secretKeyRef:
                   name: siem-collector-secrets
                   key: postgres-host
+                  optional: true
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: siem-collector-secrets
                   key: postgres-user
+                  optional: true
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: siem-collector-secrets
                   key: postgres-password
+                  optional: true
           ports:
             - name: http-grafana
               containerPort: 3000
