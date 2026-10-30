@@ -16,20 +16,20 @@ data:
         uid: siem-postgres-ds
         type: postgres
         access: proxy
-        url: ${SIEM_POSTGRES_HOST}
-        user: ${SIEM_POSTGRES_USER}
+        url: ${POSTGRES_HOST}
+        user: ${POSTGRES_USER}
         database: virtual_lab
         isDefault: true
         editable: true
         secureJsonData:
-          password: "${SIEM_POSTGRES_PASSWORD}"
+          password: "${POSTGRES_PASSWORD}"
         jsonData:
           sslmode: "disable"
           postgresVersion: 1500
           timescaledb: false
       - name: VictoriaLogs-HotStorage
         uid: victorialogs-hot-ds
-        type: prometheus
+        type: victoriametrics-logs-datasource
         access: proxy
         url: http://victorialogs.siem-system.svc.cluster.local:9428
         isDefault: false
@@ -107,6 +107,8 @@ metadata:
     vlab.siem/layer: "5-detection"
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: grafana-siem
@@ -125,10 +127,7 @@ spec:
         - key: "node-role.kubernetes.io/control-plane"
           operator: "Exists"
           effect: "NoSchedule"
-        - key: "node-role.kubernetes.io/master"
-          operator: "Exists"
-          effect: "NoSchedule"
-      # Pin Grafana strictly to control-plane / master so it inherits tag:vlab-server
+      # Pin Grafana strictly to control-plane so it inherits tag:vlab-server
       # and can reach the backend database on port 5432 through Tailscale ACL
       affinity:
         nodeAffinity:
@@ -136,9 +135,6 @@ spec:
             nodeSelectorTerms:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
-                    operator: Exists
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/master
                     operator: Exists
       containers:
         - name: grafana
@@ -159,12 +155,23 @@ spec:
               value: "dark"
             - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
               value: "/var/lib/grafana/dashboards/vlab-siem-visual-analytics.json"
-            - name: SIEM_POSTGRES_HOST
-              value: "100.86.87.27:5432"
-            - name: SIEM_POSTGRES_USER
-              value: "postgres"
-            - name: SIEM_POSTGRES_PASSWORD
-              value: "password"
+            - name: GF_INSTALL_PLUGINS
+              value: "victoriametrics-logs-datasource"
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: postgres-host
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: postgres-password
           ports:
             - name: http-grafana
               containerPort: 3000
