@@ -219,7 +219,7 @@ data:
         type: filter
         inputs:
           - ecs_normalize_and_enrich
-        condition: '.severity == "WARNING" || .severity == "CRITICAL" || .category != "SYSTEM_LOG" || .event_type == "FALCO_EBPF_ALERT" || .event_type == "SQUID_EGRESS_DROP" || .event_type == "KYVERNO_POLICY_BLOCK" || .event_type == "TAILSCALE_UNAUTHORIZED_ACCESS" || .event_type == "SIGMA_RULE_MATCH"'
+        condition: '.eventType != "SYSTEM_LOG" || includes(["WARNING", "ERROR", "CRITICAL"], .severity)'
 
     # ---------------------
     # 3. SINKS (Deliver Normalized ECS Events to Layer 4 Dual-Tier Storage & Control Plane)

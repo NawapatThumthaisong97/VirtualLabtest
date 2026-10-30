@@ -212,32 +212,12 @@ data:
           }
 
     # ---------------------
-    # 3. SINKS (Encrypted Tailscale Transport to Central Hub / Layer 2 Buffer)
+    # 3. SINKS (Layer 2 NATS JetStream Buffer Transport)
     # ---------------------
     sinks:
-      # 3.1 Central SIEM Hub over Tailscale VPN (100.64.0.0/10 internal overlay network)
-      tailscale_central_hub:
-        type: http
-        inputs:
-          - enrich_boundary_logs
-          - enrich_falco_ebpf_alerts
-        uri: "${SIEM_CENTRAL_TAILSCALE_ENDPOINT:-http://100.86.87.27:8000/api/v1/logs}"
-        method: post
-        encoding:
-          codec: json
-        batch:
-          max_events: 1
-        request:
-          headers:
-            X-Collector-Token: "${SIEM_COLLECTOR_TOKEN}"
-            X-SIEM-Layer: "layer1-collector"
-            X-Transport-Network: "tailscale0"
-        buffer:
-          type: disk
-          max_size: 536870912
-          when_full: drop_newest
-
-      # 3.2 Layer 2 NATS JetStream Buffer (Absorbs high-rate bursts from K3s & Ephemeral SkyPilot nodes)
+      # Layer 2 NATS JetStream Buffer (Absorbs high-rate bursts from K3s & Ephemeral SkyPilot nodes)
+      # All telemetry is delivered through Layer 2 Buffer -> Layer 3 Aggregator (ECS/GeoIP/ThreatIntel) -> Storage & DB
+      # Eliminates dual-path ingestion and prevents duplicate Falco eBPF / boundary alert rows in database
       nats_jetstream_buffer:
         type: nats
         inputs:

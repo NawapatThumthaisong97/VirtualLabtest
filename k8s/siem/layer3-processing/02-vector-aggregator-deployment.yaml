@@ -57,8 +57,6 @@ spec:
                 matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
-                  - key: node-role.kubernetes.io/master
-                    operator: DoesNotExist
       containers:
         - name: vector-aggregator
           image: timberio/vector:0.42.0-debian

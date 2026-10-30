@@ -165,10 +165,11 @@ class TestLayer1KubernetesManifests:
         # Local Falco receiver binds strictly to loopback (127.0.0.1), never 0.0.0.0
         assert sources["falco_ebpf_http"]["address"].startswith("127.0.0.1:")
 
-        # Sink uses Tailscale internal network with disk buffering
-        hub_sink = vector_cfg["sinks"]["tailscale_central_hub"]
-        assert hub_sink["buffer"]["type"] == "disk"
-        assert hub_sink["request"]["headers"]["X-Transport-Network"] == "tailscale0"
+        # Sink delivers to Layer 2 NATS JetStream Buffer to prevent duplicate DB writes and absorb bursts
+        nats_sink = vector_cfg["sinks"]["nats_jetstream_buffer"]
+        assert nats_sink["type"] == "nats"
+        assert "nats-jetstream.siem-system.svc.cluster.local:4222" in nats_sink["url"]
+        assert nats_sink["subject"] == "siem.logs.telemetry"
 
         # DaemonSet must not expose any public hostPort
         ds_doc = yaml.safe_load(
