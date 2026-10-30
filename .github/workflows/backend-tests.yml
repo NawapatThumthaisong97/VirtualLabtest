@@ -208,18 +208,53 @@ jobs:
           sudo chmod -R 777 /s3-cold-archive /etc/sigma-rules /tmp/siem-ci
 
           # -----------------------------------------------------------------
-          # Layer 1: Extract & Validate Vector Agent Config with Official Vector Binary
+          # Layer 1: Extract & Strictly Validate Vector Agent with Official Vector Binary + Execute VRL Transforms
           # -----------------------------------------------------------------
           if [ -f "k8s/siem/layer1-collector/03-vector-agent-configmap.yaml" ]; then
-            echo "=== [CI Layer 1] Validating Vector Agent Config with timberio/vector:0.42.0-debian ==="
+            echo "=== [CI Layer 1] Strictly Validating Vector Agent Config with timberio/vector:0.42.0-debian (--deny-warnings) ==="
             python3 -c '
           import yaml, pathlib
           cm = yaml.safe_load(pathlib.Path("k8s/siem/layer1-collector/03-vector-agent-configmap.yaml").read_text())
           pathlib.Path("/tmp/siem-ci/vector-agent.yaml").write_text(cm["data"]["vector.yaml"])
           '
-            docker run --rm -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
-              -v /tmp/siem-ci:/etc/vector timberio/vector:0.42.0-debian \
-              validate --no-environment /etc/vector/vector-agent.yaml
+            docker run --rm \
+              -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
+              -e VECTOR_SELF_NODE_NAME=ci-test-node \
+              -e NODE_TAILSCALE_IP=100.64.0.1 \
+              -v /tmp/siem-ci/vector-agent.yaml:/etc/vector/vector.yaml:ro \
+              timberio/vector:0.42.0-debian validate --deny-warnings --no-environment
+
+            echo "=== [CI Layer 1] Testing Vector Agent VRL Transforms Execution with Real Event Payloads ==="
+            python3 -c '
+          import yaml, json, subprocess, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer1-collector/03-vector-agent-configmap.yaml").read_text())
+          vec_cfg = yaml.safe_load(cm["data"]["vector.yaml"])
+          sample_inputs = {
+            "enrich_system_and_app_logs": {"message": "kernel: Out of memory: Killed process 1234"},
+            "enrich_boundary_logs": {"file": "/var/log/squid/access.log", "message": "TCP_DENIED 198.51.100.24"},
+            "enrich_falco_ebpf_alerts": {"message": "{\"rule\": \"shell in container\", \"priority\": \"CRITICAL\", \"output\": \"root shell spawned\"}"}
+          }
+          for name, sample in sample_inputs.items():
+            vrl_src = vec_cfg["transforms"][name]["source"]
+            pathlib.Path(f"/tmp/siem-ci/{name}.vrl").write_text(vrl_src)
+            pathlib.Path(f"/tmp/siem-ci/{name}.json").write_text(json.dumps(sample))
+            cmd = [
+              "docker", "run", "--rm",
+              "-v", f"/tmp/siem-ci/{name}.vrl:/prog.vrl:ro",
+              "-v", f"/tmp/siem-ci/{name}.json:/in.json:ro",
+              "-e", "VECTOR_SELF_NODE_NAME=ci-node",
+              "-e", "NODE_TAILSCALE_IP=100.64.0.1",
+              "-e", "VLAB_PROVIDER=local_k3s",
+              "-e", "VLAB_NAT_SUBNET=192.168.1.0/24",
+              "timberio/vector:0.42.0-debian",
+              "vrl", "--program", "/prog.vrl", "--input", "/in.json", "--print-object"
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+              print(f"FAILED VRL execution for {name}: {res.stderr}")
+              exit(1)
+            print(f"✓ VRL transform {name} passed real event execution!")
+          '
           fi
 
           # -----------------------------------------------------------------
@@ -252,18 +287,49 @@ jobs:
           fi
 
           # -----------------------------------------------------------------
-          # Layer 3: Extract & Validate Vector Aggregator VRL (ECS v8.11.0 + GeoIP + Threat Intel)
+          # Layer 3: Extract & Strictly Validate Vector Aggregator with Official Vector Binary + Execute ECS VRL Pipeline
           # -----------------------------------------------------------------
           if [ -f "k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml" ]; then
-            echo "=== [CI Layer 3] Validating Vector Aggregator VRL Pipeline with timberio/vector:0.42.0-debian ==="
+            echo "=== [CI Layer 3] Strictly Validating Vector Aggregator VRL Pipeline with timberio/vector:0.42.0-debian (--deny-warnings) ==="
             python3 -c '
           import yaml, pathlib
           cm = yaml.safe_load(pathlib.Path("k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml").read_text())
           pathlib.Path("/tmp/siem-ci/vector-aggregator.yaml").write_text(cm["data"]["vector-aggregator.yaml"])
           '
-            docker run --rm -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
-              -v /tmp/siem-ci:/etc/vector-aggregator timberio/vector:0.42.0-debian \
-              validate --no-environment /etc/vector-aggregator/vector-aggregator.yaml
+            docker run --rm \
+              -e SIEM_COLLECTOR_TOKEN=ci-test-collector-token \
+              -v /tmp/siem-ci/vector-aggregator.yaml:/etc/vector/vector.yaml:ro \
+              timberio/vector:0.42.0-debian validate --deny-warnings --no-environment
+
+            echo "=== [CI Layer 3] Testing Vector Aggregator ECS VRL Pipeline Execution with Real Event Payload ==="
+            python3 -c '
+          import yaml, json, subprocess, pathlib
+          cm = yaml.safe_load(pathlib.Path("k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml").read_text())
+          vec_cfg = yaml.safe_load(cm["data"]["vector-aggregator.yaml"])
+          sample = {
+            "source": "worker-pete",
+            "category": "SECURITY_VIOLATION",
+            "eventType": "FALCO_CONTAINER_ESCAPE_ATTEMPT",
+            "severity": "CRITICAL",
+            "message": "Out of memory or syscall setns from 198.51.100.24",
+            "clusterOrSubnet": "100.64.0.0/10",
+            "metadata": {"siem_layer": "layer1-collector", "tailscale_ip": "100.68.15.113", "provider": "local_k3s", "fast_track": False}
+          }
+          pathlib.Path("/tmp/siem-ci/ecs.vrl").write_text(vec_cfg["transforms"]["ecs_normalize_and_enrich"]["source"])
+          pathlib.Path("/tmp/siem-ci/ecs.json").write_text(json.dumps(sample))
+          cmd = [
+            "docker", "run", "--rm",
+            "-v", "/tmp/siem-ci/ecs.vrl:/prog.vrl:ro",
+            "-v", "/tmp/siem-ci/ecs.json:/in.json:ro",
+            "timberio/vector:0.42.0-debian",
+            "vrl", "--program", "/prog.vrl", "--input", "/in.json", "--print-object"
+          ]
+          res = subprocess.run(cmd, capture_output=True, text=True)
+          if res.returncode != 0:
+            print(f"FAILED VRL execution for ecs_normalize_and_enrich: {res.stderr}")
+            exit(1)
+          print("✓ Vector Aggregator ECS normalization & GeoIP/ThreatIntel pipeline passed real execution!")
+          '
           fi
 
           # -----------------------------------------------------------------

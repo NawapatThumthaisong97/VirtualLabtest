@@ -79,3 +79,38 @@ class TestLayer3VectorAggregatorManifests:
         keys = {expr["key"] for expr in pref["matchExpressions"]}
         assert "node-role.kubernetes.io/control-plane" in keys
 
+    def test_vector_aggregator_config_passes_strict_binary_validation(self):
+        """Strict validation of vector-aggregator.yaml using official Vector binary if Docker is available"""
+        import shutil
+        import subprocess
+        import pytest
+
+        if not shutil.which("docker"):
+            pytest.skip("Docker is not available for strict Vector binary validation")
+
+        cm_doc = yaml.safe_load(
+            (K8S_LAYER3_DIR / "01-vector-aggregator-configmap.yaml").read_text(encoding="utf-8")
+        )
+        vector_yaml = cm_doc["data"]["vector-aggregator.yaml"]
+
+        tmp_cfg = REPO_ROOT / "test_tmp_vector_aggregator.yaml"
+        try:
+            tmp_cfg.write_text(vector_yaml, encoding="utf-8")
+            res = subprocess.run(
+                [
+                    "docker", "run", "--rm",
+                    "-v", f"{tmp_cfg.resolve()}:/etc/vector/vector.yaml:ro",
+                    "-e", "SIEM_COLLECTOR_TOKEN=dummy-token",
+                    "timberio/vector:0.42.0-debian",
+                    "validate", "--deny-warnings", "--no-environment"
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            assert res.returncode == 0, f"Vector aggregator validate failed:\nSTDOUT: {res.stdout}\nSTDERR: {res.stderr}"
+        finally:
+            if tmp_cfg.exists():
+                tmp_cfg.unlink()
+

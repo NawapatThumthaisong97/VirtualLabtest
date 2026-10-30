@@ -178,6 +178,41 @@ class TestLayer1KubernetesManifests:
         for c in ds_doc["spec"]["template"]["spec"]["containers"]:
             assert "ports" not in c, "Vector Agent DaemonSet must not expose public hostPorts"
 
+    def test_vector_agent_config_passes_strict_binary_validation(self):
+        """Strict validation of vector-agent.yaml using official Vector binary if Docker is available"""
+        import shutil
+        import subprocess
+
+        if not shutil.which("docker"):
+            pytest.skip("Docker is not available for strict Vector binary validation")
+
+        cm_doc = yaml.safe_load(
+            (K8S_LAYER1_DIR / "03-vector-agent-configmap.yaml").read_text(encoding="utf-8")
+        )
+        vector_yaml = cm_doc["data"]["vector.yaml"]
+
+        tmp_cfg = REPO_ROOT / "test_tmp_vector_agent.yaml"
+        try:
+            tmp_cfg.write_text(vector_yaml, encoding="utf-8")
+            res = subprocess.run(
+                [
+                    "docker", "run", "--rm",
+                    "-v", f"{tmp_cfg.resolve()}:/etc/vector/vector.yaml:ro",
+                    "-e", "SIEM_COLLECTOR_TOKEN=dummy-token",
+                    "-e", "VECTOR_SELF_NODE_NAME=test-node",
+                    "timberio/vector:0.42.0-debian",
+                    "validate", "--deny-warnings", "--no-environment"
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            assert res.returncode == 0, f"Vector validate failed:\nSTDOUT: {res.stdout}\nSTDERR: {res.stderr}"
+        finally:
+            if tmp_cfg.exists():
+                tmp_cfg.unlink()
+
 
 class TestLayer1AnsibleAndAwsAmiBaking:
     """Verify Ansible Role and AWS EC2/SkyPilot AMI baking script for Layer 1"""
