@@ -20,7 +20,7 @@ const defaultFeatures: HeaderFeature[] = [
   { label: 'Class Scheduler', to: '/admin/scheduler' },
   { label: 'Bill Explorer', target: 'billing' },
   { label: 'Logs', to: '/admin/logs' },
-  { label: 'Security', note: 'เร็ว ๆ นี้ — Grafana SIEM' },
+  { label: 'Security', to: '/admin/security' },
 ];
 
 const button = (enabled: boolean, active: boolean) =>

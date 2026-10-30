@@ -18,6 +18,7 @@ import AdminMonitorPage from '../pages/AdminMonitor.tsx';
 import AdminDashboardPage from '../pages/AdminDashboard.tsx';
 import ClassSchedulePage from '../pages/ClassSchedule.tsx';
 import LogExplorerPage from '../pages/LogExplorerPage.tsx';
+import SecurityPage from '../pages/SecurityPage.tsx';
 
 export const router = createBrowserRouter([
   // Public auth pages: no navbar, no footer
@@ -101,6 +102,11 @@ export const router = createBrowserRouter([
           {
             path: '/admin/logs',
             element: <LogExplorerPage />,
+          },
+          {
+            // Grafana SIEM ของ Nawapat ฝังเต็มจอ (โทนมืด)
+            path: '/admin/security',
+            element: <SecurityPage />,
           },
           {
             element: <RootLayout />,

@@ -133,7 +133,7 @@ describe('AdminDashboard (/admin)', () => {
     expect((screen.getByText('Logs') as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByText('Class Scheduler') as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText('Class System')).toBeNull();
-    expect((screen.getByText('Security') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText('Security') as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText('is pending review')).toBeNull();
   });
 
