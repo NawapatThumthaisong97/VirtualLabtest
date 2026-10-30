@@ -1,3 +1,4 @@
+# ตัวอย่าง — cp tailscale/vlab-tags.tsv.example tailscale/vlab-tags.tsv แล้วใส่ IP ของเครื่องใน cluster ตัวเอง
 # เครื่องไหนได้ tag อะไร (script/tailscale-acl.sh plan / apply / check อ่านไฟล์นี้)
 # ผูกด้วย Tailscale IP เพราะไม่ซ้ำและไม่เปลี่ยน (hostname ซ้ำกันได้) ต้องตรงกับ ansible/inventory.yml
 # thinkpad / vlab-web เลิกใช้แล้ว backend รันบน WSL ของเครื่องคนในทีม (ไม่ติด tag = autogroup:member)
