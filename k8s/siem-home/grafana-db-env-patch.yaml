@@ -1,0 +1,32 @@
+# patch ของ cluster บ้าน (master / worker-pete / vlab-web) ทับ k8s/siem/layer5-detection/00-grafana-deployment.yaml
+# ไม่แก้ไฟล์ของ Nawapat: ไฟล์นั้นใส่ host / user / password ของ DB เครื่องเขาเป็นค่าตายตัว
+# ที่นี่ให้อ่านจาก Secret siem-collector-secrets แทน → DB เว็บบน VM (100.102.72.39:5432) ด้วย user grafana_ro (SELECT infrastructure_logs อย่างเดียว)
+#
+# ใช้ (หลัง apply ไฟล์ของ Nawapat ทุกครั้ง เพราะ apply ไฟล์นั้นจะคืนค่าตายตัว):
+#   kubectl apply -f k8s/siem/layer5-detection/00-grafana-deployment.yaml
+#   kubectl -n siem-system patch deployment grafana-siem --patch-file k8s/siem-home/grafana-db-env-patch.yaml
+# Secret ต้องมี key postgres-host / postgres-user / postgres-password (สร้างด้วย kubectl create secret ไม่อยู่ใน git)
+spec:
+  # hostNetwork + ปักไว้ที่ master เครื่องเดียว → RollingUpdate เปิดตัวใหม่ไม่ได้เพราะพอร์ต 3000 ถูกตัวเก่าจอง
+  # และไม่ยอมปิดตัวเก่าก่อน (ค้างทั้งคู่) → Recreate: ปิดตัวเก่าก่อนค่อยเปิด Grafana ดับไม่กี่วินาทีตอนอัปเดต
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    spec:
+      containers:
+        - name: grafana
+          env:
+            # value: null = ลบค่าตายตัวของไฟล์ต้นทาง (strategic merge จับคู่ env ตามชื่อ)
+            - name: SIEM_POSTGRES_HOST
+              value: null
+              valueFrom:
+                secretKeyRef: {name: siem-collector-secrets, key: postgres-host}
+            - name: SIEM_POSTGRES_USER
+              value: null
+              valueFrom:
+                secretKeyRef: {name: siem-collector-secrets, key: postgres-user}
+            - name: SIEM_POSTGRES_PASSWORD
+              value: null
+              valueFrom:
+                secretKeyRef: {name: siem-collector-secrets, key: postgres-password}
