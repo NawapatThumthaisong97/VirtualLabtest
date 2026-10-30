@@ -17,7 +17,7 @@ data:
         type: postgres
         access: proxy
         url: ${SIEM_POSTGRES_HOST:100.86.87.27:5432}
-        user: postgres
+        user: ${SIEM_POSTGRES_USER:postgres}
         database: virtual_lab
         isDefault: true
         editable: true
@@ -121,16 +121,25 @@ spec:
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+      # Pin Grafana strictly to control-plane / master so it inherits tag:vlab-server
+      # and can reach the backend database on port 5432 through Tailscale ACL
       affinity:
         nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
-                    operator: DoesNotExist
+                    operator: Exists
+              - matchExpressions:
                   - key: node-role.kubernetes.io/master
-                    operator: DoesNotExist
+                    operator: Exists
       containers:
         - name: grafana
           image: grafana/grafana:11.2.0
@@ -150,6 +159,12 @@ spec:
               value: "dark"
             - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
               value: "/var/lib/grafana/dashboards/vlab-siem-visual-analytics.json"
+            - name: SIEM_POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: postgres-user
+                  optional: true
             - name: SIEM_POSTGRES_HOST
               valueFrom:
                 secretKeyRef:
