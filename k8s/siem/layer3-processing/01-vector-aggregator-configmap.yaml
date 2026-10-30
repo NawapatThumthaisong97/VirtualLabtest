@@ -212,6 +212,15 @@ data:
             }
           }
 
+      # 2.4 Filter events destined for Central PostgreSQL Control Plane
+      # Preserves routine INFO system logs in VictoriaLogs (hot tier) & S3 (cold tier)
+      # Forwards only security events, Sigma matches, and WARNING/CRITICAL issues to PostgreSQL DB
+      filter_control_plane_events:
+        type: filter
+        inputs:
+          - ecs_normalize_and_enrich
+        condition: '.severity == "WARNING" || .severity == "CRITICAL" || .category != "SYSTEM_LOG" || .event_type == "FALCO_EBPF_ALERT" || .event_type == "SQUID_EGRESS_DROP" || .event_type == "KYVERNO_POLICY_BLOCK" || .event_type == "TAILSCALE_UNAUTHORIZED_ACCESS" || .event_type == "SIGMA_RULE_MATCH"'
+
     # ---------------------
     # 3. SINKS (Deliver Normalized ECS Events to Layer 4 Dual-Tier Storage & Control Plane)
     # ---------------------
@@ -248,7 +257,7 @@ data:
       central_siem_control_plane:
         type: http
         inputs:
-          - ecs_normalize_and_enrich
+          - filter_control_plane_events
         uri: "${SIEM_CENTRAL_TAILSCALE_ENDPOINT:-http://100.86.87.27:8000/api/v1/logs}"
         method: post
         encoding:

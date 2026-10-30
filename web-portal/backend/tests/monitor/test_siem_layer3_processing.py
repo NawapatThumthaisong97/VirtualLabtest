@@ -65,6 +65,13 @@ class TestLayer3VectorAggregatorManifests:
         assert '"ioc_matched"' in vrl_src
         assert '"mitre_technique"' in vrl_src
 
+        # 3. Filter transform filters out routine INFO system logs to protect DB volume
+        filter_cfg = vec_cfg["transforms"]["filter_control_plane_events"]
+        assert filter_cfg["type"] == "filter"
+        assert "ecs_normalize_and_enrich" in filter_cfg["inputs"]
+        assert '.category != "SYSTEM_LOG"' in filter_cfg["condition"]
+        assert "filter_control_plane_events" in vec_cfg["sinks"]["central_siem_control_plane"]["inputs"]
+
     def test_vector_aggregator_deployment_separates_from_master_node(self):
         docs = list(
             yaml.safe_load_all(

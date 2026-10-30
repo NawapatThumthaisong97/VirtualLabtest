@@ -203,6 +203,8 @@ class Settings(BaseSettings):
     HEALTH_CHECK_INTERVAL_SECONDS: int = 300
     # เก็บผลตรวจย้อนหลังกี่วัน (job ลบของเก่าทุกรอบ ตารางไม่บวม)
     HEALTH_CHECK_RETENTION_DAYS: int = 7
+    # เก็บ Log ในตาราง infrastructure_logs ย้อนหลังกี่วัน (job ช่วยเคลียร์ของเก่าทุกรอบ)
+    INFRASTRUCTURE_LOG_RETENTION_DAYS: int = 30
     # ตอบช้ากว่านี้ (ms) = degraded
     HEALTH_CHECK_SLOW_MS: int = 2000
 
