@@ -1,0 +1,5 @@
+---
+# Secret ใน vlab-scan ที่ Job สแกนใช้ push เข้า camp registry :5002
+# ชื่อต้องตรงกับ SCAN_PUSH_SECRET ของ backend, user ต้องอยู่ใน registry_users (group_vars/all.yml)
+scan_push_secret: registry-push
+scan_push_user: scanner

@@ -1,0 +1,21 @@
+---
+# camp registry แบบ 2 container ใช้ storage ร่วมกัน
+#   pull :5001 read-only ไม่มี auth  ← K3s node, ecr-sync
+#   push :5002 htpasswd              ← scan Job บน master (user scanner), Ansible บน rn (user ansible)
+
+# pin เวอร์ชัน ไม่ใช้ registry:2 ลอย ๆ (เปลี่ยนแล้ว container ถูกสร้างใหม่เอง)
+registry_image: "registry:2.8.3"
+
+registry_pull_port: 5001
+registry_push_port: 5002
+
+registry_data_dir: /srv/camp-registry
+registry_config_dir: /etc/camp-registry
+
+# user ที่ push ได้: {ชื่อ: {password: ..., description: ...}} ใส่ใน group_vars/all.yml
+# user ที่ไม่อยู่ในรายการจะถูกลบออกจาก htpasswd
+registry_users: {}
+# bcrypt cost (htpasswd -C)
+registry_bcrypt_cost: 12
+# user ที่ role ใช้ตรวจว่า login ที่ :5002 ได้จริงหลังตั้งค่า
+registry_verify_user: ansible

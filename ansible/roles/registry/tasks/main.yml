@@ -1,9 +1,29 @@
 ---
-# ติดตั้ง private Docker registry (camp-registry, port 5001)  เก็บ image ให้เครื่องอื่นดึงไปใช้
-# เครื่อง registry  ต้องติดตั้ง Docker Engine เองก่อน
-- name: Ensure Docker Engine is installed
+# camp registry 2 container ใช้ storage ร่วมกัน
+#   camp-registry-pull :5001  read-only ไม่มี auth  ← K3s node / ecr-sync pull
+#   camp-registry-push :5002  htpasswd              ← scan Job (user scanner) / Ansible (user ansible)
+# เครื่อง registry ต้องติดตั้ง Docker Engine เองก่อน
+
+- name: Validate registry inputs
+  ansible.builtin.assert:
+    that:
+      - registry_users is mapping
+      - registry_users | length > 0
+      - registry_verify_user in registry_users
+      - (registry_users | dict2items | map(attribute='key') | select('match', '^[a-z0-9_-]+$') | list | length)
+        == (registry_users | length)
+      - (registry_users | dict2items | map(attribute='value.password') | map('length') | min) >= 12
+      - registry_pull_port != registry_push_port
+    fail_msg: >-
+      registry_users ต้องมีอย่างน้อย 1 user (รวม {{ registry_verify_user }}) ชื่อเป็น a-z0-9_- และรหัสยาว ≥ 12 ตัว
+      ใส่ใน group_vars/all.yml
+    quiet: true
+
+- name: Ensure Docker Engine and htpasswd are installed
   ansible.builtin.apt:
-    name: docker.io
+    name:
+      - docker.io
+      - apache2-utils
     state: present
     update_cache: true
     # ถ้าไม่ใส่ cache_valid_time จะบังคับดึง index ใหม่ทุกครั้งที่รัน playbook
@@ -17,22 +37,219 @@
     state: started
     enabled: true
 
-- name: Ensure docker SDK for Ansible
-  ansible.builtin.apt:
-    name: python3-docker
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
+- name: Ensure registry storage directory exists
+  ansible.builtin.file:
+    path: "{{ registry_data_dir }}"
+    state: directory
+    mode: "0755"
 
-- name: Camp private registry (port 5001)
-  community.docker.docker_container:
-    name: camp-registry
-    image: registry:2
-    restart_policy: always
-    published_ports: ["5001:5001"]
-    env:
-      REGISTRY_HTTP_ADDR: "0.0.0.0:5001"
-      REGISTRY_STORAGE_DELETE_ENABLED: "true"
-    volumes:
-      - "/srv/camp-registry:/var/lib/registry"
+- name: Ensure registry config directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ registry_config_dir }}"
+    - "{{ registry_config_dir }}/auth"
 
+- name: Write registry configs
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ registry_config_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - config-pull.yml
+    - config-push.yml
+  register: registry_configs
+
+# ---------- htpasswd ----------
+# bcrypt สุ่ม salt ทุกครั้ง เขียนใหม่ทุกรอบจะ "changed" ตลอด จึงตรวจรหัสก่อน (htpasswd -v) แล้วค่อยเขียนเฉพาะที่ต่าง
+# รหัสส่งทาง stdin (-i) ไม่อยู่ใน argv (ps ของเครื่องมองเห็น argv ได้)
+
+- name: Ensure htpasswd file exists
+  ansible.builtin.file:
+    path: "{{ registry_config_dir }}/auth/htpasswd"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve
+
+- name: Read current htpasswd users
+  ansible.builtin.slurp:
+    src: "{{ registry_config_dir }}/auth/htpasswd"
+  register: registry_htpasswd_raw
+
+- name: Remove users that are no longer configured
+  ansible.builtin.command:
+    argv: [htpasswd, -D, "{{ registry_config_dir }}/auth/htpasswd", "{{ item }}"]
+  loop: >-
+    {{ (registry_htpasswd_raw.content | b64decode).splitlines()
+       | select('match', '^[^:]+:') | map('regex_replace', ':.*$', '') | list
+       | difference(registry_users.keys() | list) }}
+  register: registry_htpasswd_removed
+  changed_when: true
+
+- name: Check stored password of each user
+  ansible.builtin.command:
+    argv: [htpasswd, -v, -i, "{{ registry_config_dir }}/auth/htpasswd", "{{ item.key }}"]
+    stdin: "{{ item.value.password }}"
+    stdin_add_newline: false
+  loop: "{{ registry_users | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: registry_htpasswd_check
+  failed_when: false
+  changed_when: false
+  no_log: true
+
+- name: Set password for new or changed users
+  ansible.builtin.command:
+    argv:
+      - htpasswd
+      - -B
+      - -C
+      - "{{ registry_bcrypt_cost }}"
+      - -i
+      - "{{ registry_config_dir }}/auth/htpasswd"
+      - "{{ item.item.key }}"
+    stdin: "{{ item.item.value.password }}"
+    stdin_add_newline: false
+  loop: "{{ registry_htpasswd_check.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  when: item.rc != 0
+  register: registry_htpasswd_set
+  changed_when: true
+  no_log: true
+
+# htpasswd เขียนไฟล์ใหม่ทับ สิทธิ์อาจกลับเป็นค่าตาม umask
+- name: Lock down htpasswd file
+  ansible.builtin.file:
+    path: "{{ registry_config_dir }}/auth/htpasswd"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Read htpasswd checksum
+  ansible.builtin.stat:
+    path: "{{ registry_config_dir }}/auth/htpasswd"
+  register: registry_htpasswd_stat
+
+# ---------- containers ----------
+
+# container เดิมก่อนแยก pull/push (port 5001 ชนกับตัว pull)
+# docker rm -f ตอบ 0 แม้ไม่มี container จึงต้องดูก่อนว่ามีไหม
+- name: Check for legacy single camp-registry container
+  ansible.builtin.command:
+    argv: [docker, inspect, camp-registry]
+  register: registry_legacy
+  failed_when: false
+  changed_when: false
+
+- name: Remove legacy single camp-registry container
+  ansible.builtin.command:
+    argv: [docker, rm, -f, camp-registry]
+  when: registry_legacy.rc == 0
+  changed_when: true
+
+# hash ของทุกอย่างที่กำหนด container ติดเป็น label ถ้าต่างจากของที่รันอยู่ = สร้างใหม่
+# (docker run ไม่มีวิธี "อัปเดต" container ที่มีอยู่ การดูแค่ว่ามี container ไหมจะพลาดตอน config เปลี่ยน)
+- name: Describe registry containers
+  ansible.builtin.set_fact:
+    registry_containers:
+      - name: camp-registry-pull
+        port: "{{ registry_pull_port }}"
+        config: "{{ registry_configs.results[0].checksum }}"
+        mounts:
+          - "{{ registry_data_dir }}:/var/lib/registry:ro"
+          - "{{ registry_config_dir }}/config-pull.yml:/etc/docker/registry/config.yml:ro"
+        auth: ""
+      - name: camp-registry-push
+        port: "{{ registry_push_port }}"
+        config: "{{ registry_configs.results[1].checksum }}"
+        mounts:
+          - "{{ registry_data_dir }}:/var/lib/registry"
+          - "{{ registry_config_dir }}/config-push.yml:/etc/docker/registry/config.yml:ro"
+          # mount ทั้งโฟลเดอร์ไม่ใช่ไฟล์: htpasswd เขียนไฟล์ใหม่ (inode ใหม่) bind mount ไฟล์เดี่ยวจะยังเห็นของเก่า
+          - "{{ registry_config_dir }}/auth:/auth:ro"
+        auth: "{{ registry_htpasswd_stat.stat.checksum }}"
+
+- name: Inspect running registry containers
+  ansible.builtin.command:
+    argv: [docker, inspect, "{{ item.name }}"]
+  loop: "{{ registry_containers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: registry_inspect
+  failed_when: false
+  changed_when: false
+
+- name: Recreate registry containers whose config changed
+  ansible.builtin.shell:
+    # rm แล้ว run ต่อกันใน task เดียว ถ้า run ล้ม play ล้มทันที ไม่ค้างแบบไม่มี container
+    cmd: >-
+      docker rm -f {{ item.item.name | quote }} >/dev/null 2>&1;
+      docker run -d
+      --name {{ item.item.name | quote }}
+      --restart always
+      --read-only --tmpfs /tmp
+      --cap-drop ALL --security-opt no-new-privileges
+      -p {{ item.item.port }}:5000
+      {% for m in item.item.mounts %}-v {{ m | quote }} {% endfor %}
+      --label vlab.registry.config-hash={{ registry_hash | quote }}
+      {{ registry_image | quote }}
+  vars:
+    registry_hash: "{{ (registry_image ~ item.item.port ~ item.item.config ~ item.item.auth ~ (item.item.mounts | join(','))) | hash('sha256') }}"
+    registry_running_hash: >-
+      {{ '' if item.rc != 0
+         else ((item.stdout | from_json)[0].Config.Labels | default({}, true)).get('vlab.registry.config-hash', '') }}
+    registry_running: "{{ item.rc == 0 and (item.stdout | from_json)[0].State.Running }}"
+  loop: "{{ registry_inspect.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: registry_running_hash != registry_hash or not (registry_running | bool)
+  changed_when: true
+
+# ---------- ตรวจผล ----------
+
+- name: Pull port answers without auth
+  ansible.builtin.uri:
+    url: "http://localhost:{{ registry_pull_port }}/v2/"
+    status_code: 200
+  register: registry_pull_check
+  retries: 10
+  delay: 2
+  until: registry_pull_check.status == 200
+
+- name: Push port rejects anonymous requests
+  ansible.builtin.uri:
+    url: "http://localhost:{{ registry_push_port }}/v2/"
+    status_code: 401
+  register: registry_push_anon
+  retries: 10
+  delay: 2
+  until: registry_push_anon.status == 401
+
+- name: Push port accepts {{ registry_verify_user }}
+  ansible.builtin.uri:
+    url: "http://localhost:{{ registry_push_port }}/v2/"
+    url_username: "{{ registry_verify_user }}"
+    url_password: "{{ registry_users[registry_verify_user].password }}"
+    force_basic_auth: true
+    status_code: 200
+  no_log: true
+
+# เริ่ม upload ที่ตัว pull ต้องไม่สำเร็จ (สำเร็จ = 202 แปลว่า read-only ไม่ทำงาน)
+- name: Pull port refuses uploads
+  ansible.builtin.uri:
+    url: "http://localhost:{{ registry_pull_port }}/v2/vlab/readonly-check/blobs/uploads/"
+    method: POST
+    status_code: [202, 401, 403, 405, 503]
+  register: registry_pull_upload
+  failed_when: registry_pull_upload.status == 202

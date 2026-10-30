@@ -49,6 +49,14 @@ skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 vault_backend_secret_key: <BACKEND_SECRET_KEY>
 vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
 
+# --- camp registry (role registry) 5001 = pull read-only ไม่มี auth / 5002 = push ต้อง login ---
+# รหัสยาว ≥ 12 ตัว ต้องมี user ansible (role ใช้ตรวจ login) user ที่ไม่อยู่ในรายการถูกลบจาก htpasswd
+registry_users:
+  scanner:
+    password: <SCANNER_PASSWORD>   # scan Job บน master push ผลที่ผ่านสแกน
+  ansible:
+    password: <ANSIBLE_PASSWORD>   # role scan-runner-image / build-images.yml
+
 # --- ecr-sync (เครื่อง registry sync camp registry -> ECR ทุก 2 นาที) ---
 # ecr_sync_registry ต้องตรงกับ ECR_REGISTRY_HOST ของ backend
 # key ของ IAM user แยก (เช่น vlab-ecr-sync) สิทธิ์ตาม policy ใน ansible/roles/ecr-sync/files/iam-policy.json

@@ -177,7 +177,16 @@ class Settings(BaseSettings):
     # image ของ runner (docs/SCAN_RUNNER_IMAGE.md) ปกติไม่ต้องตั้ง: ใช้ <DOCKER_REGISTRY_HOST>/vlab/scan-runner:<VERSION>
     # ที่ role Ansible scan-runner-image push ไว้ (tag นั้น immutable) ตั้งเองได้ถ้าอยากอ้างด้วย digest
     SCAN_RUNNER_IMAGE: Optional[str] = None
-    SCAN_RUNNER_VERSION: str = "1.0.0"  # ต้องตรงกับ scan_runner_version ใน ansible/roles/scan-runner-image/defaults
+    SCAN_RUNNER_VERSION: str = "1.1.0"  # ต้องตรงกับ scan_runner_version ใน ansible/roles/scan-runner-image/defaults
+    # camp registry แยก pull (DOCKER_REGISTRY_HOST, ไม่มี auth) กับ push (ต้อง login)
+    # ไม่ตั้ง REGISTRY_PUSH_HOST = host ของ DOCKER_REGISTRY_HOST + REGISTRY_PUSH_PORT
+    REGISTRY_PUSH_HOST: Optional[str] = None
+    REGISTRY_PUSH_PORT: int = 5002
+    # Secret (kubernetes.io/basic-auth) ใน SCAN_NAMESPACE ที่ Ansible role k3s-server สร้าง backend ไม่ต้องรู้รหัส
+    SCAN_PUSH_SECRET: str = "registry-push"
+    # Pod สแกนต้องรันบน master: ACL ของ Tailscale ให้แค่ master push เข้า registry ได้
+    # (traffic ของ Pod ออกไปด้วย IP ของ node) ว่าง {} = ไม่บังคับ
+    SCAN_NODE_SELECTOR: dict[str, str] = {"node-role.kubernetes.io/control-plane": "true"}
     # อายุ presigned GET ที่ Pod ใช้โหลด tar (ต้อง > เวลารอ schedule + เวลาโหลด)
     SCAN_DOWNLOAD_URL_TTL_SECONDS: int = 3600
     # ช่องโหว่ระดับนี้ขึ้นไปที่มีเวอร์ชันแก้แล้ว = FAIL (CRITICAL / HIGH / MEDIUM / LOW)
@@ -274,6 +283,16 @@ class Settings(BaseSettings):
             return self.SCAN_RUNNER_IMAGE
         if self.DOCKER_REGISTRY_HOST:
             return f"{self.DOCKER_REGISTRY_HOST}/vlab/scan-runner:{self.SCAN_RUNNER_VERSION}"
+        return None
+
+    @property
+    def registry_push_host(self) -> Optional[str]:
+        """host:port ที่ Pod สแกน push ผลที่ผ่าน (None = ยังไม่มี registry)"""
+        if self.REGISTRY_PUSH_HOST:
+            return self.REGISTRY_PUSH_HOST
+        if self.DOCKER_REGISTRY_HOST:
+            host = self.DOCKER_REGISTRY_HOST.rsplit(":", 1)[0]
+            return f"{host}:{self.REGISTRY_PUSH_PORT}"
         return None
 
     @property

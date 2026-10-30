@@ -20,6 +20,11 @@ ETAG = "0123456789abcdef0123456789abcdef"
 def scan_settings(monkeypatch):
     monkeypatch.setattr(settings, "SCAN_RUNNER_IMAGE", RUNNER)
     monkeypatch.setattr(settings, "DOCKER_REGISTRY_HOST", "100.64.0.3:5001")
+    # .env ของเครื่องที่รัน test อาจตั้งค่าพวกนี้ไว้ ให้ทุก test เริ่มจากค่าเริ่มต้น
+    monkeypatch.setattr(settings, "REGISTRY_PUSH_HOST", None)
+    monkeypatch.setattr(settings, "REGISTRY_PUSH_PORT", 5002)
+    monkeypatch.setattr(settings, "SCAN_PUSH_SECRET", "registry-push")
+    monkeypatch.setattr(settings, "SCAN_NODE_SELECTOR", {"node-role.kubernetes.io/control-plane": "true"})
     monkeypatch.setattr(settings, "SCAN_MAX_CONCURRENT", 2)
     monkeypatch.setattr(settings, "SCAN_MAX_ATTEMPTS", 2)
 
@@ -95,14 +100,41 @@ def test_job_manifest_is_hardened_and_scopes_secret_to_fetch(make_image):
         assert ctx["capabilities"] == {"drop": ["ALL"]}
         assert container["image"] == RUNNER
         mounts = {m["mountPath"] for m in container["volumeMounts"]}
-        # URL ที่เซ็นแล้วเห็นได้เฉพาะ fetch
+        # URL ที่เซ็นแล้วเห็นได้เฉพาะ fetch, credential ของ registry เห็นได้เฉพาะ publish
         assert ("/secrets/fetch" in mounts) == (container["name"] == "fetch")
+        assert ("/secrets/push" in mounts) == (container["name"] == "publish")
 
     envs = {c["name"]: {e["name"]: e["value"] for e in c["env"]} for c in pod["initContainers"] + pod["containers"]}
     assert envs["fetch"]["EXPECTED_SIZE"] == "123"
     assert envs["validate"]["DECLARED_PORTS"] == "8080"
     assert envs["publish"]["REPOSITORY"] == image.repository
+    # push ผ่าน push port ไม่ใช่ pull port ที่เป็น read-only
+    assert envs["publish"]["REGISTRY"] == "100.64.0.3:5002"
     assert "REGISTRY" not in envs["scan"]
+    # รหัสไม่อยู่ใน env ของ container ไหนเลย
+    assert not any("PASSWORD" in name for env in envs.values() for name in env)
+
+    push = next(v for v in pod["volumes"] if v["name"] == "push-credentials")
+    assert push["secret"]["secretName"] == "registry-push"
+    assert push["secret"]["defaultMode"] == 0o400
+    assert pod["nodeSelector"] == {"node-role.kubernetes.io/control-plane": "true"}
+
+
+def test_node_selector_can_be_disabled(make_image, monkeypatch):
+    monkeypatch.setattr(settings, "SCAN_NODE_SELECTOR", {})
+    image = make_image(id=uuid.uuid4(), archive_etag=ETAG, archive_size_bytes=123)
+    assert "nodeSelector" not in build_scan_job(image, "scan-x")["spec"]["template"]["spec"]
+
+
+def test_registry_push_host_defaults_from_pull_host(monkeypatch):
+    assert settings.registry_push_host == "100.64.0.3:5002"
+    monkeypatch.setattr(settings, "REGISTRY_PUSH_PORT", 6000)
+    assert settings.registry_push_host == "100.64.0.3:6000"
+    monkeypatch.setattr(settings, "REGISTRY_PUSH_HOST", "registry.lab:5002")
+    assert settings.registry_push_host == "registry.lab:5002"
+    monkeypatch.setattr(settings, "REGISTRY_PUSH_HOST", None)
+    monkeypatch.setattr(settings, "DOCKER_REGISTRY_HOST", None)
+    assert settings.registry_push_host is None
 
 
 def test_respects_max_concurrent(db, k8s, fake_r2, queued):
@@ -125,7 +157,7 @@ def test_retry_deletes_previous_job_and_uses_next_attempt_name(db, k8s, fake_r2,
 
 def test_runner_image_defaults_from_registry_host(monkeypatch):
     monkeypatch.setattr(settings, "SCAN_RUNNER_IMAGE", None)
-    assert settings.scan_runner_image == "100.64.0.3:5001/vlab/scan-runner:1.0.0"
+    assert settings.scan_runner_image == "100.64.0.3:5001/vlab/scan-runner:1.1.0"
     monkeypatch.setattr(settings, "SCAN_RUNNER_IMAGE", RUNNER)
     assert settings.scan_runner_image == RUNNER
 
