@@ -16,13 +16,13 @@ data:
         uid: siem-postgres-ds
         type: postgres
         access: proxy
-        url: ${POSTGRES_HOST}
-        user: ${POSTGRES_USER}
+        url: ${POSTGRES_HOST:-100.86.87.27:5432}
+        user: ${POSTGRES_USER:-postgres}
         database: virtual_lab
         isDefault: true
         editable: true
         secureJsonData:
-          password: "${POSTGRES_PASSWORD}"
+          password: "${POSTGRES_PASSWORD:-postgres}"
         jsonData:
           sslmode: "disable"
           postgresVersion: 1500
@@ -127,7 +127,10 @@ spec:
         - key: "node-role.kubernetes.io/control-plane"
           operator: "Exists"
           effect: "NoSchedule"
-      # Pin Grafana strictly to control-plane so it inherits tag:vlab-server
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+      # Pin Grafana to control-plane / master so it inherits tag:vlab-server
       # and can reach the backend database on port 5432 through Tailscale ACL
       affinity:
         nodeAffinity:
@@ -135,6 +138,9 @@ spec:
             nodeSelectorTerms:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
+                    operator: Exists
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/master
                     operator: Exists
       containers:
         - name: grafana
@@ -144,7 +150,11 @@ spec:
             - name: GF_SECURITY_ADMIN_USER
               value: "admin"
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: "vlab-siem-admin"
+              valueFrom:
+                secretKeyRef:
+                  name: siem-collector-secrets
+                  key: grafana-admin-password
+                  optional: true
             - name: GF_SECURITY_ALLOW_EMBEDDING
               value: "true"
             - name: GF_AUTH_ANONYMOUS_ENABLED
@@ -162,16 +172,19 @@ spec:
                 secretKeyRef:
                   name: siem-collector-secrets
                   key: postgres-host
+                  optional: true
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: siem-collector-secrets
                   key: postgres-user
+                  optional: true
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: siem-collector-secrets
                   key: postgres-password
+                  optional: true
           ports:
             - name: http-grafana
               containerPort: 3000

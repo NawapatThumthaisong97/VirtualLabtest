@@ -109,11 +109,26 @@ def apply_k8s_manifests(v1: client.CoreV1Api, apps_v1: client.AppsV1Api, rbac_v1
                 print(f"  ! Warning applying {kind}/{name}: {exc}")
 
     # Create/Update siem-collector-secrets
+    collector_admin_jwt = jwt.encode(
+        {
+            "sub": "00000000-0000-0000-0000-000000000001",
+            "email": "admin@dome.tu.ac.th",
+            "name": "SIEM Collector Service",
+            "role": "admin",
+            "exp": int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
+        },
+        SECRET_KEY,
+        algorithm="HS256",
+    )
     secret_body = client.V1Secret(
         metadata=client.V1ObjectMeta(name="siem-collector-secrets", namespace="siem-system"),
         data={
             "central-tailscale-endpoint": base64.b64encode(CENTRAL_ENDPOINT.encode()).decode(),
-            "collector-token": base64.b64encode(SECRET_KEY.encode()).decode(),
+            "collector-token": base64.b64encode(collector_admin_jwt.encode()).decode(),
+            "postgres-host": base64.b64encode(b"100.86.87.27:5432").decode(),
+            "postgres-user": base64.b64encode(b"postgres").decode(),
+            "postgres-password": base64.b64encode(b"postgres").decode(),
+            "grafana-admin-password": base64.b64encode(b"vlab-siem-admin").decode(),
         },
     )
     try:
