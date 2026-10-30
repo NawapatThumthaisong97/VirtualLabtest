@@ -98,7 +98,13 @@ curl http://<registry-ip>:5001/v2/_catalog          # ต้องเห็น s
 ```bash
 # บนเครื่อง master (หรือเครื่องที่มี kubeconfig):
 kubectl apply -f k8s/siem/layer1-collector/00-namespace-rbac.yaml
-# สร้าง token ลับสำหรับให้ตัวส่ง log (Vector Agent) ส่งเข้า NATS Buffer
+# สร้าง token ลับสำหรับ Vector Agent และคอนฟิกฐานข้อมูลสำหรับ Grafana (SIEM Secrets)
+kubectl create secret generic siem-collector-secrets -n siem-system \
+  --from-literal=collector-token="vlab-tailscale-collector-secret" \
+  --from-literal=postgres-user="grafana_ro" \
+  --from-literal=postgres-host="<WEBSERVICE_TAILSCALE_IP>:5432" \
+  --from-literal=postgres-password="<POSTGRES_PASSWORD>" \
+  --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic siem-collector-token -n siem-system --from-literal=token="vlab-tailscale-collector-secret" --dry-run=client -o yaml | kubectl apply -f -
 
 # Deploy Layer 2 (NATS Buffer) -> Layer 4 (VictoriaLogs) -> Layer 3 (Vector Aggregator) -> Layer 1 & 5

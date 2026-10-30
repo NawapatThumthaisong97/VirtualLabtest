@@ -85,8 +85,20 @@ spec:
               readOnly: true
             - name: vector-data
               mountPath: /var/lib/vector
+            - name: etc-machine-id
+              mountPath: /etc/machine-id
+              readOnly: true
             - name: var-log-journal
               mountPath: /var/log/journal
+              readOnly: true
+            - name: var-log-syslog
+              mountPath: /var/log/syslog
+              readOnly: true
+            - name: var-log-auth
+              mountPath: /var/log/auth.log
+              readOnly: true
+            - name: var-log-kern
+              mountPath: /var/log/kern.log
               readOnly: true
             - name: var-log-squid
               mountPath: /var/log/squid
@@ -108,10 +120,26 @@ spec:
           hostPath:
             path: /var/lib/vector-agent
             type: DirectoryOrCreate
+        - name: etc-machine-id
+          hostPath:
+            path: /etc/machine-id
+            type: FileOrCreate
         - name: var-log-journal
           hostPath:
             path: /var/log/journal
             type: DirectoryOrCreate
+        - name: var-log-syslog
+          hostPath:
+            path: /var/log/syslog
+            type: FileOrCreate
+        - name: var-log-auth
+          hostPath:
+            path: /var/log/auth.log
+            type: FileOrCreate
+        - name: var-log-kern
+          hostPath:
+            path: /var/log/kern.log
+            type: FileOrCreate
         - name: var-log-squid
           hostPath:
             path: /var/log/squid
