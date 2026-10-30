@@ -1,3 +1,5 @@
+// ตัวอย่าง — cp tailscale/vlab-acl.hujson.example tailscale/vlab-acl.hujson แล้วแก้ให้ตรงกับ cluster ตัวเอง
+// ไฟล์จริงไม่อยู่ใน git: policy มีผลทั้ง tailnet และแต่ละคนใช้ cluster / tailnet ของตัวเอง (ตัวอย่างนี้คือ cluster mn / wn1 / rn)
 // Tailscale policy สำหรับ cluster ห้องแลป
 //
 // apply ด้วย script/tailscale-acl.sh (plan → apply → check) ไม่ต้องกดใน admin console

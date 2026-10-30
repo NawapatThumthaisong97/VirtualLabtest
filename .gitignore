@@ -319,3 +319,6 @@ web-portal/backend/script/check_repo.py
 
 # backup ของ Tailscale policy (script/tailscale-acl.sh) อาจมีข้อมูลของ tailnet
 tailscale/backup/
+# policy / tag ของ tailnet แต่ละคน (ตัวอย่างอยู่ที่ *.example) — policy มีผลทั้ง tailnet ห้ามใช้ของคนอื่นทับ
+tailscale/vlab-acl.hujson
+tailscale/vlab-tags.tsv

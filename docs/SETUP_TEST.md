@@ -44,6 +44,7 @@ curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up                # login เข้า tailnet เดียวกัน แล้วจด IP: tailscale ip -4
 ```
 - webservice ใส่ `--advertise-tags=tag:vlab-server` (ไม่งั้นต่อ SkyPilot ที่ master ไม่ได้)
+- ครั้งแรก: `cp tailscale/vlab-acl.hujson.example tailscale/vlab-acl.hujson` และ `cp tailscale/vlab-tags.tsv.example tailscale/vlab-tags.tsv` แล้วแก้ให้ตรงกับ cluster ตัวเอง (ไม่อยู่ใน git — แต่ละคนใช้ tailnet ของตัวเอง)
 - เครื่องใหม่ต้องเพิ่มใน `tailscale/vlab-tags.tsv` แล้วรัน `script/tailscale-acl.sh apply`
 - จากเครื่องสั่งงาน: `ssh-copy-id <user>@<tailscale-ip>` ทุกเครื่อง
 

@@ -15,7 +15,9 @@
 #   ./script/tailscale-acl.sh check [node ...]      # ทดสอบจาก server / worker ทุกเครื่องใน vlab-tags.tsv (ไม่ใช้ token)
 #                                                   # ใส่ชื่อ node เพื่อทดสอบเฉพาะเครื่องนั้น
 #
-# ไฟล์: tailscale/vlab-acl.hujson (policy), tailscale/vlab-tags.tsv (IP → tag), tailscale/backup/ (gitignore)
+# ไฟล์ (gitignore ทั้งหมด — แต่ละ cluster / tailnet มีของตัวเอง):
+#   tailscale/vlab-acl.hujson (policy), tailscale/vlab-tags.tsv (IP → tag), tailscale/backup/
+#   ครั้งแรก: cp tailscale/vlab-acl.hujson.example tailscale/vlab-acl.hujson (และ vlab-tags.tsv) แล้วแก้ IP / tag ของ cluster ตัวเอง
 
 set -euo pipefail
 trap 'printf "\033[?25h"' EXIT
@@ -29,6 +31,14 @@ KUBECONFIG_FILE="${VLAB_KUBECONFIG:-$ROOT/web-portal/backend/kubeconfig.yaml}"
 API="https://api.tailscale.com/api/v2"
 
 die() { echo "!! $*" >&2; exit 1; }
+
+# policy มีผลทั้ง tailnet ห้ามใช้ไฟล์ตัวอย่างของ cluster อื่นไปเขียนทับ tailnet ของเรา → ต้องมีไฟล์ของตัวเองก่อน
+need_local_files() {
+  local f
+  for f in "$POLICY" "$TAGS"; do
+    [ -f "$f" ] || die "ไม่มี ${f#$ROOT/} — cp ${f#$ROOT/}.example ${f#$ROOT/} แล้วแก้ให้ตรงกับ cluster / tailnet ของตัวเอง"
+  done
+}
 
 banner() {
   local title="Virtual Lab : Tailscale ACL configuration" width
@@ -241,6 +251,7 @@ check() {
 }
 
 cmd="${1:-}"; shift || true
+case "$cmd" in plan|apply|check) need_local_files ;; esac
 case "$cmd" in plan|apply|rollback|check) banner "$cmd" ;; esac
 case "$cmd" in
   plan)
