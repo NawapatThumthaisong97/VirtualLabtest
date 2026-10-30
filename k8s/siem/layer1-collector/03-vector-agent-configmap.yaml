@@ -91,14 +91,13 @@ data:
           provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
           nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
           msg = to_string(.message) ?? "System log entry"
+          cat = "INFRASTRUCTURE"
+          ev = "SYSTEM_LOG"
+          sev = "INFO"
           if contains(downcase(msg), "oom-killer") || contains(downcase(msg), "killed process") {
             cat = "CONTAINER"
             ev = "OOM_KILLED"
             sev = "CRITICAL"
-          } else {
-            cat = "INFRASTRUCTURE"
-            ev = "SYSTEM_LOG"
-            sev = "INFO"
           }
           . = {
             "severity": sev,
@@ -130,15 +129,14 @@ data:
           nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
           file_path = to_string(.file) ?? ""
           msg = to_string(.message) ?? "Boundary violation detected"
+          ev = "TAILSCALE_CROSS_CLUSTER_ATTEMPT"
+          sev = "WARNING"
           if contains(file_path, "squid") {
             ev = "SQUID_EGRESS_DROP"
             sev = "WARNING"
           } else if contains(file_path, "kyverno") {
             ev = "OPA_KYVERNO_BLOCK"
             sev = "CRITICAL"
-          } else {
-            ev = "TAILSCALE_CROSS_CLUSTER_ATTEMPT"
-            sev = "WARNING"
           }
           . = {
             "severity": sev,
@@ -161,11 +159,12 @@ data:
         type: remap
         inputs:
           - falco_ebpf_http
+          - falco_ebpf_file
         source: |
           if is_string(.message) {
             parsed, err = parse_json(to_string!(.message))
             if err == null && is_object(parsed) {
-              . = merge(., parsed)
+              . = merge!(., parsed)
             }
           }
           node_name = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown-node"
@@ -173,26 +172,23 @@ data:
           provider = get_env_var("VLAB_PROVIDER") ?? "local_k3s"
           nat_subnet = get_env_var("VLAB_NAT_SUBNET") ?? "192.168.1.0/24"
           prio = upcase(to_string(.priority) ?? "WARNING")
+          sev = "WARNING"
+          fast = false
           if prio == "EMERGENCY" || prio == "ALERT" || prio == "CRITICAL" {
             sev = "CRITICAL"
             fast = true
           } else if prio == "ERROR" {
             sev = "ERROR"
-            fast = false
-          } else {
-            sev = "WARNING"
-            fast = false
           }
           rule_raw = to_string(.rule) ?? "Falco Kernel Rule"
           rule_name = downcase(rule_raw)
+          ev = "FALCO_EBPF_ALERT"
           if contains(rule_name, "shell") {
             ev = "FALCO_CONTAINER_SHELL_SPAWN"
           } else if contains(rule_name, "sensitive") || contains(rule_name, "file") {
             ev = "FALCO_SENSITIVE_FILE_READ"
           } else if contains(rule_name, "escape") || contains(rule_name, "syscall") {
             ev = "FALCO_CONTAINER_ESCAPE_ATTEMPT"
-          } else {
-            ev = "FALCO_EBPF_ALERT"
           }
           msg = to_string(.output) ?? to_string(.message) ?? "Falco eBPF kernel security alert"
           . = {
