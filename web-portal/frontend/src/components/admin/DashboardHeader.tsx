@@ -12,6 +12,8 @@ export interface HeaderFeature {
   note?: string;
   /** แท็บของหน้าที่เปิดอยู่ — ขีดเส้นใต้ กดไม่ได้ */
   active?: boolean;
+  /** เปิด modal ฯลฯ ในหน้าเดียวกัน (แทน target / to) */
+  onClick?: () => void;
 }
 
 const defaultFeatures: HeaderFeature[] = [
@@ -54,7 +56,8 @@ export default function DashboardHeader({
 }) {
   const navigate = useNavigate();
   const go = (f: HeaderFeature) => {
-    if (f.to) navigate(f.to);
+    if (f.onClick) f.onClick();
+    else if (f.to) navigate(f.to);
     else if (f.target) document.getElementById(f.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -75,7 +78,7 @@ export default function DashboardHeader({
         <nav style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
           {features.map((f) => {
             const active = Boolean(f.active);
-            const enabled = !active && Boolean(f.target || f.to);
+            const enabled = !active && Boolean(f.target || f.to || f.onClick);
             return (
               <button
                 key={f.label}

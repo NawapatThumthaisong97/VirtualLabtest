@@ -2,7 +2,7 @@ import mimetypes
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status as http_status
-from fastapi.responses import FileResponse
+from app.adapters.storage import content_disposition, get_storage
 from app.middlewares.request_validation import require_non_empty_body
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.repositories.lab_repository import LabRepository
 from app.schemas.lab_schema import (
     LabCreateRequest,
     LabDetailResponse,
+    LabDocUrlResponse,
     LabResponse,
     LabUpdateRequest,
 )
@@ -63,14 +64,44 @@ def get_lab_doc(
     current_user: User = Depends(get_current_user),
     controller: LabController = Depends(get_controller)
 ):
-    """ส่งไฟล์เอกสารแลปออกไปตรง ๆ (ต้อง login)"""
-    path = controller.get_lab_doc_path(lab_id, current_user)
-    media_type, _ = mimetypes.guess_type(path.name)
-    return FileResponse(
-        path,
-        media_type=media_type or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{path.name}"'},
-    )
+    """เปิดเอกสารแลป (ต้องเห็น lab นี้ได้) — disk: ส่งไฟล์ตรง / S3: 307 ไป presigned URL อายุสั้น"""
+    key = controller.get_lab_doc_key(lab_id, current_user)
+    return get_storage().response(key, **_doc_headers(key))
+
+
+@router.get("/{lab_id}/doc-url", response_model=ApiResponse[LabDocUrlResponse])
+def get_lab_doc_url(
+    lab_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller),
+):
+    """URL สำหรับ fetch เอกสารจากหน้าเว็บ (react-pdf) — S3: presigned URL, disk: null (ใช้ /doc เดิม)
+
+    fetch ข้าม origin ตาม redirect ของ /doc ไม่ได้ (Origin กลายเป็น null) จึงแยกเป็น endpoint คืน URL
+    """
+    key = controller.get_lab_doc_key(lab_id, current_user)
+    url = get_storage().presigned_url(key, **_doc_headers(key))
+    return {"success": True, "message": "Lab document URL", "data": {"url": url}}
+
+
+@router.delete("/{lab_id}/doc", response_model=ApiResponse[LabResponse])
+def delete_lab_doc(
+    lab_id: UUID,
+    current_user: User = Depends(get_current_user),
+    controller: LabController = Depends(get_controller),
+):
+    """ถอดเอกสารออกจาก lab (ผู้สอนวิชานั้น / admin) — ลบไฟล์ด้วยถ้าไม่มี lab อื่นใช้"""
+    return {
+        "success": True,
+        "message": "Lab document removed",
+        "data": controller.delete_lab_doc(lab_id, current_user),
+    }
+
+
+def _doc_headers(key: str) -> dict:
+    filename = key.rsplit("/", 1)[-1]
+    media_type, _ = mimetypes.guess_type(filename)
+    return {"media_type": media_type or "application/octet-stream", "disposition": content_disposition(filename)}
 
 
 @router.post(

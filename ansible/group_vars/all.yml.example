@@ -49,6 +49,14 @@ skypilot_aws_secret_access_key: <SKYPILOT_IAM_SECRET_ACCESS_KEY>
 vault_backend_secret_key: <BACKEND_SECRET_KEY>
 vault_admin_session_secret_key: <ADMIN_SESSION_SECRET_KEY>
 
+# --- camp registry (role registry) 5001 = pull read-only ไม่มี auth / 5002 = push ต้อง login ---
+# รหัสยาว ≥ 12 ตัว ต้องมี user ansible (role ใช้ตรวจ login) user ที่ไม่อยู่ในรายการถูกลบจาก htpasswd
+registry_users:
+  scanner:
+    password: <SCANNER_PASSWORD>   # scan Job บน master push ผลที่ผ่านสแกน
+  ansible:
+    password: <ANSIBLE_PASSWORD>   # role scan-runner-image / build-images.yml
+
 # --- ecr-sync (เครื่อง registry sync camp registry -> ECR ทุก 2 นาที) ---
 # ecr_sync_registry ต้องตรงกับ ECR_REGISTRY_HOST ของ backend
 # key ของ IAM user แยก (เช่น vlab-ecr-sync) สิทธิ์ตาม policy ใน ansible/roles/ecr-sync/files/iam-policy.json
@@ -68,6 +76,11 @@ mail_allowed_recipients: ""
 # --- สแกน lab image ก่อนเข้า registry (Trivy Job บน K3s) — เปิดหลังรัน --tags scan ครั้งแรก
 # ansible-playbook -i <inventory> site.yml --tags scan,web-service  (namespace vlab-scan + scanner image + .env)
 webservice_scan_enabled: false
+
+# --- ไฟล์ของเว็บบน S3 (terraform/storage → output bucket_name) — ไม่ตั้ง = เก็บบน disk ของ VM
+# ย้ายไฟล์เดิม: docker compose exec backend python script/migrate_storage_to_s3.py --check-db
+webservice_storage_backend: local
+webservice_storage_s3_bucket: ""
 
 # --- R2 (lab image .tar) — ไม่ตั้ง = อัป image ไม่ได้ ส่วนอื่นของเว็บใช้ได้ปกติ
 # bucket ต้องตั้ง CORS ให้ origin ของเว็บ PUT ได้ (AllowedMethods PUT, AllowedHeaders *)

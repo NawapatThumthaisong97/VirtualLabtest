@@ -44,7 +44,7 @@ spec:
   podSelector: {}
   policyTypes: [Ingress]
 ---
-# ขาออก: DNS, camp registry (:5001 เท่านั้น) และอินเทอร์เน็ตสาธารณะ (R2, Trivy DB)
+# ขาออก: DNS, camp registry (:5001 pull, :5002 push ต้อง login) และอินเทอร์เน็ตสาธารณะ (R2, Trivy DB)
 # ห้ามเข้าเครือข่ายภายในทุกช่วง จึงแตะ kube API, node อื่น, tailnet และ backend ไม่ได้
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -70,6 +70,7 @@ spec:
             cidr: REGISTRY_IP/32
       ports:
         - {protocol: TCP, port: 5001}
+        - {protocol: TCP, port: 5002}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

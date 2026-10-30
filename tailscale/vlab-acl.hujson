@@ -1,18 +1,25 @@
-// Tailscale policy สำหรับ cluster ห้องแลป (Exp4: กันเครื่องอื่นเปิด lab ของเรา)
+// Tailscale policy สำหรับ cluster ห้องแลป
 //
-// apply ด้วย script/tailscale-acl.sh (plan → apply) ไม่ต้องกดใน admin console
+// apply ด้วย script/tailscale-acl.sh (plan → apply → check) ไม่ต้องกดใน admin console
 // script backup ของเดิม validate + รัน tests และแสดง diff ก่อนเขียนจริงทุกครั้ง
-// !! policy มีผลทั้ง tailnet (รวมเครื่องของ Film / AWS router / Windows) ไฟล์นี้คือ policy ทั้งก้อน
+// !! policy มีผลทั้ง tailnet (รวมเครื่องของคนในทีม / AWS router / Windows) ไฟล์นี้คือ policy ทั้งก้อน
 //    ถ้าจะเพิ่มกฎอื่นของ tailnet ให้เพิ่มที่ไฟล์นี้ ไม่งั้นรอบหน้าที่ apply จะถูกทับ
 //
-// tag ของแต่ละเครื่องอยู่ใน tailscale/vlab-tags.tsv (script ติดให้)
-//   tag:vlab-server   = master (100.125.244.48), thinkpad (100.93.121.17, backend + SkyPilot)
-//   tag:vlab-worker   = เครื่องในห้องแลป: worker-pete (100.83.96.97), workerfilm (100.97.13.122)
-//   tag:vlab-registry = register (100.127.74.48)
+// tag ของแต่ละเครื่องอยู่ใน tailscale/vlab-tags.tsv (script ติดให้) ต้องตรงกับ ansible/inventory.yml
+//   tag:vlab-server   = mn  (100.99.154.106)  K3s server
+//   tag:vlab-worker   = wn1 (100.68.15.113)   K3s agent
+//   tag:vlab-registry = rn  (100.119.124.73)  camp registry 5001 pull (read-only) / 5002 push (ต้อง login)
+// backend รันบน WSL ของเครื่องคนในทีม (ไม่ติด tag) ใช้สิทธิ์ของ autogroup:member
 // เครื่องที่ติด tag จะไม่ใช่ของ user อีกต่อไป → ได้สิทธิ์เฉพาะที่เขียนไว้ข้างล่าง
 //
-// สิ่งที่ Tailscale ACL กันไม่ได้: traffic ระหว่าง pod (10.42.x.x) ข้ามเครื่อง เพราะห่ออยู่ใน VXLAN
-// 8472/udp ซึ่งต้องเปิด ส่วนนั้นกันด้วย NetworkPolicy (k8s/lab-isolation-networkpolicy.yaml)
+// registry แยก pull / push:
+//   worker pull ได้อย่างเดียว (5001) / master push ได้ (5002 ต้องมีรหัส) Job สแกนจึงต้องรันบน master
+//   เพราะ traffic ของ Pod ออกไปด้วย IP ของ node
+//
+// สิ่งที่ Tailscale ACL กันไม่ได้:
+// - traffic ระหว่าง pod (10.42.x.x) ข้ามเครื่อง เพราะห่ออยู่ใน VXLAN 8472/udp ซึ่งต้องเปิด
+//   ส่วนนั้นกันด้วย NetworkPolicy (k8s/lab-isolation-networkpolicy.yaml, k8s/scan-namespace.yaml)
+// - เครื่องใน LAN เดียวกับ rn ที่ต่อ IP ของ LAN ตรง ๆ (ไม่ผ่าน Tailscale) 5002 ยังต้องมีรหัส
 {
 	"tagOwners": {
 		"tag:vlab-server":   ["autogroup:admin"],
@@ -21,17 +28,19 @@
 	},
 
 	"acls": [
-		// เครื่องของคนในทีม (ไม่ได้ติด tag) ใช้งานได้เหมือนเดิมทุกอย่าง
+		// เครื่องของคนในทีม (ไม่ได้ติด tag) ใช้งานได้เหมือนเดิมทุกอย่าง รวม Ansible ssh และ backend บน WSL → K3s API
 		// (policy ค่าเริ่มต้นคือ src "*" ซึ่งรวมเครื่องที่ติด tag ด้วย = worker คุยกันได้หมด ตัวนี้แทนที่)
+		// เข้า registry :5002 ได้แต่ต้องมีรหัส (ตัด member ออกจาก 5002 ต้องเขียน dst ใหม่ทั้งหมด เพราะ ACL ไม่มี deny)
 		{"action": "accept", "src": ["autogroup:member"], "dst": ["*:*"]},
 
-		// 1. server เข้าได้ทุกเครื่องทุกพอร์ต: master เรียก kubelet (10250), metrics, ssh / Ansible
-		//    thinkpad ต้องถึง AWS subnet ผ่าน router (SkyPilot ssh ไป EC2) จึงให้ "*" ไม่ใช่แค่ worker
+		// 1. server เข้าได้ทุกเครื่องทุกพอร์ต: master เรียก kubelet (10250), metrics, ssh
+		//    และ Job สแกนบน master push เข้า registry :5002
 		{"action": "accept", "src": ["tag:vlab-server"], "dst": ["*:*"]},
 
-		// 2. worker → server: K3s API / supervisor (6443) และหน้าเว็บ + backend ที่นักศึกษาใช้
+		// 2. worker → server: K3s API / supervisor (6443) อย่างเดียว
+		//    (backend ไม่ได้อยู่บน server แล้ว ไม่เปิด 8000 / หน้าเว็บ)
 		{"action": "accept", "src": ["tag:vlab-worker"], "proto": "tcp",
-		 "dst": ["tag:vlab-server:6443,8000,5173,80,443"]},
+		 "dst": ["tag:vlab-server:6443"]},
 
 		// 3. flannel VXLAN ระหว่างทุก node ใน cluster (pod ↔ pod ข้ามเครื่อง)
 		//    ต้องรวม server ด้วย เพราะ coredns / traefik / metrics-server รันบน master
@@ -39,10 +48,12 @@
 		{"action": "accept", "src": ["tag:vlab-worker"], "proto": "udp",
 		 "dst": ["tag:vlab-worker:8472", "tag:vlab-server:8472"]},
 
-		// 4. worker pull image จาก registry (ไม่มีข้อนี้ pod ขึ้น ErrImagePull)
+		// 4. worker pull image จาก registry เท่านั้น (ไม่มีข้อนี้ pod ขึ้น ErrImagePull)
+		//    ไม่เปิด 5002: worker push ไม่ได้แม้จะรู้รหัส
 		{"action": "accept", "src": ["tag:vlab-worker"], "proto": "tcp",
 		 "dst": ["tag:vlab-registry:5001"]},
 
+		// registry ไม่ต้องเริ่มคุยกับเครื่องไหนใน tailnet (ecr-sync ออกอินเทอร์เน็ตตรง) จึงไม่มีกฎ src เป็น registry
 		// พอร์ต lab (8080 / 5173 / 8443 / NodePort ฯลฯ) ระหว่าง worker ไม่มีข้อไหนเปิด = ปิด
 	],
 
@@ -62,11 +73,13 @@
 		{
 			"src": "tag:vlab-worker",
 			"proto": "tcp",
-			"accept": ["tag:vlab-server:6443", "tag:vlab-server:8000", "tag:vlab-registry:5001"],
-			// เปิด IDE / ssh / kubelet ของเครื่องข้าง ๆ ไม่ได้ และเข้าพอร์ตอื่นของ server ไม่ได้
-			"deny": ["tag:vlab-worker:8080", "tag:vlab-worker:8443", "tag:vlab-worker:22",
-			         "tag:vlab-worker:10250", "tag:vlab-worker:30080", "tag:vlab-server:22",
-			         "tag:vlab-server:8080", "tag:vlab-registry:22"],
+			"accept": ["tag:vlab-server:6443", "tag:vlab-registry:5001"],
+			// push เข้า registry ไม่ได้, เปิด IDE / ssh / kubelet ของเครื่องข้าง ๆ ไม่ได้, พอร์ตอื่นของ server ไม่ได้
+			"deny": ["tag:vlab-registry:5002", "tag:vlab-registry:22",
+			         "tag:vlab-worker:8080", "tag:vlab-worker:8443", "tag:vlab-worker:22",
+			         "tag:vlab-worker:10250", "tag:vlab-worker:30080",
+			         "tag:vlab-server:22", "tag:vlab-server:8000", "tag:vlab-server:8080",
+			         "tag:vlab-server:10250"],
 		},
 		{
 			"src": "tag:vlab-worker",
@@ -76,7 +89,15 @@
 		{
 			"src": "tag:vlab-server",
 			"proto": "tcp",
-			"accept": ["tag:vlab-worker:10250", "tag:vlab-worker:22", "tag:vlab-worker:8080"],
+			"accept": ["tag:vlab-registry:5001", "tag:vlab-registry:5002",
+			           "tag:vlab-worker:10250", "tag:vlab-worker:22", "tag:vlab-worker:8080"],
+		},
+		{
+			// registry เริ่มคุยกับใครไม่ได้ (ถูกยึดเครื่องก็กระโดดต่อไม่ได้)
+			"src": "tag:vlab-registry",
+			"proto": "tcp",
+			"deny": ["tag:vlab-server:6443", "tag:vlab-server:22", "tag:vlab-worker:22",
+			         "tag:vlab-worker:10250"],
 		},
 	],
 }

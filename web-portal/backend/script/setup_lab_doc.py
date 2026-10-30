@@ -3,7 +3,7 @@
 
 ทำ 3 อย่างให้ในทีเดียว — ไม่ต้องก๊อป UUID ไปมาเอง:
   1. หา lab จากชื่อ (หรือระบุ --lab-id ตรง ๆ)
-  2. ก๊อปไฟล์ไปวางที่ storage/labs/{lab_id}/doc.<ext>
+  2. วางไฟล์ที่ key labs/{lab_id}/doc.<ext> ใน storage ที่ backend ใช้ (disk หรือ S3 ตาม STORAGE_BACKEND)
   3. อัปเดต labs.doc_url ให้ชี้ key นั้น
 
 รัน (จากโฟลเดอร์ backend):
@@ -13,7 +13,7 @@
 """
 
 import argparse
-import shutil
+import mimetypes
 import sys
 from pathlib import Path
 
@@ -24,7 +24,8 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from sqlalchemy import select
 
-from app.adapters.local_storage import local_storage
+from app.adapters.storage import get_storage
+from app.configs.settings import settings
 from app.configs.db import SessionLocal
 from app.models.lab import Lab
 
@@ -73,9 +74,9 @@ def main() -> int:
             return 1
 
         key = f"labs/{lab.id}/doc{source.suffix}"
-        dest = local_storage.resolve(key)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, dest)
+        content_type, _ = mimetypes.guess_type(source.name)
+        with source.open("rb") as handle:
+            get_storage().save(key, handle, content_type)
 
         lab.doc_url = key
         db.commit()
@@ -83,7 +84,8 @@ def main() -> int:
         print(f"[ok] lab      : {lab.title}")
         print(f"[ok] lab_id   : {lab.id}")
         print(f"[ok] doc_url  : {key}")
-        print(f"[ok] ไฟล์อยู่ที่ : {dest}")
+        where = f"s3://{settings.STORAGE_S3_BUCKET}/{key}" if settings.STORAGE_BACKEND == "s3" else f"disk: {key}"
+        print(f"[ok] ไฟล์อยู่ที่ : {where}")
         print()
         print(f"     API  -> http://localhost:8000/api/labs/{lab.id}/doc")
         print(f"     หน้าเว็บ -> http://localhost:5173/labs/{lab.id}")

@@ -4,9 +4,13 @@
 # ทุก image อ้างด้วย digest เท่านั้น อัปเกรดเมื่อไหร่ให้ทำตามข้อ "อัปเกรด Trivy" ใน doc
 # แล้วเพิ่ม scan_runner_version ทุกครั้ง (tag ใน registry เป็น immutable role จะไม่ยอม push ทับ)
 
-scan_runner_version: "1.0.0"
+scan_runner_version: "1.1.0"
 scan_runner_repo: vlab/scan-runner
-scan_runner_registry_port: 5001
+# camp registry (role registry): อ่าน manifest ผ่าน pull port, push ผ่าน push port ที่ต้อง login
+scan_runner_registry_pull_port: "{{ registry_pull_port | default(5001) }}"
+scan_runner_registry_push_port: "{{ registry_push_port | default(5002) }}"
+scan_runner_registry_user: ansible
+scan_runner_registry_password: "{{ registry_users[scan_runner_registry_user].password }}"
 
 # source บนเครื่อง control / ที่วางบนเครื่อง build
 scan_runner_src: "{{ playbook_dir }}/../scan-runner/"

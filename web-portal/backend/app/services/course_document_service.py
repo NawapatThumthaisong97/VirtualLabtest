@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.local_storage import local_storage
+from app.adapters.storage import get_storage
 from app.exceptions.domain import NotFoundError, ValidationError
 from app.models.course_document import CourseDocument
 from app.models.user import User
@@ -17,7 +17,7 @@ class CourseDocumentService:
 
     def __init__(self, db: Session, storage=None):
         self.db = db
-        self.storage = storage or local_storage
+        self.storage = storage or get_storage()
 
     def list(self, course_id: UUID) -> list[CourseDocument]:
         query = (
@@ -34,12 +34,12 @@ class CourseDocumentService:
             raise NotFoundError(f"Document {document_id} not found")
         return doc
 
-    def file_path(self, course_id: UUID, document_id: UUID) -> tuple[CourseDocument, Path]:
+    def get_existing(self, course_id: UUID, document_id: UUID) -> CourseDocument:
+        """เอกสารที่มีไฟล์อยู่จริงใน storage (disk / S3) — ไฟล์หาย = 404 แยกข้อความไว้ไล่ปัญหา"""
         doc = self.get(course_id, document_id)
-        path = self.storage.resolve(doc.file_key)
-        if not path.is_file():
+        if not self.storage.exists(doc.file_key):
             raise NotFoundError(f"Document file missing from storage: {doc.file_key}")
-        return doc, path
+        return doc
 
     def upload(self, course_id: UUID, user: User, title: str, filename: str, source) -> CourseDocument:
         title = (title or "").strip() or Path(filename or "").stem.strip()
@@ -60,7 +60,7 @@ class CourseDocumentService:
 
         doc_id = uuid4()
         key = f"course-docs/{course_id}/{doc_id}.pdf"
-        self.storage.save(key, source.file)
+        self.storage.save(key, source.file, "application/pdf")
         doc = CourseDocument(
             id=doc_id, course_id=course_id, title=title, file_key=key, size_bytes=size, uploaded_by=user.id
         )

@@ -20,7 +20,7 @@ PDF = b"%PDF-1.4\n%test\n"
 def tmp_storage(tmp_path, monkeypatch):
     """เอกสารที่อัปในเทสลง tmp ไม่ปนกับ storage จริง"""
     storage = LocalStorage(str(tmp_path))
-    monkeypatch.setattr("app.services.lab_service.local_storage", storage)
+    monkeypatch.setattr("app.adapters.storage._storage", storage)
     return storage
 
 

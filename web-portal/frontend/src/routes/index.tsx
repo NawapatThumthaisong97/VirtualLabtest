@@ -73,6 +73,7 @@ export const router = createBrowserRouter([
                   <CoursesPage
                     title="Instructor Console"
                     linkTo={(course) => `/instructor/courses/${course.id}`}
+                    canCreate
                   />
                 ),
               },

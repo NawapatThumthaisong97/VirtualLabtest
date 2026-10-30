@@ -16,6 +16,7 @@ import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import LabLoader from '../components/LabLoader.tsx';
+import ContainerIcon from '../components/ContainerIcon.tsx';
 import DashboardHeader from '../components/admin/DashboardHeader';
 import { labService } from '../services/lab';
 import { sessionService } from '../services/session';
@@ -23,9 +24,9 @@ import type { LabSession } from '../services/session';
 
 /** ชื่อที่คนอ่านรู้เรื่องของแต่ละพอร์ตที่ image ของ lab เปิดไว้ */
 const PORT_LABELS: Record<string, string> = {
-  '8443': 'Code Editor',
-  '5173': 'หน้าเว็บของ lab',
-  '8080': 'Server API',
+  '5173': 'Client Server',
+  '8080': 'Backend Server',
+  '8443': 'IDE Server Tools',
 };
 
 /** ดึงข้อความ error ที่ backend ส่งมา ไม่ใช่ข้อความดิบของ axios */
@@ -36,7 +37,9 @@ function readError(err: unknown): string {
 }
 
 // pdf.js parses the file off the main thread; Vite resolves the bundled worker via ?url.
-pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+// ?mime=js: ไฟล์ worker เคยถูก nginx ส่งเป็น application/octet-stream พร้อม Cache-Control immutable 1 ปี
+// เบราว์เซอร์ที่ cache ตัวเสียไว้จะไม่ขอใหม่เอง (Ctrl+Shift+R ไม่ช่วยเพราะ worker ถูกโหลดจากใน JS) — เปลี่ยน URL บังคับโหลดใหม่
+pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?mime=js`;
 
 function DocMessage({ children }: { children: ReactNode }) {
   return (
@@ -73,6 +76,7 @@ export default function LabDetailPage() {
   const [session, setSession] = useState<LabSession | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
+  const [portsOpen, setPortsOpen] = useState(true);
 
   // โหลดไฟล์เอกสารผ่าน apiClient เพื่อให้ token ติดไปด้วย ถ้าปล่อยให้ react-pdf
   // ไปโหลด URL เองจะโดน 401 เพราะมันไม่ผ่าน interceptor ของ axios
@@ -196,28 +200,53 @@ export default function LabDetailPage() {
           <LabLoader size={48} label="Preparing your lab environment" />
         </div>
       ) : session ? (
-        <div className="mx-auto w-full max-w-[1200px] px-8 pt-8 pb-10">
+        <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
           <h1 className="mb-2 text-[22px] font-semibold">{labHeading}</h1>
           <p className="mb-6 text-[15px] text-[#6B6A66]">
             สภาพแวดล้อมพร้อมใช้งานแล้ว — เปิดลิงก์ด้านล่างในแท็บใหม่
           </p>
 
-          <div className="flex flex-col gap-3">
-            {Object.entries(session.endpoints).map(([port, url]) => (
-              <a
-                key={port}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center justify-between rounded-xl border border-[#E5E3DC] px-5 py-4 transition hover:border-[#185FA5]"
+          {/* กล่อง Container port ตาม mockup ของ Pete — หัวดำกดพับ / กางได้ แต่ละพอร์ตเปิดในแท็บใหม่ */}
+          <section className="border border-[#D9D9D9] bg-white">
+            <button
+              type="button"
+              onClick={() => setPortsOpen((open) => !open)}
+              aria-expanded={portsOpen}
+              className="flex w-full cursor-pointer items-center justify-between border-0 bg-[#0B0B0B] px-3 py-2 text-left text-[15px] font-normal text-white"
+            >
+              Container port
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+                className={`transition-transform ${portsOpen ? '' : '-rotate-90'}`}
               >
-                <span className="text-[15px] font-medium">
-                  {PORT_LABELS[port] ?? `พอร์ต ${port}`}
-                </span>
-                <span className="text-[13px] text-[#6B6A66]">{url}</span>
-              </a>
-            ))}
-          </div>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+
+            {portsOpen && (
+              <div className="flex flex-col gap-4 px-7 py-7">
+                {Object.entries(session.endpoints).map(([port, url]) => (
+                  <a
+                    key={port}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-6 border border-[#CFCFCF] px-4 py-2.5 text-[#111] no-underline shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition hover:border-[#185FA5]"
+                  >
+                    <ContainerIcon />
+                    <span className="flex-1 text-[17px] font-normal">{PORT_LABELS[port] ?? `Port ${port}`}</span>
+                    <span className="truncate text-[13px] text-[#333]">{url}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </section>
 
           <p className="mt-6 text-[13px] text-[#9B9A93]">
             cluster: {session.cluster_name} · image: {session.image_repository}:
