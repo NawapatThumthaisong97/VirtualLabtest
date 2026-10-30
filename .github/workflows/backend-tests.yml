@@ -377,12 +377,7 @@ jobs:
           for k, v in s_cm["data"].items():
               pathlib.Path(f"/etc/sigma-rules/{k}").write_text(v)
 
-          # 2. Falco Fast-Track Express Relay
-          f_docs = list(yaml.safe_load_all(pathlib.Path("k8s/siem/layer5-detection/03-falco-fast-track-relay.yaml").read_text()))
-          f_cm = next(d for d in f_docs if d["kind"] == "ConfigMap")
-          pathlib.Path("/tmp/siem-ci/fast_track_relay.py").write_text(f_cm["data"]["fast_track_relay.py"])
-
-          # 3. Grafana Provisioning & Dashboards
+          # 2. Grafana Provisioning & Dashboards
           g_docs = list(yaml.safe_load_all(pathlib.Path("k8s/siem/layer5-detection/00-grafana-deployment.yaml").read_text()))
           g_cm = next(d for d in g_docs if d["kind"] == "ConfigMap")
           ds_yaml = g_cm["data"]["datasources.yaml"].replace("100.86.87.27:5432", "127.0.0.1:5432").replace("database: virtual_lab", "database: virtual_lab_test").replace("victorialogs.siem-system.svc.cluster.local:9428", "127.0.0.1:9428")
@@ -395,9 +390,6 @@ jobs:
               pathlib.Path(f"/tmp/siem-ci/grafana/dashboards/{k}").write_text(v)
           '
             chmod -R 777 /tmp/siem-ci/grafana
-            VICTORIALOGS_INSERT_URL="http://127.0.0.1:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message" \
-              SIEM_CENTRAL_TAILSCALE_ENDPOINT="http://127.0.0.1:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message" \
-              nohup python3 /tmp/siem-ci/fast_track_relay.py >/tmp/siem-ci/fast-track.log 2>&1 &
 
             docker run -d --name siem-grafana --network host \
               -e GF_SECURITY_ADMIN_USER=admin \

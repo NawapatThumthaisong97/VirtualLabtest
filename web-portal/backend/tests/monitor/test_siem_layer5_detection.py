@@ -2,8 +2,7 @@
 Automated verification tests for SIEM Layer 5: Detection & Visualization
 - Grafana Deployment & Provisioned SIEM Dashboards (vlab-siem-analytics & vlab-siem-5layer)
 - Sigma Rules (Detection-as-Code) compiled to VictoriaLogs LogsQL running via K8s CronJob (every 1-5 minutes)
-- Dedicated Fast-Track Express Pipeline for sub-second Falco eBPF critical alerts
-- Live CI Verification (when SIEM_CI_LIVE=1): tests real Falco Fast-Track (:9080), Sigma LogsQL Engine, and Grafana 11.2.0 (:3000)
+- Live CI Verification (when SIEM_CI_LIVE=1): tests real VictoriaLogs, Sigma LogsQL Engine, and Grafana 11.2.0 (:3000)
 """
 
 import json
@@ -27,7 +26,6 @@ class TestLayer5DetectionAndVisualizationManifests:
             "00-grafana-deployment.yaml",
             "01-grafana-dashboards-configmap.yaml",
             "02-sigma-rules-cronjob.yaml",
-            "03-falco-fast-track-relay.yaml",
         ]
         for fname in expected_files:
             fpath = K8S_LAYER5_DIR / fname
@@ -97,44 +95,31 @@ class TestLayer5DetectionAndVisualizationManifests:
         assert "compile_sigma_to_logsql" in engine_code
         assert "/select/logsql/query" in engine_code
         assert "SIGMA_RULE_MATCH" in engine_code
+        assert "_time:2m" in engine_code
 
         cron = next(d for d in sigma_docs if d["kind"] == "CronJob")
         assert cron["metadata"]["name"] == "sigma-logsql-detector"
         assert cron["spec"]["schedule"] == "*/2 * * * *"
 
-    def test_falco_fast_track_express_pipeline_bypasses_batching_in_sub_second(self):
-        ft_docs = list(
-            yaml.safe_load_all(
-                (K8S_LAYER5_DIR / "03-falco-fast-track-relay.yaml").read_text(encoding="utf-8")
-            )
-        )
-        cm = next(d for d in ft_docs if d["kind"] == "ConfigMap")
-        assert cm["metadata"]["labels"]["vlab.siem/pipeline"] == "fast-track"
-        relay_code = cm["data"]["fast_track_relay.py"]
-        assert '"fast_track": True' in relay_code
-        assert '"bypass_sigma_batch": True' in relay_code
-        assert "sub_second" in relay_code
-
     @pytest.mark.skipif(os.getenv("SIEM_CI_LIVE") != "1", reason="Runs against live Layer 5 containers in CI")
-    def test_live_ci_falco_fast_track_sigma_logsql_and_grafana(self):
-        """Verifies real Falco Fast-Track (:9080), Sigma Rules -> LogsQL Engine, and Grafana 11.2.0 (:3000)."""
-        # 1. Fire critical Falco eBPF alert into Fast-Track Express Pipeline (:9080)
-        ft_payload = {
-            "rule": "Read sensitive file untrusted",
-            "output": "Critical eBPF violation: cat /etc/shadow inside container on k3s-worker-ci",
-            "hostname": "k3s-worker-ci",
+    def test_live_ci_sigma_logsql_and_grafana(self):
+        """Verifies real VictoriaLogs (:9428), Sigma Rules -> LogsQL Engine, and Grafana 11.2.0 (:3000)."""
+        # 1. Insert a security log into VictoriaLogs (:9428)
+        log_payload = {
+            "category": "SECURITY_VIOLATION",
+            "severity": "CRITICAL",
+            "eventType": "FALCO_EBPF_ALERT",
+            "source": "k3s-worker-ci",
+            "message": "Critical eBPF violation: cat /etc/shadow inside container on k3s-worker-ci",
         }
-        ft_req = urllib.request.Request(
-            "http://127.0.0.1:9080/falco-fast-track",
-            data=json.dumps(ft_payload).encode("utf-8"),
+        vl_req = urllib.request.Request(
+            "http://127.0.0.1:9428/insert/jsonline?_stream_fields=source,category,severity&_msg_field=message",
+            data=(json.dumps(log_payload) + "\n").encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(ft_req, timeout=5) as ft_res:
-            ft_out = json.loads(ft_res.read().decode("utf-8"))
-        assert ft_out["status"] == "fast_track_delivered"
-        assert ft_out["sub_second"] is True
-        assert ft_out["latency_ms"] < 500
+        with urllib.request.urlopen(vl_req, timeout=5) as vl_res:
+            assert vl_res.status in (200, 204)
 
         # 2. Execute Sigma Rules -> LogsQL Detection Engine against live VictoriaLogs (:9428)
         env = os.environ.copy()

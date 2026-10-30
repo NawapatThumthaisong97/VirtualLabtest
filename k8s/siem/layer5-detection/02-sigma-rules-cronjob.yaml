@@ -137,9 +137,9 @@ data:
         cat = rule.get("category", "SECURITY_VIOLATION")
         keywords = rule.get("keywords", [])
         if not keywords:
-            return f'category:"{cat}"'
+            return f'_time:2m AND category:"{cat}"'
         kw_expr = " OR ".join(f'"{kw}"' for kw in keywords)
-        return f'category:"{cat}" AND ({kw_expr})'
+        return f'_time:2m AND category:"{cat}" AND ({kw_expr})'
 
     def run_sigma_scan():
         results = []

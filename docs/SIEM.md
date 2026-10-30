@@ -214,9 +214,9 @@ flowchart TD
     - **`sigma-vlab-002-c2-egress` (`T1071`):** ตรวจจับการเชื่อมต่อไปยัง C2 Server (`198.51.100.24`, `c2-botnet.darknet.io`)
     - **`sigma-vlab-003-cryptomining` (`T1496`):** ตรวจจับการขุดเหรียญคริปโต (`malicious-mining.org`, `203.0.113.66`, `stratum+tcp`)
     - **`sigma-vlab-004-k8s-privesc` (`T1611`):** ตรวจจับความพยายามสร้าง Privileged Pod (`KYVERNO_POLICY_BLOCK`, `privileged=true`)
-* **3. Falco Fast-Track Express Pipeline ([`03-falco-fast-track-relay.yaml`](../k8s/siem/layer5-detection/03-falco-fast-track-relay.yaml)):**
-  - ท่อด่วนพิเศษบนพอร์ต `:30080` (`falco-fast-track`) สำหรับเหตุการณ์วิกฤตระดับ Kernel จาก Falco โดยไม่ต้องรอรอบ CronJob ของ Sigma Rules (1–5 นาที)
-  - พุ่งตรงเข้าบันทึกใน VictoriaLogs และแจ้งเตือน Control Plane ทันทีภายใน **`~26 – 37 มิลลิวินาที`** (`sub_second: true`)
+* **3. Falco Real-Time Streaming Pipeline:**
+  - เหตุการณ์วิกฤตระดับ Kernel จาก Falco ถูกส่งผ่านท่อหลัก Vector Agent -> NATS JetStream -> Vector Aggregator เข้าสู่ฐานข้อมูลและ VictoriaLogs ภายในเวลาเพียง **`~1-2 วินาที`** อย่างปลอดภัยและแม่นยำ
+  - ไม่จำเป็นต้องเปิด Port หรือแยก Service Relay พิเศษ ช่วยลดช่องโหว่ความปลอดภัยและป้องกันการบันทึกเหตุการณ์ซ้ำซ้อน
 
 ---
 
@@ -246,8 +246,7 @@ VirtualLabtest/
 │   └── layer5-detection/
 │       ├── 00-grafana-deployment.yaml             # Grafana 11.2.0 Deployment (:30300) + Datasources & Alerting Provisioning
 │       ├── 01-grafana-dashboards-configmap.yaml   # 2 Dashboards: Threat Analytics (vlab-siem-analytics) & Command Center (vlab-siem-5layer)
-│       ├── 02-sigma-rules-cronjob.yaml            # Sigma Rules 4 ข้อ + คอมไพเลอร์ Sigma-to-LogsQL रันทุก 2 นาที (CronJob)
-│       └── 03-falco-fast-track-relay.yaml         # ท่อด่วนพิเศษ Falco eBPF Fast-Track (:30080, < 50ms latency)
+│       └── 02-sigma-rules-cronjob.yaml            # Sigma Rules 4 ข้อ + คอมไพเลอร์ Sigma-to-LogsQL (_time:2m) รันทุก 2 นาที (CronJob)
 │
 ├── ansible/roles/siem-layer1-collector/           # Ansible Role สำหรับฝัง Vector Agent + Falco ลงใน AWS Golden AMI
 │   ├── defaults/main.yml

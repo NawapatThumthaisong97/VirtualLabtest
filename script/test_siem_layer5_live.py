@@ -99,21 +99,9 @@ def wait_for_layer5_pods(v1: client.CoreV1Api, timeout_sec: int = 120) -> str:
             ),
             None,
         )
-        ft_pod = next(
-            (
-                p.metadata.name
-                for p in pods
-                if p.metadata.name.startswith("falco-fast-track-relay")
-                and p.metadata.deletion_timestamp is None
-                and p.status.phase == "Running"
-                and all(c.ready for c in (p.status.container_statuses or []))
-            ),
-            None,
-        )
-        if gf_pod and ft_pod:
+        if gf_pod:
             print(f"  ✓ Grafana Pod          : {gf_pod} -> Running (Ready)")
-            print(f"  ✓ Fast-Track Relay Pod : {ft_pod} -> Running (Ready)")
-            return ft_pod
+            return gf_pod
         time.sleep(2)
     raise RuntimeError("Timed out waiting for Layer 5 pods to become Ready")
 
@@ -208,7 +196,6 @@ if __name__ == "__main__":
 
     apply_layer5_manifests(v1, apps_v1, batch_v1)
     wait_for_layer5_pods(v1)
-    test_falco_sub_second_fast_track()
     test_sigma_rules_logsql_detection(v1, batch_v1)
     verify_grafana_dashboard_api()
     print("\n" + "=" * 78)
