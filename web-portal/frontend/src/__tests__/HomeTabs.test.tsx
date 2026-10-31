@@ -26,6 +26,14 @@ describe('Home tabs', () => {
       </QueryClientProvider>,
     );
 
+  it('shows the support logo and the two glass cards with a mail link', () => {
+    renderHome();
+    fireEvent.click(screen.getByText('Help Desk'));
+    expect(screen.getByAltText('Virtual Lab Support')).toBeDefined();
+    expect(screen.getByText('Can’t run your lab?')).toBeDefined();
+    expect(screen.getByText('VirtualLabSupport@gmail.com').getAttribute('href')).toBe('mailto:VirtualLabSupport@gmail.com');
+  });
+
   it('service cards stay in the layout (hidden) on other tabs so the hero keeps its height', () => {
     renderHome();
     fireEvent.click(screen.getByText('Help Desk'));
