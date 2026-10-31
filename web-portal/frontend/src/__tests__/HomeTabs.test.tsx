@@ -29,7 +29,7 @@ describe('Home tabs', () => {
   it('shows the support logo and the two glass cards with a mail link', () => {
     renderHome();
     fireEvent.click(screen.getByText('Help Desk'));
-    expect(screen.getByAltText('Virtual Lab Support')).toBeDefined();
+    expect(screen.getByAltText('Virtual Lab Support').closest('[aria-hidden]')?.getAttribute('aria-hidden')).toBe('false');
     expect(screen.getByText('Can’t run your lab?')).toBeDefined();
     expect(screen.getByText('VirtualLabSupport@gmail.com').getAttribute('href')).toBe('mailto:VirtualLabSupport@gmail.com');
   });
@@ -40,5 +40,12 @@ describe('Home tabs', () => {
     const hidden = screen.getByText('Virtual Environment').closest('[aria-hidden]');
     expect(hidden?.getAttribute('aria-hidden')).toBe('true');
     expect(hidden?.className).toContain('invisible');
+  });
+
+  it('Help Desk pane also stays in the layout (hidden) on the Service tab', () => {
+    renderHome();
+    const pane = screen.getByAltText('Virtual Lab Support').closest('[aria-hidden]');
+    expect(pane?.getAttribute('aria-hidden')).toBe('true');
+    expect(pane?.className).toContain('invisible');
   });
 });

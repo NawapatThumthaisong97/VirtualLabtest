@@ -55,26 +55,23 @@ const INSTRUCTOR_CONSOLE: Service = {
 };
 
 // อาจารย์ / admin ไม่มีงานแลปให้ทำเอง การ์ดแรกเลยเป็นหน้าจัดการวิชา (Pete ให้ Instructor Console ขึ้นก่อน)
-/** การ์ดแนะนำในแท็บ Help Desk (การ์ดใสบน hero) */
-const HELP_CARDS: { title: string; lines: ReactNode[] }[] = [
+/** การ์ดแนะนำในแท็บ Help Desk — ขนาด / ตัวอักษรเท่าการ์ด Service ข้อความ 1 ประโยคพอ ๆ กัน */
+const HELP_CARDS: { title: string; text: ReactNode }[] = [
   {
     title: 'Can’t run your lab?',
-    lines: [
-      'Most problems go away after Close Lab → Start Lab work again.',
-      'Starting from home takes about 2 minutes while your machine boots — keep the page open until the ports appear.',
-    ],
+    text: 'Try Close Lab, then Start Lab work again. From home, give it about 2 minutes to boot.',
   },
   {
     title: 'Contact us',
-    lines: [
-      'Confused about a lab, or something isn’t working? Tell us your course and lab name.',
+    text: (
       <>
-        Email:{' '}
+        Stuck or confused? Email{' '}
         <a href="mailto:VirtualLabSupport@gmail.com" className="text-white underline underline-offset-2">
           VirtualLabSupport@gmail.com
-        </a>
-      </>,
-    ],
+        </a>{' '}
+        with your course and lab.
+      </>
+    ),
   },
 ];
 
@@ -228,24 +225,25 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
               </div>
             </div>
 
-            {tab === 'helpdesk' && (
-              <div className={`col-start-1 row-start-1 flex flex-col gap-5 ${styles.fadeUp}`}>
-                <img src={supportLogo} alt="Virtual Lab Support" className="h-auto w-[300px] select-none" draggable={false} />
-                <div className="flex flex-wrap gap-6">
-                  {HELP_CARDS.map((card) => (
-                    <div
-                      key={card.title}
-                      className="flex w-[340px] flex-col gap-2.5 rounded-[6px] border border-white/60 bg-white/15 px-6 py-5 text-white backdrop-blur-sm"
-                    >
-                      <div className="text-[19px] font-medium">{card.title}</div>
-                      {card.lines.map((line, i) => (
-                        <div key={i} className="text-[13px] leading-relaxed text-white/85">{line}</div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
+            {/* Help Desk ก็อยู่ในผังเสมอเหมือน Service — hero สูงเท่ากันทุกแท็บแม้โลโก้สูงกว่าหัวข้อ Service */}
+            <div
+              key={tab === 'helpdesk' ? 'helpdesk' : 'helpdesk-hidden'}
+              aria-hidden={tab !== 'helpdesk'}
+              className={`col-start-1 row-start-1 flex flex-col gap-3.5 ${tab === 'helpdesk' ? styles.fadeUp : 'invisible'}`}
+            >
+              <img src={supportLogo} alt="Virtual Lab Support" className="h-auto w-[200px] select-none" draggable={false} />
+              <div className="flex flex-wrap gap-4">
+                {HELP_CARDS.map((card) => (
+                  <div
+                    key={card.title}
+                    className="w-[340px] rounded-[10px] border-[1.5px] border-white/32 bg-white/12 p-[22px] text-left backdrop-blur-sm"
+                  >
+                    <div className="mb-2 text-[17px] font-semibold text-white">{card.title}</div>
+                    <div className="text-[13.5px] leading-relaxed text-white/75">{card.text}</div>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
