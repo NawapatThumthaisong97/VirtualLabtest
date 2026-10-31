@@ -239,13 +239,15 @@ class SessionService:
             "run": f"{docker_run} {shlex.quote(image)}{command}\n",
         }
 
-    def _cluster_name(self, lab_image: LabImage) -> str:
+    def _cluster_name(self, lab_image: LabImage, unique: bool = False) -> str:
         # ชื่อ cluster ของ SkyPilot ต้องเป็นตัวเล็ก ตัวเลข และ '-' ขึ้นต้นด้วยตัวอักษร
         slug = re.sub(r"[^a-z0-9-]+", "-", lab_image.repository.split("/")[-1].lower()).strip("-")
         if not slug[:1].isalpha():
             # เช่น repo "2048-game" SkyPilot ไม่รับชื่อที่ขึ้นต้นด้วยตัวเลข
             slug = f"lab-{slug}".rstrip("-")
-        return f"{slug}-{int(time.time())}"
+        name = f"{slug}-{int(time.time())}"
+        # unique: prelaunch เปิดหลายเครื่องในวินาทีเดียวกัน ชื่อซ้ำ = sky launch ใช้ cluster เดิมซ้ำแทนเปิดเครื่องใหม่
+        return f"{name}-{uuid4().hex[:4]}" if unique else name
 
     def create_session(self, user_id: UUID, lab_id: UUID, client_ip: Optional[str] = None) -> dict:
         """สร้าง session ใหม่ - launch pod และบันทึกลง database
@@ -396,7 +398,7 @@ class SessionService:
 
         แยกจาก _run_sky_launch ให้ prelaunch scheduler สร้าง record ทุกคนก่อน แล้วค่อย launch ใน thread
         """
-        cluster_name = self._cluster_name(lab_image)
+        cluster_name = self._cluster_name(lab_image, unique=prelaunched_at is not None)
         is_cloud = run_target == RunTarget.AWS
 
         task_config = self.create_fastapi_task(
