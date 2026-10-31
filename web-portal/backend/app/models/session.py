@@ -35,12 +35,14 @@ class SessionEndReason(enum.Enum):
     - LOST: cluster หายก่อนเวลา (pod / EC2 ตายเอง)
     - LAUNCH_FAILED: launch หรือ setup ไม่ผ่าน
     - STALE_PENDING: PENDING ค้างเกิน timeout (backend ตายกลาง launch)
+    - PRELAUNCH_UNCLAIMED: เครื่องที่เปิดรอไว้ให้ในคาบ online แต่นักศึกษาไม่กด Start ทันเวลา ระบบคืนเครื่อง
     """
     USER_DELETE = "user_delete"
     EXPIRED = "expired"
     LOST = "lost"
     LAUNCH_FAILED = "launch_failed"
     STALE_PENDING = "stale_pending"
+    PRELAUNCH_UNCLAIMED = "prelaunch_unclaimed"
 
 
 class Session(Base):
@@ -66,6 +68,9 @@ class Session(Base):
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
     # เปิดในคาบไหน (null = เปิดนอกคาบ) โค้ด launch ยังไม่ได้เขียนค่านี้
     class_slot_id = Column(UUID(as_uuid=True), ForeignKey("class_slots.id", ondelete="SET NULL"), nullable=True)
+    # คาบ online: scheduler เปิดเครื่องรอไว้ให้ตอนไหน (null = นักศึกษากด Start เอง) / นักศึกษามารับตอนไหน
+    prelaunched_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="sessions", foreign_keys=[user_id])

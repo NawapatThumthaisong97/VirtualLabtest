@@ -26,7 +26,9 @@ class BookingRequest(Base):
     valid_from = Column(Date, nullable=False)
     valid_until = Column(Date, nullable=False)             # "ทุกสัปดาห์ถึงวันที่"
     machines = Column(Integer, nullable=False)
-    room = Column(String(64), nullable=True)               # ห้องที่อยากได้ / ห้องที่ admin ให้
+    room = Column(String(64), nullable=True)               # ห้องที่อยากได้ / ห้องที่ admin ให้ (online = ไม่มีห้อง)
+    # onsite = เรียนในห้องแลป (warm pod) / online = เปิด EC2 รอไว้ให้ทุกคน (docs/AWS_PRELAUNCH.md)
+    mode = Column(String(16), nullable=False, default="onsite", server_default="onsite")
     note = Column(Text, nullable=True)
     status = Column(String(16), nullable=False, default="pending", server_default="pending")
     decided_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -47,5 +49,6 @@ class BookingRequest(Base):
         CheckConstraint("valid_until >= valid_from", name="ck_booking_requests_date_order"),
         CheckConstraint("machines > 0", name="ck_booking_requests_machines"),
         CheckConstraint("status IN ('pending', 'approved', 'rejected', 'cancelled')", name="ck_booking_requests_status"),
+        CheckConstraint("mode IN ('onsite', 'online')", name="ck_booking_requests_mode"),
         Index("ix_booking_requests_status", "status"),
     )
