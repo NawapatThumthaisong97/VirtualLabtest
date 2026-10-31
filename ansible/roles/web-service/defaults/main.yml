@@ -71,6 +71,13 @@ webservice_lab_isolation_enabled: true
 # ดู docs/archive/LAB_DIRECT_POD.md สลับตอนรัน: -e webservice_lab_machine_launch=skypilot
 webservice_lab_machine_launch: pod
 
+# คาบ online (docs/AWS_PRELAUNCH.md): ปิดไว้ก่อน เปิดแล้วเสียเงิน AWS จริงทุกคาบ online
+# เทสด้วยเวลาสั้น ๆ: -e webservice_prelaunch_enabled=true -e webservice_prelaunch_lead_minutes=5 -e webservice_prelaunch_claim_minutes=3
+webservice_prelaunch_enabled: false
+webservice_prelaunch_lead_minutes: 10
+webservice_prelaunch_claim_minutes: 15
+webservice_prelaunch_max_parallel: 5
+
 # ---------- SIEM (k8s/siem ของ Nawapat ใน namespace siem-system) ----------
 # token ของตัวส่ง log (Vector / Falco / Sigma) ใช้ได้กับ POST /api/v1/logs อย่างเดียว ว่าง = ปิด
 # สร้าง: python3 -c 'import secrets;print(secrets.token_urlsafe(48))' ใส่ค่าเดียวกันใน Secret siem-collector-secrets
