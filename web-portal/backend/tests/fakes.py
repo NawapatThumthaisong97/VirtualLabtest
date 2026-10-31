@@ -16,11 +16,14 @@ from kubernetes.client.rest import ApiException
 
 try:
     import sky
-    from sky.exceptions import ClusterDoesNotExist
+    from sky.exceptions import ApiServerConnectionError, ClusterDoesNotExist
 except ModuleNotFoundError:  # Windows ไม่มี module 'resource' ที่ sky เรียกใช้
     sky = _ns(Task=object, StatusRefreshMode=object, ClusterStatus=_ns(UP="UP"))
 
     class ClusterDoesNotExist(Exception):
+        pass
+
+    class ApiServerConnectionError(RuntimeError):
         pass
 
 
@@ -47,6 +50,8 @@ class FakeSky:
         self.status_error: Exception | None = None
         self.down_error: Exception | None = None
         self.log_tail = "setup failed: no-such-tag\n"
+        # ต่อ API server ไม่ได้ชั่วคราว: method ไหน → พังอีกกี่ครั้ง (ApiServerConnectionError ทันทีแบบที่เจอบน VM)
+        self.connection_errors: dict[str, int] = {}
 
         # สิ่งที่ถูกเรียก ให้เทส assert
         self.launched: list[tuple[str, sky.Task]] = []
@@ -55,6 +60,12 @@ class FakeSky:
         self.tailed: list[tuple[str, int]] = []
         self.autostops: list[tuple[str, int, bool]] = []
         self._next_job_id = 1
+
+    def _flaky(self, method: str):
+        left = self.connection_errors.get(method, 0)
+        if left > 0:
+            self.connection_errors[method] = left - 1
+            raise ApiServerConnectionError("http://fake-api:46580")
 
     def get(self, request: FakeRequest):
         if request.exc is not None:
@@ -73,10 +84,12 @@ class FakeSky:
         return self.get(request)
 
     def job_status(self, cluster_name, job_ids):
+        self._flaky("job_status")
         status = self.job_statuses.pop(0) if len(self.job_statuses) > 1 else self.job_statuses[0]
         return FakeRequest(value={job_ids[0]: status})
 
     def endpoints(self, cluster):
+        self._flaky("endpoints")
         return FakeRequest(value=dict(self.endpoints_map))
 
     def status(self, cluster_names=None, refresh=None):
@@ -90,6 +103,7 @@ class FakeSky:
         ])
 
     def down(self, cluster_name):
+        self._flaky("down")
         self.downed.append(cluster_name)
         if self.down_error is not None:
             return FakeRequest(exc=self.down_error)

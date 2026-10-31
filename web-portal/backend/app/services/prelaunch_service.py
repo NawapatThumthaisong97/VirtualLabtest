@@ -117,7 +117,7 @@ def _down_job(cluster_name: str) -> Callable[[], None]:
     def run() -> None:
         try:
             sky = session_service.sky
-            sky.get(sky.down(cluster_name))
+            session_service.sky_call(lambda: sky.get(sky.down(cluster_name)))
         except Exception as e:
             # ลบไม่ได้ก็ไม่เป็นไรมาก autostop (safety_minutes) จะลบเองอยู่ดี
             logger.warning(f"[prelaunch] cannot down unclaimed {cluster_name}: {e}")

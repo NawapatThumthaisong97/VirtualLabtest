@@ -1,14 +1,14 @@
 from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
+from typing import Callable, Optional, Any, TypeVar
 import io
 import os
 import re
 import shlex
 import sky
 import time
-from sky.exceptions import ClusterDoesNotExist
+from sky.exceptions import ApiServerConnectionError, ClusterDoesNotExist
 from sky.skylet.autostop_lib import AutostopWaitFor
 
 from app.adapters.ecr_adapter import get_ecr_token
@@ -54,6 +54,31 @@ FAILED_LOG_TAIL_LINES = 50
 
 # pod ตรง / รอ warm pod: เช็กสถานะ pod ทุกกี่วินาที
 POD_POLL_SECONDS = 2
+
+# SDK ของ SkyPilot บางครั้งโยน ApiServerConnectionError ทันที (0 วินาที) ทั้งที่ API server ยังดีอยู่
+# เทสบน VM 2026-11-01: เรียก sky.status ทุก 5 วินาที พัง 4/24 ครั้ง ขณะที่ curl /api/health ผ่าน 60/60
+# และ server ไม่เห็น request ที่พังเลย (น่าจะใช้ connection keep-alive ที่ server ปิดไปแล้วซ้ำ)
+# ถ้าไม่ลองใหม่: launch สำเร็จแต่ job_status พัง → ตั้ง FAILED แล้ว sky.down ก็พังอีก → EC2 ค้างจน autostop
+SKY_RETRY_ATTEMPTS = 3
+SKY_RETRY_SECONDS = 1
+
+T = TypeVar("T")
+
+
+def sky_call(fn: Callable[[], T]) -> T:
+    """เรียก SkyPilot (เช่น lambda: sky.get(sky.down(name))) ลองใหม่เมื่อต่อ API server ไม่ได้ชั่วคราว
+
+    ไม่ใช้กับ sky.launch — ถ้า request ไปถึง server แล้วแต่ตอบกลับไม่ถึง การลองใหม่จะ launch ซ้ำ
+    """
+    for attempt in range(1, SKY_RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except ApiServerConnectionError as e:
+            if attempt == SKY_RETRY_ATTEMPTS:
+                raise
+            logger.warning(f"[sky] cannot reach API server (attempt {attempt}/{SKY_RETRY_ATTEMPTS}), retrying: {e}")
+            time.sleep(SKY_RETRY_SECONDS)
+    raise AssertionError("unreachable")
 
 
 def get_warm_pod_service() -> WarmPodService:
@@ -323,8 +348,8 @@ class SessionService:
         if existing_session and existing_session.sky_cluster_name:
 
             try:
-                request_id = sky.status(cluster_names=[existing_session.sky_cluster_name])
-                cluster_records = sky.get(request_id)
+                cluster_records = sky_call(lambda: sky.get(
+                    sky.status(cluster_names=[existing_session.sky_cluster_name])))
 
                 if not cluster_records:
 
@@ -461,7 +486,7 @@ class SessionService:
             request_id = sky.launch(task, cluster_name=cluster_name)
             job_id, handle = sky.stream_and_get(request_id)
             self._wait_job_running(cluster_name, job_id)
-            endpoints = sky.get(sky.endpoints(cluster=cluster_name))
+            endpoints = sky_call(lambda: sky.get(sky.endpoints(cluster=cluster_name)))
         except Exception as e:
             self._end_session(new_session, SessionStatus.FAILED, SessionEndReason.LAUNCH_FAILED)
             if job_id is not None:
@@ -538,8 +563,8 @@ class SessionService:
         lab_image = self.lab_image_repository.find_by_id(session.lab_image_id)
         lifespan = (lab_image.lifespan_minutes if lab_image else None) or 60
         try:
-            sky.get(sky.autostop(session.sky_cluster_name, idle_minutes=lifespan,
-                                 wait_for=AutostopWaitFor.NONE, down=True))
+            sky_call(lambda: sky.get(sky.autostop(session.sky_cluster_name, idle_minutes=lifespan,
+                                                  wait_for=AutostopWaitFor.NONE, down=True)))
         except Exception as e:
             # ไม่ตั้งใหม่ = เครื่องจะลบตัวเองตาม autostop สั้น ๆ ตอนเปิดรอ (กลางคาบ) ให้กดใหม่ดีกว่า
             raise ClusterOperationError(f"ตั้งเวลาเครื่องที่เปิดรอไว้ไม่สำเร็จ ลองกด Start อีกครั้ง: {e}")
@@ -794,7 +819,7 @@ class SessionService:
         """
         deadline = time.monotonic() + JOB_START_TIMEOUT.total_seconds()
         while True:
-            status = sky.get(sky.job_status(cluster_name, [job_id])).get(job_id)
+            status = sky_call(lambda: sky.get(sky.job_status(cluster_name, [job_id]))).get(job_id)
             status = getattr(status, "value", status)
             if status == "RUNNING":
                 return
@@ -850,7 +875,7 @@ class SessionService:
     def _down_quietly(self, cluster_name: str) -> None:
         """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
         try:
-            sky.get(sky.down(cluster_name))
+            sky_call(lambda: sky.get(sky.down(cluster_name)))
         except ClusterDoesNotExist:
             pass
         except Exception as e:
@@ -893,10 +918,10 @@ class SessionService:
 
         # AUTO = refresh เฉพาะ cluster ที่ตั้ง autostop ไว้ ซึ่ง lab ทุกตัวตั้ง ไม่ refresh
         # แล้ว API server จะยังเห็นเครื่องที่ skylet ลบตัวเองไปแล้วเป็น UP อยู่
-        records = sky.get(sky.status(
+        records = sky_call(lambda: sky.get(sky.status(
             cluster_names=[s.sky_cluster_name for s in running],
             refresh=sky.StatusRefreshMode.AUTO,
-        ))
+        )))
         alive = {r.get("name"): r.get("status") for r in records}
         for session in running:
             # AUTOSTOPPING ยังไม่นับว่าหาย เคยเห็นค้างสถานะนี้ตอน autostop ลบเครื่องไม่สำเร็จ
@@ -962,7 +987,7 @@ class SessionService:
             elif session.sky_cluster_name:
                 try:
                     # sky.down คืน request_id ต้อง sky.get ถึงจะรู้ว่าลบเสร็จหรือพังจริง
-                    sky.get(sky.down(session.sky_cluster_name))
+                    sky_call(lambda: sky.get(sky.down(session.sky_cluster_name)))
                     cluster_stopped = True
                 except ClusterDoesNotExist:
                     # autostop ลบไปเองแล้ว ไม่มีอะไรให้ปิด
