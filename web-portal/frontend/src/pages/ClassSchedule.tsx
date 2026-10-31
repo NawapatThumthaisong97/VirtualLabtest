@@ -101,6 +101,15 @@ export default function ClassSchedulePage() {
     onSuccess: (b, f) => done(`จองแล้ว ${b.slotsCreated ?? 0} คาบ — ส่งเมลแจ้งอาจารย์`, f.date),
     onError: (e) => setError(apiError(e)),
   });
+  const cancel = useMutation({
+    mutationFn: (e: ClassEvent) => bookingService.cancelSlot(e.id),
+    onSuccess: (r) => done(r.released.length ? `ยกเลิกคาบแล้ว คืนเครื่องที่เปิดรอไว้ ${r.released.length} เครื่อง` : 'ยกเลิกคาบแล้ว'),
+    onError: (e) => setNotice(apiError(e)),
+  });
+  const cancelEvent = (e: ClassEvent) => {
+    if (window.confirm(`ยกเลิกคาบ ${e.title} ${e.start}–${e.end} ?`)) cancel.mutate(e);
+  };
+
   const reject = useMutation({
     mutationFn: ({ f, reason }: { f: EventForm; reason: string }) => bookingService.reject(f.bookingId!, reason),
     onSuccess: () => done('ไม่อนุมัติแล้ว — ส่งเมลแจ้งอาจารย์พร้อมเหตุผล'),
@@ -161,6 +170,7 @@ export default function ClassSchedulePage() {
           onSelect={select}
           onCreate={openCreate}
           onRequests={() => setRequestsOpen(true)}
+          onCancelEvent={cancelEvent}
         />
         <MonthCalendar
           year={view.year}

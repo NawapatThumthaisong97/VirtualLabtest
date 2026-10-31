@@ -237,4 +237,7 @@ export const bookingService = {
   approve: (id: string, body: ScheduleFormBody) => postData<BookingItem>(`/v1/admin/bookings/${id}/approve`, body),
   reject: (id: string, reason: string) => postData<BookingItem>(`/v1/admin/bookings/${id}/reject`, { reason }),
   create: (body: ScheduleFormBody) => postData<BookingItem>('/v1/admin/schedules', body),
+  /** ยกเลิกคาบ 1 คาบ (id = id ของ event ในปฏิทิน) — คาบ online คืนเครื่องที่เปิดรอไว้แต่ยังไม่มีคนรับ */
+  cancelSlot: (slotId: string) =>
+    postData<{ slotId: string; status: string; released: string[] }>(`/v1/admin/slots/${slotId}/cancel`, {}),
 };

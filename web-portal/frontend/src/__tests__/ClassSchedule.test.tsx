@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ClassSchedulePage from '../pages/ClassSchedule';
 import * as AuthContextModule from '../contexts/AuthContext';
 import { bookingService, type BookingItem } from '../services/adminDashboard';
+import { toISO } from '../components/scheduler/date';
 
 const booking: BookingItem = {
   id: 'b1', status: 'pending', requesterName: 'Dr. Napat Srisuk', requesterEmail: 'napat@dome.tu.ac.th',
@@ -89,5 +90,19 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     expect(body.mode).toBe('online');
     expect(body).not.toHaveProperty('room');
     expect(body).not.toHaveProperty('machines');
+  });
+
+  it('Cancel a class from the day list after confirming', async () => {
+    vi.spyOn(bookingService, 'getCalendar').mockResolvedValue({ month: '2026-11', events: [{
+      id: 's1', title: 'Web Development – React Fundamentals', date: toISO(new Date()),   // วันนี้ตามเวลาเครื่อง (toISOString เป็น UTC วันอาจไม่ตรง)
+      start: '13:00', end: '13:30', room: null, courseId: 'c1', courseName: 'Web Development', machines: 2,
+      status: 'scheduled', mode: 'online',
+    }] });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const cancelSlot = vi.spyOn(bookingService, 'cancelSlot').mockResolvedValue({ slotId: 's1', status: 'cancelled', released: [] });
+    renderPage();
+    fireEvent.click(await screen.findByLabelText(/Cancel Web Development/));
+    await waitFor(() => expect(cancelSlot).toHaveBeenCalledWith('s1'));
+    expect(await screen.findByText('ยกเลิกคาบแล้ว')).toBeDefined();
   });
 });
