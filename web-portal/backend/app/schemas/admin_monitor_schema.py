@@ -60,6 +60,30 @@ class RoomSlot(CamelModel):
     status: str
 
 
+RoomClassStatus = Literal["pending", "preparing", "ready", "in_class", "incomplete", "done"]
+
+
+class RoomClass(CamelModel):
+    """คาบ 1 คาบของห้องนี้ในวันนี้ (ตาราง ClusterName ในหน้า admin)
+
+    status:
+    - pending: ยังไม่ถึงเวลาเตรียม (ก่อนคาบเกิน PREWARM_LEAD_MINUTES)
+    - preparing: กำลังเตรียม warm pod / pull image
+    - ready: warm pod พร้อมทุกเครื่อง รอคาบเริ่ม
+    - in_class: กำลังเรียน เครื่องพร้อมครบตามที่จอง
+    - incomplete: คาบเริ่มแล้วแต่เครื่องพร้อมไม่ครบ (เครื่องดับ / warm pod ยังไม่ครบ)
+    - done: จบแล้ว
+    """
+    id: UUID
+    course: str = Field(..., description="รหัส + ชื่อวิชา")
+    starts_at: datetime
+    ends_at: datetime
+    status: RoomClassStatus
+    in_use: int = Field(..., description="กำลังเรียน: เครื่องที่เปิดแลปอยู่ / จบแล้ว: คนที่เคยเปิดแลปในคาบนี้")
+    seats: int = Field(..., description="จำนวนเครื่องที่จองไว้")
+    pcs_ready: int = Field(..., description="เครื่องในห้องที่พร้อมตอนนี้ (ใช้อธิบาย incomplete)")
+
+
 class RoomUsageItem(CamelModel):
     room: str
     pcs_in_use: int
@@ -68,6 +92,8 @@ class RoomUsageItem(CamelModel):
         ..., description="launched = มีคนใช้อยู่, idle = ว่าง (queue จะมีเมื่อ slot ผูกห้องได้ — PR จองห้อง)"
     )
     slot: Optional[RoomSlot] = None
+    classes: list[RoomClass] = Field(default_factory=list, description="คาบของห้องนี้วันนี้ เรียงตามเวลา (ไม่รวมที่ยกเลิก)")
+    outside_class: int = Field(0, description="เครื่องที่เปิดแลปอยู่นอกคาบ")
 
 
 class RoomUsageResponse(CamelModel):

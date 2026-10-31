@@ -17,10 +17,10 @@ from tests.session.test_warm_pod import PETE_IP, k8s  # noqa: F401 (fixture)
 @pytest.fixture
 def add_slot(db, world):
     def _add(start=timedelta(minutes=-30), length=timedelta(hours=3), status=ClassSlotStatus.READY,
-             deleted=False):
-        now = datetime.now(timezone.utc)
+             deleted=False, room=None, seats=30, now=None):
+        now = now or datetime.now(timezone.utc)
         slot = ClassSlot(course_id=world.course.id, lab_image_id=world.k8s_image.id, starts_at=now + start, ends_at=now + start + length,
-                         expected_seats=30, status=status, created_by=world.user.id,
+                         expected_seats=seats, status=status, created_by=world.user.id, room=room,
                          deleted_at=now if deleted else None)
         db.add(slot)
         db.commit()
@@ -138,6 +138,50 @@ class TestRoomUsage:
         assert (lc123.slot.course, lc123.slot.starts_at, lc123.slot.status) == (
             world.course.name, slot.starts_at, "ready")
         assert (rooms["LC-207"].state, rooms["LC-207"].slot) == ("idle", None)
+
+    # 12:00 เวลาไทย — คาบ ±3 ชม. อยู่ในวันเดียวกันเสมอ ไม่ขึ้นกับเวลาที่รันเทส
+    NOON = datetime(2031, 3, 3, 5, 0, tzinfo=timezone.utc)
+
+    def _classes(self, db, cluster, room="LC-123"):
+        usage = AdminMonitorService(db, cluster).get_rooms_usage(now=self.NOON)
+        return {r.room: r for r in usage.rooms}[room].classes
+
+    @pytest.mark.parametrize("start, status, slot_status, expected", [
+        (timedelta(hours=2), ClassSlotStatus.SCHEDULED, "pending", 0),
+        (timedelta(minutes=20), ClassSlotStatus.PREWARMING, "preparing", 0),
+        (timedelta(minutes=20), ClassSlotStatus.READY, "ready", 0),
+        (timedelta(hours=-4), ClassSlotStatus.DONE, "done", 0),
+    ], ids=["pending", "preparing", "ready", "done"])
+    def test_today_class_status(self, db, world, cluster, add_slot, start, status, slot_status, expected):
+        """Today's classes of the room show a status by time even before anyone opens a lab"""
+        add_slot(start=start, status=status, room="LC-123", seats=2, now=self.NOON)
+        [c] = self._classes(db, cluster)
+        assert (c.status, c.in_use, c.seats, c.course) == (slot_status, expected, 2, f"{world.course.code} {world.course.name}")
+
+    def test_in_class_vs_incomplete(self, db, world, cluster, add_slot, add_session):
+        """Class started: 2 seats and 2 ready PCs -> in_class; 3 seats but only 2 ready -> incomplete"""
+        ok = add_slot(start=timedelta(minutes=-10), length=timedelta(minutes=50), room="LC-123", seats=2, now=self.NOON)
+        s = add_session(SessionStatus.RUNNING)
+        s.node_name, s.class_slot_id = "lc123-pc01", ok.id
+        add_slot(start=timedelta(hours=1), length=timedelta(hours=1), room="LC-123", seats=3, now=self.NOON)
+        db.commit()
+        first, second = self._classes(db, cluster)
+        assert (first.status, first.in_use, first.seats) == ("in_class", 1, 2)
+
+        later = self.NOON + timedelta(hours=1, minutes=5)
+        usage = AdminMonitorService(db, cluster).get_rooms_usage(now=later)
+        [_, c] = {r.room: r for r in usage.rooms}["LC-123"].classes
+        assert (c.status, c.seats, c.pcs_ready) == ("incomplete", 3, 2)
+
+    def test_cancelled_other_room_and_outside_class(self, db, world, cluster, add_slot, add_session):
+        """Cancelled / other-room classes hidden; lab opened outside class counted separately"""
+        add_slot(start=timedelta(hours=1), status=ClassSlotStatus.CANCELLED, room="LC-123", now=self.NOON)
+        add_slot(start=timedelta(hours=1), room="LC-207", now=self.NOON)
+        s = add_session(SessionStatus.RUNNING)
+        s.node_name = "lc123-pc02"
+        db.commit()
+        usage = {r.room: r for r in AdminMonitorService(db, cluster).get_rooms_usage(now=self.NOON).rooms}
+        assert usage["LC-123"].classes == [] and usage["LC-123"].outside_class == 1
 
     def test_in_use_without_slot(self, db, world, cluster, add_session):
         """Someone using a PC outside class -> launched, slot null"""
