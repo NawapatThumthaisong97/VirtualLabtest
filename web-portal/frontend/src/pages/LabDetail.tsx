@@ -165,12 +165,8 @@ export default function LabDetailPage() {
             <LabLoader size={48} label="Preparing your lab environment" />
           </div>
         ) : session ? (
+          // Dashboard ไม่มีหัวข้อ lab ซ้ำ (tester ขอ) — ชื่อวิชาอยู่บนแถบฟ้าแล้ว
           <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
-            <h1 className="mb-2 text-[22px] font-semibold">{labHeading}</h1>
-            <p className="mb-6 text-[15px] text-[#6B6A66]">
-              สภาพแวดล้อมพร้อมใช้งานแล้ว — เปิดลิงก์ด้านล่างในแท็บใหม่
-            </p>
-
             {/* กล่อง Container port ตาม mockup ของ Pete — หัวดำกดพับ / กางได้ แต่ละพอร์ตเปิดในแท็บใหม่ */}
             <section className="border border-[#D9D9D9] bg-white">
               <button
