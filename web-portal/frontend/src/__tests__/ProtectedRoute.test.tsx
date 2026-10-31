@@ -95,5 +95,33 @@ describe('ProtectedRoute & Route Protection (Issue #80 Acceptance Criteria 2)', 
     expect(screen.getByText(/Verifying session/i)).toBeDefined();
     expect(screen.queryByText('Protected Courses Content')).toBeNull();
   });
+
+  it('redirectTo: role ไม่ผ่านแล้วพาไปหน้าที่กำหนด (อาจารย์เปิดหน้าแลปนักศึกษา)', () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      user: { id: 'usr-2', email: 't@tu.ac.th', name: 'Teacher', studentId: null, role: 'instructor' } as CurrentUser,
+      isLoading: false,
+      isAuthenticated: true,
+      login: vi.fn(),
+      loginWithSSO: vi.fn(),
+      handleSsoCallback: vi.fn(),
+      logout: vi.fn(),
+      refreshUser: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/labs/lab-1']}>
+        <Routes>
+          <Route path="/instructor" element={<div>Instructor Home</div>} />
+          <Route element={<ProtectedRoute allowedRoles={['student', 'admin']} redirectTo="/instructor" />}>
+            <Route path="/labs/:labId" element={<div>Student Lab Page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('Instructor Home')).toBeDefined();
+    expect(screen.queryByText('Student Lab Page')).toBeNull();
+    expect(screen.queryByText('Access Restricted')).toBeNull();
+  });
 });
 
