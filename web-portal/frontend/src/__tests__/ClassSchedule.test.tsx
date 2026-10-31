@@ -75,4 +75,19 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     fireEvent.click(screen.getByText('Confirm reject'));
     await waitFor(() => expect(reject).toHaveBeenCalledWith('b1', 'ห้องเต็ม'));
   });
+
+  it('Online class: no classroom fields, sends mode online without room / machines', async () => {
+    const approve = vi.spyOn(bookingService, 'approve').mockResolvedValue({ ...booking, status: 'approved', mode: 'online' });
+    renderPage();
+    fireEvent.click(await screen.findByText('Class Request'));
+    fireEvent.click(await screen.findByLabelText('Open request from Dr. Napat Srisuk'));
+    fireEvent.click(screen.getByRole('radio', { name: /Online/ }));
+    expect(screen.queryByLabelText('Room')).toBeNull();
+    fireEvent.click(screen.getByText('Approve'));
+    await waitFor(() => expect(approve).toHaveBeenCalled());
+    const body = approve.mock.calls[0][1];
+    expect(body.mode).toBe('online');
+    expect(body).not.toHaveProperty('room');
+    expect(body).not.toHaveProperty('machines');
+  });
 });

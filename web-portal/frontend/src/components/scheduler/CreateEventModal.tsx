@@ -61,7 +61,9 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
   const labs = (options?.labs ?? []).filter((l) => l.courseId === form.courseId);
   const room = options?.rooms.find((r) => r.room === form.room);
   const fromRequest = Boolean(form.bookingId);
-  const ready = form.courseId && form.labId && form.room && form.machines > 0 && form.date && form.until;
+  const online = form.mode === 'online';
+  // online ไม่มีห้อง / จำนวนเครื่อง (backend เปิดให้นักศึกษาที่ลงทะเบียนทุกคน)
+  const ready = form.courseId && form.labId && (online || (form.room && form.machines > 0)) && form.date && form.until;
 
   return (
     <GradientModal open={open} onClose={onClose} icon="/flask.png" title="Class Scheduler">
@@ -104,6 +106,42 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
             </IconField>
           </label>
           <div style={labelWrap}>
+            <span>Class type</span>
+            <div role="radiogroup" aria-label="Class type" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {([
+                ['onsite', 'On-site', 'เรียนในห้องแลป'],
+                ['online', 'Online', 'เรียนจากที่ไหนก็ได้'],
+              ] as const).map(([value, label, hint]) => {
+                const active = form.mode === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setForm((f) => ({ ...f, mode: value }))}
+                    style={{
+                      height: 44, borderRadius: 8, fontFamily: 'inherit', fontSize: 14, textAlign: 'left', padding: '0 14px',
+                      border: `1px solid ${active ? colors.primary : colors.inputBorder}`,
+                      background: active ? '#EEF4FB' : '#fff', color: colors.text,
+                      display: 'flex', alignItems: 'baseline', gap: 8,
+                    }}
+                  >
+                    <span style={{ fontWeight: active ? 600 : 400 }}>{label}</span>
+                    <span style={{ fontSize: 12, color: colors.muted }}>{hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {online ? (
+            <div style={{ ...labelWrap, fontSize: 12, color: colors.muted, lineHeight: 1.6 }}>
+              <span style={{ fontSize: 14, color: colors.text }}>Machines</span>
+              ระบบเปิดเครื่องบน AWS รอไว้ให้นักศึกษาที่ลงทะเบียนวิชานี้ทุกคนก่อนคาบเริ่ม
+              ใครไม่กด Start ภายในเวลาที่กำหนดหลังคาบเริ่ม ระบบจะคืนเครื่อง (กดทีหลังได้ แต่ต้องรอเปิดเครื่องใหม่)
+            </div>
+          ) : (
+          <div style={labelWrap}>
             <span>Classroom</span>
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24 }}>
               <select aria-label="Room" value={form.room} onChange={set('room')} style={field}>
@@ -124,6 +162,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
               />
             </div>
           </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
