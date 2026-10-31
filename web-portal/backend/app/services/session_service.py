@@ -379,9 +379,21 @@ class SessionService:
                 "ปิดการเปิด lab บน AWS ชั่วคราว (admin ปิด burst เช่นใช้เกิน budget) — ใช้เครื่องในห้องแลปแทน"
             )
 
+        pin_node = node[0] if node is not None and settings.LAB_ISOLATION_ENABLED else None
+        new_session, task = self._new_sky_session(user_id, lab, lab_image, run_target, pin_node,
+                                                  class_slot_id=self._current_slot_id(lab))
+        self._run_sky_launch(new_session, task, lab_image)
+        return self._sky_result(new_session, lab, lab_image, run_target)
+
+    def _new_sky_session(self, user_id: UUID, lab: Lab, lab_image: LabImage, run_target: RunTarget,
+                         pin_node: Optional[str], class_slot_id: Optional[UUID],
+                         prelaunched_at: Optional[datetime] = None) -> tuple[SessionModel, Any]:
+        """สร้าง task ของ SkyPilot + record PENDING (ยังไม่ launch) คืน (session, task)
+
+        แยกจาก _run_sky_launch ให้ prelaunch scheduler สร้าง record ทุกคนก่อน แล้วค่อย launch ใน thread
+        """
         cluster_name = self._cluster_name(lab_image)
         is_cloud = run_target == RunTarget.AWS
-        pin_node = node[0] if node is not None and settings.LAB_ISOLATION_ENABLED else None
 
         task_config = self.create_fastapi_task(
             lab_image=lab_image,
@@ -403,7 +415,7 @@ class SessionService:
         # (บน AWS cluster ที่ไม่มี record คือ EC2 ที่เปิดค้างเสียเงินโดยไม่มีใครเห็น)
         new_session = SessionModel(
             user_id=user_id,
-            lab_id=lab_id,
+            lab_id=lab.id,
             lab_image_id=lab_image.id,
             service_type=ServiceType.LAB,
             sky_cluster_name=cluster_name,
@@ -412,12 +424,17 @@ class SessionService:
             is_remote=False,
             is_cloud=is_cloud,
 
-            class_slot_id=self._current_slot_id(lab),
+            class_slot_id=class_slot_id,
+            prelaunched_at=prelaunched_at,
         )
         self.db.add(new_session)
         self.db.commit()
         self.db.refresh(new_session)
+        return new_session, task
 
+    def _run_sky_launch(self, new_session: SessionModel, task: Any, lab_image: LabImage) -> None:
+        """sky launch + รอ job RUNNING + endpoints แล้วตั้ง session เป็น RUNNING (พัง = FAILED + down แล้ว raise)"""
+        cluster_name = new_session.sky_cluster_name
         job_id = None
         try:
             request_id = sky.launch(task, cluster_name=cluster_name)
@@ -449,19 +466,20 @@ class SessionService:
         self.db.commit()
         self.db.refresh(new_session)
 
+    def _sky_result(self, session: SessionModel, lab: Lab, lab_image: LabImage, run_target: RunTarget) -> dict:
         return {
-            "session_id": new_session.id,
-            "cluster_name": cluster_name,
+            "session_id": session.id,
+            "cluster_name": session.sky_cluster_name,
             "launch_mode": "skypilot",
             "run_target": run_target.value,
-            "lab_id": lab_id,
+            "lab_id": lab.id,
             "lab_title": lab.title,
             "image_repository": lab_image.repository,
             "image_tag": lab_image.tag,
-            "endpoints": formatted_endpoints,
+            "endpoints": session.endpoints,
             "status": "running",
-            "started_at": new_session.started_at,
-            "expires_at": new_session.expires_at,
+            "started_at": session.started_at,
+            "expires_at": session.expires_at,
         }
 
     def _current_slot_id(self, lab: Lab) -> Optional[UUID]:
