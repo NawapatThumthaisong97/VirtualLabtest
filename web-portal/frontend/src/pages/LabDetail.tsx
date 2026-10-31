@@ -7,14 +7,11 @@
  * Pressing "Start Lab work" hands the whole page over to the provisioning loader.
  * Navbar/Footer come from RootLayout, so this file renders page content only.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Document, Page, pdfjs } from 'react-pdf';
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
+import LabDocViewer, { DocMessage } from '../components/LabDocViewer.tsx';
 import LabLoader from '../components/LabLoader.tsx';
 import ContainerIcon from '../components/ContainerIcon.tsx';
 import DashboardHeader from '../components/admin/DashboardHeader';
@@ -34,19 +31,6 @@ function readError(err: unknown): string {
   const data = (err as { response?: { data?: { message?: string; detail?: string } } })
     ?.response?.data;
   return data?.message ?? data?.detail ?? 'เปิด lab ไม่สำเร็จ ลองใหม่อีกครั้ง';
-}
-
-// pdf.js parses the file off the main thread; Vite resolves the bundled worker via ?url.
-// ?mime=js: ไฟล์ worker เคยถูก nginx ส่งเป็น application/octet-stream พร้อม Cache-Control immutable 1 ปี
-// เบราว์เซอร์ที่ cache ตัวเสียไว้จะไม่ขอใหม่เอง (Ctrl+Shift+R ไม่ช่วยเพราะ worker ถูกโหลดจากใน JS) — เปลี่ยน URL บังคับโหลดใหม่
-pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?mime=js`;
-
-function DocMessage({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-80 items-center justify-center rounded-xl bg-[#F5F4EF] p-4 text-center text-[13px] text-[#9B9A93]">
-      {children}
-    </div>
-  );
 }
 
 function PageMessage({ children }: { children: ReactNode }) {
@@ -85,33 +69,6 @@ export default function LabDetailPage() {
     queryFn: () => labService.fetchDoc(labId),
     enabled: Boolean(lab?.docUrl),
   });
-
-  // react-pdf จะโหลดไฟล์ใหม่ทุกครั้งที่ prop `file` เปลี่ยน reference
-  // ถ้าสร้าง object ใหม่ทุก render มันจะวนโหลดไม่จบ
-  const docFile = useMemo(
-    () => (docBuffer ? { data: new Uint8Array(docBuffer) } : null),
-    [docBuffer]
-  );
-
-  const docRef = useRef<HTMLDivElement>(null);
-  const [pageWidth, setPageWidth] = useState(0);
-  const [pageCount, setPageCount] = useState(0);
-
-  // pdf.js rasterises each page at a fixed pixel width, so the width has to be
-  // measured from the column and re-measured whenever the window resizes.
-  // The column only exists once the lab has loaded and while not launching,
-  // so both are dependencies — otherwise the observer watches a dead element
-  // and pageWidth stays 0, which renders nothing at all.
-  useEffect(() => {
-    const el = docRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver(([entry]) => {
-      setPageWidth(entry.contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [isLaunching, lab]);
 
   // สร้าง session = SkyPilot ไป schedule pod แล้ว pull image ใช้เวลาราว 1-2 นาที
   // backend รอจน pod พร้อมก่อนถึงจะตอบกลับ ไม่ได้ตอบทันทีแล้วให้ poll เอา
@@ -274,41 +231,15 @@ export default function LabDetailPage() {
             )}
 
             {/* Lab document — pdf.js draws each page straight into the article */}
-            <div ref={docRef}>
-              {!lab.docUrl ? (
-                <DocMessage>ยังไม่มีเอกสารสำหรับ lab นี้</DocMessage>
-              ) : isDocError ? (
-                <DocMessage>เปิดเอกสารไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง</DocMessage>
-              ) : !docFile ? (
-                <DocMessage>กำลังโหลดเอกสาร...</DocMessage>
-              ) : (
-                <Document
-                  file={docFile}
-                  onLoadSuccess={({ numPages }) => setPageCount(numPages)}
-                  externalLinkTarget="_blank"
-                  loading={<DocMessage>กำลังโหลดเอกสาร...</DocMessage>}
-                  error={<DocMessage>เปิดเอกสารไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง</DocMessage>}
-                  noData={<DocMessage>ยังไม่มีเอกสารสำหรับ lab นี้</DocMessage>}
-                  className="flex flex-col"
-                >
-                  {pageWidth > 0 &&
-                    Array.from({ length: pageCount }, (_, i) => (
-                      <div
-                        key={i}
-                        className={i > 0 ? 'mt-7 border-t border-[#F0EEE7] pt-7' : ''}
-                      >
-                        <Page 
-                          pageNumber={i + 1} 
-                          width={pageWidth} 
-                          loading=""
-                          renderAnnotationLayer={false}
-                          renderTextLayer={false}
-                        />
-                      </div>
-                    ))}
-                </Document>
-              )}
-            </div>
+            {!lab.docUrl ? (
+              <DocMessage>ยังไม่มีเอกสารสำหรับ lab นี้</DocMessage>
+            ) : isDocError ? (
+              <DocMessage>เปิดเอกสารไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง</DocMessage>
+            ) : !docBuffer ? (
+              <DocMessage>กำลังโหลดเอกสาร...</DocMessage>
+            ) : (
+              <LabDocViewer buffer={docBuffer} />
+            )}
           </article>
         </div>
       )}
