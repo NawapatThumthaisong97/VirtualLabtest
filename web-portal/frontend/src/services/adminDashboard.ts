@@ -162,6 +162,9 @@ export const adminLogService = {
 
 // ---------- จองห้อง (หน้า /admin/scheduler) ----------
 
+/** onsite = เรียนในห้องแลป (warm pod) / online = เปิด EC2 รอไว้ให้นักศึกษาทุกคน (docs/AWS_PRELAUNCH.md) */
+export type ClassMode = 'onsite' | 'online';
+
 export interface BookingItem {
   id: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -178,6 +181,7 @@ export interface BookingItem {
   validUntil: string;
   machines: number;
   room: string | null;
+  mode: ClassMode;
   note: string | null;
   decisionNote: string | null;
   classScheduleId: string | null;
@@ -197,6 +201,7 @@ export interface CalendarEventItem {
   courseName: string;
   machines: number;
   status: string;
+  mode: ClassMode;
 }
 
 export interface SchedulerOptions {
@@ -208,8 +213,10 @@ export interface SchedulerOptions {
 export interface ScheduleFormBody {
   courseId?: string;
   labId: string;
-  room: string;
-  machines: number;
+  mode: ClassMode;
+  /** online ไม่ส่ง — ไม่มีห้อง และ backend นับจำนวนนักศึกษาเอง */
+  room?: string;
+  machines?: number;
   firstDate: string;
   startTime: string;
   endTime: string;

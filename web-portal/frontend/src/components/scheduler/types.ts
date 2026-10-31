@@ -1,4 +1,5 @@
 import type { EventColor } from './theme';
+import type { ClassMode } from '../../services/adminDashboard';
 
 export interface ClassEvent {
   id: string;
@@ -30,6 +31,8 @@ export interface EventForm {
   bookingId?: string;
   courseId: string;
   labId: string;
+  /** onsite = ห้องแลป / online = ไม่มีห้อง เปิด EC2 ให้ทุกคนที่ลงทะเบียน */
+  mode: ClassMode;
   room: string;
   machines: number;
   /** คาบแรก yyyy-mm-dd */

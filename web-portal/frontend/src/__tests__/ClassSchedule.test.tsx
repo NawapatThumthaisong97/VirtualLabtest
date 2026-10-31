@@ -10,7 +10,7 @@ const booking: BookingItem = {
   id: 'b1', status: 'pending', requesterName: 'Dr. Napat Srisuk', requesterEmail: 'napat@dome.tu.ac.th',
   courseId: 'c1', courseName: 'Web Development', labId: 'l1', labTitle: 'React Fundamentals',
   weekday: 2, startTime: '09:00:00', endTime: '12:00:00', validFrom: '2026-11-02', validUntil: '2027-02-24',
-  machines: 25, room: 'LC-123', note: null, decisionNote: null, classScheduleId: null, slotsCreated: null,
+  machines: 25, room: 'LC-123', mode: 'onsite', note: null, decisionNote: null, classScheduleId: null, slotsCreated: null,
   mailStatus: null, createdAt: '2026-10-24T10:00:00Z',
 };
 
@@ -61,7 +61,7 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     fireEvent.click(screen.getByText('Approve'));
     expect(await screen.findByRole('alert')).toBeDefined();
     expect(approve).toHaveBeenCalledWith('b1', expect.objectContaining({
-      room: 'LC-123', machines: 25, firstDate: '2026-11-04', startTime: '09:00', endTime: '12:00', until: '2027-02-24',
+      mode: 'onsite', room: 'LC-123', machines: 25, firstDate: '2026-11-04', startTime: '09:00', endTime: '12:00', until: '2027-02-24',
     }));
   });
 

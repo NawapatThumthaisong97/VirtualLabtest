@@ -26,7 +26,7 @@ const monthKey = (y: number, m: number) => `${y}-${String(m + 1).padStart(2, '0'
 const blankForm = (date: Date): EventForm => {
   const until = new Date(date);
   until.setDate(until.getDate() + 7 * 15);
-  return { courseId: '', labId: '', room: '', machines: 0, date: toISO(date), start: '13:00', end: '16:00', until: toISO(until), note: '' };
+  return { courseId: '', labId: '', mode: 'onsite', room: '', machines: 0, date: toISO(date), start: '13:00', end: '16:00', until: toISO(until), note: '' };
 };
 
 /** คำขอ → ฟอร์ม: คาบแรก = วันในสัปดาห์ที่ขอ ตั้งแต่ validFrom */
@@ -34,14 +34,16 @@ const formFromBooking = (b: BookingItem): EventForm => {
   const first = fromISO(b.validFrom);
   first.setDate(first.getDate() + ((b.weekday - ((first.getDay() + 6) % 7) + 7) % 7));
   return {
-    bookingId: b.id, courseId: b.courseId, labId: b.labId, room: b.room ?? '', machines: b.machines,
+    bookingId: b.id, courseId: b.courseId, labId: b.labId, mode: b.mode, room: b.room ?? '', machines: b.machines,
     date: toISO(first), start: hhmm(b.startTime), end: hhmm(b.endTime), until: b.validUntil, note: '',
   };
 };
 
 const toBody = (f: EventForm): ScheduleFormBody => ({
-  courseId: f.courseId, labId: f.labId, room: f.room, machines: f.machines, firstDate: f.date,
-  startTime: f.start, endTime: f.end, until: f.until, note: f.note || undefined,
+  courseId: f.courseId, labId: f.labId, mode: f.mode,
+  // online ไม่มีห้อง และ backend นับนักศึกษาที่ลงทะเบียนเป็นจำนวนเครื่องเอง
+  ...(f.mode === 'onsite' ? { room: f.room, machines: f.machines } : {}),
+  firstDate: f.date, startTime: f.start, endTime: f.end, until: f.until, note: f.note || undefined,
 });
 
 const apiError = (e: unknown) =>
@@ -67,7 +69,8 @@ export default function ClassSchedulePage() {
 
   const events: ClassEvent[] = useMemo(
     () => (calendar.data?.events ?? []).map((e) => ({
-      id: e.id, title: e.room ? `${e.title} · ${e.room}` : e.title, date: e.date, start: e.start, end: e.end,
+      id: e.id, title: e.mode === 'online' ? `${e.title} · Online` : e.room ? `${e.title} · ${e.room}` : e.title,
+      date: e.date, start: e.start, end: e.end,
       color: colorOf(e.courseId),
     })),
     [calendar.data],
@@ -81,7 +84,7 @@ export default function ClassSchedulePage() {
   const bookings = pending.data?.items ?? [];
   const requests: ClassRequest[] = bookings.map((b) => ({
     id: b.id, requester: b.requesterName, purpose: `${b.courseName} – ${b.labTitle}`, course: b.courseName,
-    lab: b.labTitle, room: b.room ?? '-', max: `${b.machines} Machines`,
+    lab: b.labTitle, room: b.mode === 'online' ? 'Online' : b.room ?? '-', max: `${b.machines} Machines`,
     date: `${hhmm(b.startTime)}-${hhmm(b.endTime)} ${WEEKDAYS[b.weekday]}`, isNew: true,
   }));
 
