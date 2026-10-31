@@ -90,6 +90,12 @@ class TestInfraMap:
             ("unassigned", "ok", 1, 1, 0),
         ]
         assert (aws.type, aws.status, aws.instances_running) == ("cloud", "unknown", 0)
+        # ผังห้องแลป: สถานะรายเครื่อง เรียงตามชื่อ
+        assert [(m.name, m.ready, m.in_use) for m in k3s.rooms[0].machines] == [
+            ("lc123-pc01", True, True),
+            ("lc123-pc02", True, False),
+            ("lc123-pc03", False, False),
+        ]
 
     def test_aws_count(self, db, world, cluster, add_session):
         """AWS = cloud sessions RUNNING / PENDING; stopped ones not counted"""

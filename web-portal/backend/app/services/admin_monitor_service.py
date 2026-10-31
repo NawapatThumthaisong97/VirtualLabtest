@@ -19,6 +19,7 @@ from app.schemas.admin_monitor_schema import (
     ClusterMapItem,
     ControlPlane,
     InfraMapResponse,
+    RoomMachine,
     RoomMapItem,
     RoomSlot,
     RoomUsageItem,
@@ -88,6 +89,10 @@ class AdminMonitorService:
                 pcs_ready=ready,
                 pcs_in_use=sum(1 for n in members if in_use[n.metadata.name] > 0),
                 nodes=sorted(n.metadata.name for n in members),
+                machines=[
+                    RoomMachine(name=n.metadata.name, ready=_is_ready(n), in_use=in_use[n.metadata.name] > 0)
+                    for n in sorted(members, key=lambda n: n.metadata.name)
+                ],
             ))
         # unassigned ไว้ท้ายสุด
         return sorted(rooms, key=lambda r: (r.room == UNASSIGNED_ROOM, r.room))

@@ -13,6 +13,13 @@ from app.schemas.base import CamelModel
 RoomStatus = Literal["ok", "warn", "down"]
 
 
+class RoomMachine(CamelModel):
+    """คอม 1 เครื่องในห้อง (= worker 1 ตัว) ใช้วาดผังห้องแลป"""
+    name: str
+    ready: bool
+    in_use: bool = Field(..., description="มี session RUNNING บนเครื่องนี้")
+
+
 class RoomMapItem(CamelModel):
     """ห้องแลป 1 ห้อง = worker ที่มี label vlab/room เดียวกัน (คอม 1 เครื่อง = 1 worker)"""
     room: str = Field(..., description="ชื่อห้องจาก label vlab/room หรือ unassigned")
@@ -21,6 +28,7 @@ class RoomMapItem(CamelModel):
     pcs_ready: int
     pcs_in_use: int = Field(..., description="เครื่องที่มี session RUNNING อย่างน้อย 1 ตัว")
     nodes: list[str]
+    machines: list[RoomMachine] = Field(default_factory=list, description="สถานะรายเครื่อง เรียงตามชื่อ")
 
 
 class ControlPlane(CamelModel):
