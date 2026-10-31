@@ -109,9 +109,9 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
             <span>Class type</span>
             <div role="radiogroup" aria-label="Class type" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {([
-                ['onsite', 'On-site', 'เรียนในห้องแลป'],
-                ['online', 'Online', 'เรียนจากที่ไหนก็ได้'],
-              ] as const).map(([value, label, hint]) => {
+                ['onsite', 'On-site'],
+                ['online', 'Online'],
+              ] as const).map(([value, label]) => {
                 const active = form.mode === value;
                 return (
                   <button
@@ -121,14 +121,12 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
                     aria-checked={active}
                     onClick={() => setForm((f) => ({ ...f, mode: value }))}
                     style={{
-                      height: 44, borderRadius: 8, fontFamily: 'inherit', fontSize: 14, textAlign: 'left', padding: '0 14px',
+                      height: 44, borderRadius: 8, fontFamily: 'inherit', fontSize: 14, textAlign: 'center',
                       border: `1px solid ${active ? colors.primary : colors.inputBorder}`,
-                      background: active ? '#EEF4FB' : '#fff', color: colors.text,
-                      display: 'flex', alignItems: 'baseline', gap: 8,
+                      background: active ? '#EEF4FB' : '#fff', color: colors.text, fontWeight: active ? 600 : 400,
                     }}
                   >
-                    <span style={{ fontWeight: active ? 600 : 400 }}>{label}</span>
-                    <span style={{ fontSize: 12, color: colors.muted }}>{hint}</span>
+                    {label}
                   </button>
                 );
               })}
