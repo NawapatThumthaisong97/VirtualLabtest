@@ -1,6 +1,6 @@
 # คาบ online: เปิด EC2 รอไว้ให้นักศึกษาทุกคนก่อนคาบ (pre-launch)
 
-> สถานะ: **รอ Pete review** — ยังไม่มีโค้ด ยังไม่มี branch
+> สถานะ: **โค้ดเสร็จบน branch `feature/online-prelaunch` (2026-10-31) รอเทสบน VM** — Pete อนุมัติ doc แล้ว
 > ที่มา: tester ถามว่าทำไม AWS ยังรอ ~2 นาที และถ้า launch รอไว้ให้แต่ละ account ก่อนคาบได้ไหม (2026-10-31)
 
 ## 1. สรุป
@@ -93,6 +93,15 @@ T+15        scheduler: session ที่ยังไม่ claim → sky down �
 | `PRELAUNCH_LEAD_MINUTES` | `10` |
 | `PRELAUNCH_CLAIM_MINUTES` | `15` |
 | `PRELAUNCH_MAX_PARALLEL` | `5` (รอผลเทส) |
+
+## 5.6 ที่ทำจริงต่างจากแผน / เพิ่มจากแผน
+- ฝั่งอาจารย์ยังไม่มีฟอร์มขอจองในหน้าเว็บ (มีแค่ API `POST /v1/bookings`) — แก้ฟอร์มของ admin (`CreateEventModal`) ที่เดียว
+- ชื่อ cluster ของเครื่องที่ prelaunch ต่อท้าย hex 4 ตัว เพราะเปิดหลายเครื่องในวินาทีเดียว ชื่อเดิม (image + วินาที) จะซ้ำ
+  แล้ว sky launch เอา cluster เดิมมาใช้ซ้ำ
+- scheduler เปิดเมื่อ `PREWARM_ENABLED` **หรือ** `PRELAUNCH_ENABLED` (คาบ online ไม่ต้องพึ่ง K3s)
+- เครื่องที่ยัง PENDING ตอนหมดเวลารับ ยังไม่คืนในรอบนั้น รอรอบถัดไปตอนเป็น RUNNING (กัน thread launch เขียนทับสถานะ)
+- กด Start ตอนเครื่องยัง PENDING → รอจน launch เสร็จแล้วรับเครื่องนั้น (ไม่เปิดซ้อน)
+- ตั้ง autostop ใหม่ตอนรับเครื่องไม่สำเร็จ → error ให้กดใหม่ (ไม่ claim) เพราะไม่งั้นเครื่องจะลบตัวเองกลางคาบ
 
 ## 6. แผนเทส (ทำหลัง Pete อนุมัติ doc + โค้ดเสร็จ)
 
