@@ -5,7 +5,7 @@
  * then two list cards whose top third overlaps the hero.
  * The navbar comes from RootLayout, so it is not repeated here.
  */
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
@@ -20,6 +20,7 @@ import { activityService, toEntry } from '../services/activity.ts';
 import type { Entry } from '../components/EntryBox.tsx';
 import styles from './Home.module.css';
 import heroBg from '../assets/B1.jpg';
+import supportLogo from '../assets/home/support.png';
 
 
 const TABS: Tab[] = [
@@ -54,6 +55,29 @@ const INSTRUCTOR_CONSOLE: Service = {
 };
 
 // อาจารย์ / admin ไม่มีงานแลปให้ทำเอง การ์ดแรกเลยเป็นหน้าจัดการวิชา (Pete ให้ Instructor Console ขึ้นก่อน)
+/** การ์ดแนะนำในแท็บ Help Desk (การ์ดใสบน hero) */
+const HELP_CARDS: { title: string; lines: ReactNode[] }[] = [
+  {
+    title: 'Can’t run your lab?',
+    lines: [
+      'Most problems go away after Close Lab → Start Lab work again.',
+      'Starting from home takes about 2 minutes while your machine boots — keep the page open until the ports appear.',
+    ],
+  },
+  {
+    title: 'Contact us',
+    lines: [
+      'Confused about a lab, or something isn’t working? Tell us your course and lab name.',
+      <>
+        Email:{' '}
+        <a href="mailto:VirtualLabSupport@gmail.com" className="text-white underline underline-offset-2">
+          VirtualLabSupport@gmail.com
+        </a>
+      </>,
+    ],
+  },
+];
+
 const STUDENT_SERVICES: Service[] = [LAB_WORK, COMPUTE];
 const INSTRUCTOR_SERVICES: Service[] = [INSTRUCTOR_CONSOLE, COMPUTE];
 
@@ -204,6 +228,24 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
               </div>
             </div>
 
+            {tab === 'helpdesk' && (
+              <div className={`col-start-1 row-start-1 flex flex-col gap-5 ${styles.fadeUp}`}>
+                <img src={supportLogo} alt="Virtual Lab Support" className="h-auto w-[300px] select-none" draggable={false} />
+                <div className="flex flex-wrap gap-6">
+                  {HELP_CARDS.map((card) => (
+                    <div
+                      key={card.title}
+                      className="flex w-[340px] flex-col gap-2.5 rounded-[6px] border border-white/60 bg-white/15 px-6 py-5 text-white backdrop-blur-sm"
+                    >
+                      <div className="text-[19px] font-medium">{card.title}</div>
+                      {card.lines.map((line, i) => (
+                        <div key={i} className="text-[13px] leading-relaxed text-white/85">{line}</div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
