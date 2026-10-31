@@ -119,7 +119,13 @@ export default function LabDetailPage() {
         title={`${lab.course.code} : ${lab.course.name}`}
         features={[
           { label: 'Instruction', active: view === 'instruction', onClick: () => setView('instruction') },
-          { label: 'Dashboard', active: view === 'dashboard', onClick: () => setView('dashboard') },
+          // ยังไม่ได้ Start = ไม่มีอะไรให้ดู ไม่ใส่ onClick แท็บจะจางและกดไม่ได้ (ชี้แล้วขึ้น note)
+          {
+            label: 'Dashboard',
+            active: view === 'dashboard',
+            onClick: session || isLaunching ? () => setView('dashboard') : undefined,
+            note: 'กด Start Lab work ก่อน',
+          },
         ]}
         inner={{
           width: 'calc(min(1200px, 100%) - 64px)',
@@ -214,11 +220,7 @@ export default function LabDetailPage() {
               {session.image_tag}
             </p>
           </div>
-        ) : (
-          <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
-            <DocMessage>ยังไม่ได้เปิด lab — กด Start Lab work ที่แถบด้านบนเพื่อเริ่ม</DocMessage>
-          </div>
-        )
+        ) : null
       ) : (
         // คุมความกว้างคอลัมน์เท่าเดิมเพื่อให้ขนาดตัวหนังสือใน PDF อ่านสบาย
         // (pdf.js วาดหน้าเท่าความกว้างคอลัมน์ ปล่อยเต็มจอแล้วตัวโตเกินไป)
