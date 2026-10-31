@@ -92,20 +92,6 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     expect(body).not.toHaveProperty('machines');
   });
 
-  it('Cancel a class from the day list after confirming', async () => {
-    vi.spyOn(bookingService, 'getCalendar').mockResolvedValue({ month: '2026-11', events: [{
-      id: 's1', title: 'Web Development – React Fundamentals', date: toISO(new Date()),   // วันนี้ตามเวลาเครื่อง (toISOString เป็น UTC วันอาจไม่ตรง)
-      start: '13:00', end: '13:30', room: null, courseId: 'c1', courseName: 'Web Development', labId: 'l1', machines: 2,
-      status: 'scheduled', mode: 'online',
-    }] });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const cancelSlot = vi.spyOn(bookingService, 'cancelSlot').mockResolvedValue({ slotId: 's1', status: 'cancelled', released: [] });
-    renderPage();
-    fireEvent.click(await screen.findByLabelText(/Cancel Web Development/));
-    await waitFor(() => expect(cancelSlot).toHaveBeenCalledWith('s1'));
-    expect(await screen.findByText('ยกเลิกคาบแล้ว')).toBeDefined();
-  });
-
   const onsiteToday = () => vi.spyOn(bookingService, 'getCalendar').mockResolvedValue({ month: '2026-11', events: [{
     id: 's2', title: 'Web Development – React Fundamentals', date: toISO(new Date()),
     start: '09:00', end: '12:00', room: 'LC-123', courseId: 'c1', courseName: 'Web Development', labId: 'l1', machines: 20,

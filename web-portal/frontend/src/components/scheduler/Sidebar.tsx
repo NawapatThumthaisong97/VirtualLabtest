@@ -16,13 +16,11 @@ interface Props {
   onSelect: (d: Date) => void;
   onCreate: () => void;
   onRequests: () => void;
-  /** ยกเลิกคาบที่เลือก (ถามยืนยันก่อนเรียก) */
-  onCancelEvent?: (e: ClassEvent) => void;
 }
 
 const card = { background: '#fff', borderRadius: '0 0 14px 14px', fontSize: 11 } as const;
 
-export default function Sidebar({ year, month, selected, today, selectedEvents, unread, onPrev, onNext, onSelect, onCreate, onRequests, onCancelEvent }: Props) {
+export default function Sidebar({ year, month, selected, today, selectedEvents, unread, onPrev, onNext, onSelect, onCreate, onRequests }: Props) {
   const dates = monthGrid(year, month);
   const title = sameDay(selected, today) ? "Today's Events" : `${selected.getDate()} ${MONTHS[selected.getMonth()]} ${selected.getFullYear()}`;
 
@@ -73,20 +71,10 @@ export default function Sidebar({ year, month, selected, today, selectedEvents, 
           {selectedEvents.map((e) => (
             <div key={e.id} style={{ display: 'flex', gap: 8 }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: eventColors[e.color].color }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <span style={{ fontWeight: 600, fontSize: 11 }}>{e.title}</span>
                 <span style={{ color: '#666', fontSize: 10 }}>{to12h(e.start)} - {to12h(e.end)}</span>
               </div>
-              {onCancelEvent && (
-                <button
-                  type="button"
-                  aria-label={`Cancel ${e.title} ${e.start}`}
-                  onClick={() => onCancelEvent(e)}
-                  style={{ alignSelf: 'flex-start', border: `1px solid ${colors.danger}`, background: '#fff', color: colors.danger, borderRadius: 6, fontSize: 10, padding: '2px 6px', fontFamily: 'inherit' }}
-                >
-                  ยกเลิก
-                </button>
-              )}
             </div>
           ))}
         </div>

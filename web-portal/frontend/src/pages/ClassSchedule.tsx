@@ -126,9 +126,6 @@ export default function ClassSchedulePage() {
     onSuccess: (r) => done(r.released.length ? `ยกเลิกคาบแล้ว คืนเครื่องที่เปิดรอไว้ ${r.released.length} เครื่อง` : 'ยกเลิกคาบแล้ว'),
     onError: (e) => setError(apiError(e)),
   });
-  const cancelEvent = (e: ClassEvent) => {
-    if (window.confirm(`ยกเลิกคาบ ${e.title} ${e.start}–${e.end} ?`)) cancel.mutate(e.id);
-  };
   const deleteFromModal = (f: EventForm) => {
     if (f.slotId && window.confirm(`ยกเลิกคาบวันที่ ${f.date} ${f.start}–${f.end} ?`)) cancel.mutate(f.slotId);
   };
@@ -200,7 +197,6 @@ export default function ClassSchedulePage() {
           onSelect={select}
           onCreate={openCreate}
           onRequests={() => setRequestsOpen(true)}
-          onCancelEvent={cancelEvent}
         />
         <MonthCalendar
           year={view.year}
