@@ -20,10 +20,12 @@ export const colors = {
   logTitle: '#3AAEE0',
 } as const;
 
-export type StatusTone = 'success' | 'error' | 'warning';
+export type StatusTone = 'success' | 'error' | 'warning' | 'info' | 'neutral';
 
 export const toneColor: Record<StatusTone, string> = {
   success: colors.success,
   error: colors.error,
   warning: colors.yellow,
+  info: colors.blue,
+  neutral: '#B5B5B5',
 };

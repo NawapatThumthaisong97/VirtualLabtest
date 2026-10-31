@@ -63,12 +63,30 @@ export interface InfraMap {
   clusters: ClusterMapItem[];
 }
 
+export type RoomClassStatus = 'pending' | 'preparing' | 'ready' | 'in_class' | 'incomplete' | 'done';
+
+/** คาบ 1 คาบของห้องนี้ในวันนี้ */
+export interface RoomClass {
+  id: string;
+  course: string;
+  startsAt: string;
+  endsAt: string;
+  status: RoomClassStatus;
+  /** กำลังเรียน: เครื่องที่เปิดแลปอยู่ / จบแล้ว: คนที่เคยเปิดแลปในคาบ */
+  inUse: number;
+  /** เครื่องที่จองไว้ */
+  seats: number;
+  pcsReady: number;
+}
+
 export interface RoomUsageItem {
   room: string;
   pcsInUse: number;
   pcsTotal: number;
   state: 'launched' | 'idle';
   slot: { course: string; startsAt: string; endsAt: string; status: string } | null;
+  classes?: RoomClass[];
+  outsideClass?: number;
 }
 
 export interface RoomUsage {
