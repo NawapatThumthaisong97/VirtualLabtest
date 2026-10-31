@@ -15,13 +15,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.configs.db import SessionLocal
+from app.configs.settings import settings
 from app.exceptions.domain import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models.booking_request import BookingRequest
 from app.models.class_schedule import ClassSchedule
 from app.models.class_slot import ClassSlot, ClassSlotStatus
 from app.models.courses import Course
 from app.models.enrollment import Enrollment, RoleInCourse
-from app.models.lab import Lab
+from app.models.lab import Lab, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
 from app.models.user import User
 from app.schemas.booking_schema import (
@@ -72,6 +73,27 @@ def _lab_of_course(db: DbSession, lab_id: UUID, course_id: UUID) -> Lab:
     return lab
 
 
+def _enrolled_students(db: DbSession, course_id: UUID) -> int:
+    return (db.query(Enrollment.user_id)
+            .filter(Enrollment.course_id == course_id, Enrollment.role_in_course == RoleInCourse.STUDENT)
+            .count())
+
+
+def _room_and_machines(db: DbSession, course_id: UUID, mode: str, room: Optional[str],
+                       machines: Optional[int], room_required: bool) -> tuple[Optional[str], int]:
+    """onsite: ใช้ห้อง / จำนวนเครื่องตามฟอร์ม — online: ไม่มีห้อง เครื่อง = นักศึกษาที่ลงทะเบียนทุกคน"""
+    if mode == "online":
+        students = _enrolled_students(db, course_id)
+        if students == 0:
+            raise ValidationError("คาบ online ต้องมีนักศึกษาลงทะเบียนวิชานี้ก่อน (ระบบเปิดเครื่องให้ทุกคนที่ลงทะเบียน)")
+        return None, students
+    if room_required and not room:
+        raise ValidationError("คาบ on-site ต้องเลือกห้อง")
+    if machines is None:
+        raise ValidationError("คาบ on-site ต้องระบุจำนวนเครื่อง")
+    return room, machines
+
+
 def _check_times(start, end, first: date, until: date) -> None:
     if end <= start:
         raise ValidationError("เวลาจบต้องหลังเวลาเริ่ม")
@@ -88,7 +110,8 @@ def _to_item(db: DbSession, b: BookingRequest, slots_created: Optional[int] = No
         requester_email=requester.email if requester else "-", course_id=b.course_id,
         course_name=course.name if course else "-", lab_id=b.lab_id, lab_title=lab.title if lab else "-",
         weekday=b.weekday, start_time=b.start_time, end_time=b.end_time, valid_from=b.valid_from,
-        valid_until=b.valid_until, machines=b.machines, room=b.room, note=b.note, decision_note=b.decision_note,
+        valid_until=b.valid_until, machines=b.machines, room=b.room, mode=b.mode, note=b.note,
+        decision_note=b.decision_note,
         class_schedule_id=b.class_schedule_id, slots_created=slots_created, mail_status=b.mail_status,
         created_at=b.created_at,
     )
@@ -102,10 +125,13 @@ def create_request(db: DbSession, user: User, body: BookingCreate) -> BookingIte
         raise ForbiddenError("ขอจองได้เฉพาะอาจารย์ของวิชานี้")
     _lab_of_course(db, body.lab_id, body.course_id)
     _check_times(body.start_time, body.end_time, body.valid_from, body.valid_until)
+    room, machines = _room_and_machines(db, body.course_id, body.mode, body.room, body.machines,
+                                        room_required=False)
     b = BookingRequest(
         requested_by=user.id, course_id=body.course_id, lab_id=body.lab_id, weekday=body.weekday,
         start_time=body.start_time, end_time=body.end_time, valid_from=body.valid_from,
-        valid_until=body.valid_until, machines=body.machines, room=body.room, note=body.note, status="pending",
+        valid_until=body.valid_until, machines=machines, room=room, mode=body.mode, note=body.note,
+        status="pending",
     )
     db.add(b)
     db.commit()
@@ -137,23 +163,29 @@ def _get(db: DbSession, booking_id: UUID) -> BookingRequest:
     return b
 
 
-def _conflicts(db: DbSession, room: str, course_id: UUID, times: list[tuple[datetime, datetime]]) -> Optional[str]:
-    """คาบแรกที่ชน (ห้องเดียวกัน หรือวิชาเดียวกัน) เป็นข้อความ — ไม่ชน = None"""
+def _conflicts(db: DbSession, room: Optional[str], course_id: UUID,
+               times: list[tuple[datetime, datetime]]) -> Optional[str]:
+    """คาบแรกที่ชน (ห้องเดียวกัน หรือวิชาเดียวกัน) เป็นข้อความ — ไม่ชน = None
+
+    room = None (คาบ online) เช็กแค่วิชาเดียวกัน — ห้ามเทียบ room == None เพราะจะชนกับทุกคาบที่ไม่มีห้อง
+    """
     if not times:
         return None
     start, end = min(t[0] for t in times), max(t[1] for t in times)
+    same = ClassSlot.course_id == course_id
+    if room is not None:
+        same = same | (ClassSlot.room == room)
     existing = (
         db.query(ClassSlot, Course)
         .join(Course, ClassSlot.course_id == Course.id)
         .filter(ClassSlot.deleted_at.is_(None), ClassSlot.status != ClassSlotStatus.CANCELLED,
-                ClassSlot.starts_at < end, ClassSlot.ends_at > start,
-                (ClassSlot.room == room) | (ClassSlot.course_id == course_id))
+                ClassSlot.starts_at < end, ClassSlot.ends_at > start, same)
         .all()
     )
     for slot, course in existing:
         for s, e in times:
             if slot.starts_at < e and slot.ends_at > s:
-                where = f"ห้อง {slot.room}" if slot.room == room else "วิชาเดียวกัน"
+                where = f"ห้อง {slot.room}" if room is not None and slot.room == room else "วิชาเดียวกัน"
                 local = slot.starts_at.astimezone(TZ)
                 return (f"{where} มีคาบ {course.name} วัน{WEEKDAY_TH[local.weekday()]} "
                         f"{local:%d/%m/%Y %H:%M}–{slot.ends_at.astimezone(TZ):%H:%M} อยู่แล้ว")
@@ -165,25 +197,28 @@ def _schedule(db: DbSession, b: BookingRequest, admin: User, form: ScheduleForm,
     """สร้าง class_schedule + slots ให้คำขอ b (commit) คืนจำนวนคาบ"""
     lab = _lab_of_course(db, form.lab_id, b.course_id)
     _check_times(form.start_time, form.end_time, form.first_date, form.until)
-    if room_capacity is not None:
-        if form.room not in room_capacity:
-            raise ValidationError(f"ไม่มีห้อง {form.room} (ห้องที่มี: {', '.join(sorted(room_capacity)) or '-'})")
-        if form.machines > room_capacity[form.room]:
-            raise ValidationError(f"ห้อง {form.room} มี {room_capacity[form.room]} เครื่อง ขอ {form.machines}")
+    room, machines = _room_and_machines(db, b.course_id, form.mode, form.room, form.machines,
+                                        room_required=True)
+    if room is not None and room_capacity is not None:
+        if room not in room_capacity:
+            raise ValidationError(f"ไม่มีห้อง {room} (ห้องที่มี: {', '.join(sorted(room_capacity)) or '-'})")
+        if machines > room_capacity[room]:
+            raise ValidationError(f"ห้อง {room} มี {room_capacity[room]} เครื่อง ขอ {machines}")
 
     schedule = ClassSchedule(
         course_id=b.course_id, weekday=form.first_date.weekday(), start_time=form.start_time,
         end_time=form.end_time, valid_from=form.first_date, valid_until=form.until,
-        default_lab_image_id=lab.image_id, expected_seats=form.machines, created_by=admin.id, room=form.room,
+        default_lab_image_id=lab.image_id, expected_seats=machines, created_by=admin.id, room=room,
+        mode=form.mode,
     )
     times = [(_to_utc(d, form.start_time), _to_utc(d, form.end_time)) for d in _class_dates(schedule)]
     if not times:
         raise ValidationError("ช่วงวันที่ไม่มีวันที่ตรงกับวันในสัปดาห์ที่เลือก")
-    conflict = _conflicts(db, form.room, b.course_id, times)
+    conflict = _conflicts(db, room, b.course_id, times)
     if conflict:
         raise RoomConflictError(conflict)
 
-    b.lab_id, b.room, b.machines = form.lab_id, form.room, form.machines
+    b.lab_id, b.room, b.machines, b.mode = form.lab_id, room, machines, form.mode
     b.weekday, b.start_time, b.end_time = schedule.weekday, form.start_time, form.end_time
     b.valid_from, b.valid_until = form.first_date, form.until
     b.status, b.decided_by, b.decided_at = "approved", admin.id, datetime.now(timezone.utc)
@@ -199,7 +234,7 @@ def _schedule(db: DbSession, b: BookingRequest, admin: User, form: ScheduleForm,
     except IntegrityError as e:
         # ชนพร้อมกันกับคนอื่น (เช็กข้างบนแล้วแต่ยังแข่งกันได้) — exclusion constraint กันไว้
         db.rollback()
-        raise RoomConflictError(f"ห้อง {form.room} หรือวิชานี้มีคาบเวลาทับกัน: {e.orig}") from e
+        raise RoomConflictError(f"ห้อง {room or '-'} หรือวิชานี้มีคาบเวลาทับกัน: {e.orig}") from e
     return len(slots)
 
 
@@ -227,10 +262,11 @@ def create_direct(db: DbSession, admin: User, form: ScheduleCreate,
     """Create new event: admin สร้างเอง = คำขอที่ approved ทันที (เก็บประวัติเหมือนคำขอ + ส่งเมลถึงอาจารย์)"""
     if db.get(Course, form.course_id) is None:
         raise NotFoundError("ไม่พบวิชา")
+    # machines / room จริงตั้งใน _schedule (online นับนักศึกษาเอง) ตรงนี้ใส่ไว้ให้ผ่าน NOT NULL ก่อน
     b = BookingRequest(
         requested_by=admin.id, course_id=form.course_id, lab_id=form.lab_id, weekday=form.first_date.weekday(),
         start_time=form.start_time, end_time=form.end_time, valid_from=form.first_date, valid_until=form.until,
-        machines=form.machines, room=form.room, status="pending",
+        machines=form.machines or 1, room=form.room, mode=form.mode, status="pending",
     )
     db.add(b)
     db.flush()
@@ -252,10 +288,18 @@ def _mail_text(db: DbSession, b: BookingRequest) -> tuple[str, str]:
     head = f"วิชา: {course.name if course else '-'}\nLab: {lab.title if lab else '-'}\nเวลา: {when}\n"
     if b.status == "approved":
         subject = f"[Virtual Lab] จองห้องแลปให้แล้ว — {course.name if course else ''}"
-        body = (f"เรียน อาจารย์\n\nVirtual Lab Team จองห้องแลปให้แล้วครับ\n\n{head}"
-                f"ห้อง: {b.room}\nจำนวนเครื่อง: {b.machines}\n"
+        if b.mode == "online":
+            where = f"รูปแบบ: online (ไม่ใช้ห้อง)\nจำนวนเครื่อง: {b.machines} (นักศึกษาที่ลงทะเบียนทุกคน)\n"
+            prepare = ("ระบบจะเปิดเครื่องบน AWS รอไว้ให้นักศึกษาทุกคนก่อนเริ่มคาบประมาณ "
+                       f"{settings.PRELAUNCH_LEAD_MINUTES} นาที นักศึกษาที่ไม่กด Start ภายใน "
+                       f"{settings.PRELAUNCH_CLAIM_MINUTES} นาทีหลังเริ่มคาบ ระบบจะคืนเครื่อง "
+                       "(กดทีหลังได้ แต่ต้องรอเปิดเครื่องใหม่ราว 2 นาที)")
+        else:
+            where = f"ห้อง: {b.room}\nจำนวนเครื่อง: {b.machines}\n"
+            prepare = "ระบบจะเตรียม lab ลงเครื่องในห้องให้ก่อนเริ่มคาบประมาณ 30 นาที"
+        body = (f"เรียน อาจารย์\n\nVirtual Lab Team จองคาบให้แล้วครับ\n\n{head}{where}"
                 + (f"หมายเหตุ: {b.decision_note}\n" if b.decision_note else "")
-                + "\nระบบจะเตรียม lab ลงเครื่องในห้องให้ก่อนเริ่มคาบประมาณ 30 นาที\n\nVirtual Lab Team")
+                + f"\n{prepare}\n\nVirtual Lab Team")
     else:
         subject = f"[Virtual Lab] ไม่สามารถจองห้องแลปได้ — {course.name if course else ''}"
         body = (f"เรียน อาจารย์\n\nขออภัยครับ คำขอจองห้องแลปไม่ได้รับการอนุมัติ\n\n{head}"
@@ -310,6 +354,7 @@ def get_calendar(db: DbSession, month: date) -> CalendarResponse:
             id=slot.id, title=f"{course.name} – {lab.title}" if lab else course.name, date=s.date(),
             start=f"{s:%H:%M}", end=f"{e:%H:%M}", room=slot.room, course_id=course.id, course_name=course.name,
             machines=slot.expected_seats, status=slot.status.value,
+            mode="online" if slot.run_target == RunTarget.AWS else "onsite",
         ))
     return CalendarResponse(month=f"{month.year:04d}-{month.month:02d}", events=events)
 

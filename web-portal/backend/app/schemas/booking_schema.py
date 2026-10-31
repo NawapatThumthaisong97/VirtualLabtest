@@ -11,6 +11,8 @@ from pydantic import Field
 from app.schemas.base import CamelModel
 
 BookingStatus = Literal["pending", "approved", "rejected", "cancelled"]
+# onsite = เรียนในห้องแลป (warm pod) / online = เปิด EC2 รอไว้ให้ทุกคนที่ลงทะเบียน (docs/AWS_PRELAUNCH.md)
+ClassMode = Literal["onsite", "online"]
 
 
 class BookingCreate(CamelModel):
@@ -22,16 +24,21 @@ class BookingCreate(CamelModel):
     end_time: time
     valid_from: date
     valid_until: date
-    machines: int = Field(..., gt=0)
-    room: Optional[str] = Field(None, max_length=64, description="ห้องที่อยากได้ (ไม่บังคับ)")
+    mode: ClassMode = "onsite"
+    machines: Optional[int] = Field(None, gt=0, description="onsite ต้องใส่ / online = จำนวนนักศึกษาที่ลงทะเบียน (ระบบนับเอง)")
+    room: Optional[str] = Field(None, max_length=64, description="ห้องที่อยากได้ (ไม่บังคับ, online ไม่ใช้)")
     note: Optional[str] = Field(None, max_length=1000)
 
 
 class ScheduleForm(CamelModel):
-    """ฟอร์ม Class Scheduler (admin): คาบแรก first_date + เวลา, ทำซ้ำทุกสัปดาห์ถึง until"""
+    """ฟอร์ม Class Scheduler (admin): คาบแรก first_date + เวลา, ทำซ้ำทุกสัปดาห์ถึง until
+
+    onsite ต้องมี room + machines / online ไม่มีห้อง และ machines = จำนวนนักศึกษาที่ลงทะเบียน (ระบบนับเอง)
+    """
     lab_id: UUID
-    room: str = Field(..., min_length=1, max_length=64)
-    machines: int = Field(..., gt=0)
+    mode: ClassMode = "onsite"
+    room: Optional[str] = Field(None, min_length=1, max_length=64)
+    machines: Optional[int] = Field(None, gt=0)
     first_date: date
     start_time: time
     end_time: time
@@ -64,6 +71,7 @@ class BookingItem(CamelModel):
     valid_until: date
     machines: int
     room: Optional[str]
+    mode: ClassMode
     note: Optional[str]
     decision_note: Optional[str]
     class_schedule_id: Optional[UUID]
@@ -88,6 +96,7 @@ class CalendarEvent(CamelModel):
     course_name: str
     machines: int
     status: str
+    mode: ClassMode = Field(..., description="online = slot ที่เปิด EC2 รอไว้ (run_target AWS)")
 
 
 class CalendarResponse(CamelModel):
