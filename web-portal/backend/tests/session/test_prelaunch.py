@@ -16,7 +16,9 @@ from app.models.enrollment import Enrollment, RoleInCourse
 from app.models.lab import RunTarget
 from app.models.session import Session as SessionModel, SessionEndReason, SessionStatus
 from app.models.user import User
+from app.exceptions.domain import ClusterOperationError
 from app.services import prelaunch_service as pl
+from app.services import session_service
 
 NOW = datetime(2031, 3, 3, 9, 0, tzinfo=timezone.utc)
 
@@ -175,3 +177,93 @@ class TestExpire:
         slot = online()
         pl.sync_prelaunch(db, slot.ends_at, background=run_now)
         assert slot.status == ClassSlotStatus.DONE
+
+
+def _started_online(online):
+    """คาบ online ที่เริ่มไปแล้ว 1 นาที (create_session ดูเวลาจริง ไม่ใช่ NOW)"""
+    return online(starts_in=datetime.now(timezone.utc) - NOW - timedelta(minutes=1))
+
+
+def _prelaunch_for(db, svc, world, slot, user, status=SessionStatus.RUNNING):
+    """record ที่ scheduler เปิดรอไว้ให้ user (ข้าม sync_prelaunch ตรงนี้ไม่ต้องอิงช่วงเวลา lead)"""
+    session, _task = svc._new_sky_session(user.id, world.aws_lab, world.aws_image, RunTarget.AWS, None,
+                                          class_slot_id=slot.id, prelaunched_at=datetime.now(timezone.utc),
+                                          autostop_minutes=pl.safety_minutes())
+    if status == SessionStatus.RUNNING:
+        session.endpoints = {"8080": "http://10.10.2.7:8080"}
+    session.status = status
+    db.commit()
+    return session
+
+
+class TestClaim:
+    """Student presses Start in an online class and gets the machine launched for them"""
+
+    def test_claim_running(self, db, svc, world, online, fake_sky):
+        """Machine ready -> returned at once, claimed_at set, autostop reset to lifespan, nothing launched"""
+        slot = _started_online(online)
+        waiting = _prelaunch_for(db, svc, world, slot, world.user)
+
+        result = svc.create_session(world.user.id, world.aws_lab.id)
+
+        assert result["session_id"] == waiting.id and result["endpoints"] == {"8080": "http://10.10.2.7:8080"}
+        assert waiting.claimed_at is not None
+        assert fake_sky.autostops == [(waiting.sky_cluster_name, world.aws_image.lifespan_minutes, True)]
+        assert fake_sky.launched == []
+        left = waiting.expires_at.replace(tzinfo=None) - datetime.utcnow()
+        assert timedelta(minutes=58) < left <= timedelta(minutes=60)
+
+    def test_claim_waits_for_pending(self, db, svc, world, online, fake_sky):
+        """Still launching -> wait until the scheduler's thread finishes, then claim (no second machine)"""
+        slot = _started_online(online)
+        waiting = _prelaunch_for(db, svc, world, slot, world.user, status=SessionStatus.PENDING)
+
+        def finish(clock):
+            waiting.status = SessionStatus.RUNNING
+            waiting.endpoints = {"8080": "http://10.10.2.8:8080"}
+            db.commit()
+        session_service.time.on_sleep = finish   # FakeClock ของ fake_sky: รอ 1 รอบแล้ว launch เสร็จ
+
+        result = svc.create_session(world.user.id, world.aws_lab.id)
+        assert result["session_id"] == waiting.id and waiting.claimed_at is not None
+        assert fake_sky.launched == []
+
+    def test_failed_prelaunch_launches_new(self, db, svc, world, online, fake_sky):
+        """Pre-launch failed -> normal Sky launch for the student"""
+        slot = _started_online(online)
+        failed = _prelaunch_for(db, svc, world, slot, world.user, status=SessionStatus.FAILED)
+
+        result = svc.create_session(world.user.id, world.aws_lab.id)
+        assert result["session_id"] != failed.id and len(fake_sky.launched) == 1
+
+    def test_released_then_late_student(self, db, svc, world, online, fake_sky):
+        """Machine released (unclaimed) -> late student gets a normal Sky launch"""
+        slot = _started_online(online)
+        released = _prelaunch_for(db, svc, world, slot, world.user)
+        released.status, released.end_reason = SessionStatus.STOPPED, SessionEndReason.PRELAUNCH_UNCLAIMED
+        db.commit()
+
+        result = svc.create_session(world.user.id, world.aws_lab.id)
+        assert result["run_target"] == "aws" and len(fake_sky.launched) == 1
+
+    def test_autostop_failure_not_claimed(self, db, svc, world, online, fake_sky, monkeypatch):
+        """Cannot reset autostop -> error, machine stays unclaimed (student can press again)"""
+        slot = _started_online(online)
+        waiting = _prelaunch_for(db, svc, world, slot, world.user)
+
+        def broken(*a, **k):
+            raise RuntimeError("API server down")
+        monkeypatch.setattr(fake_sky, "autostop", broken)
+
+        with pytest.raises(ClusterOperationError):
+            svc.create_session(world.user.id, world.aws_lab.id)
+        assert waiting.claimed_at is None
+
+    def test_lab_machine_in_online_class_goes_aws(self, db, svc, world, online, fake_sky, monkeypatch):
+        """Online class: Start from a lab machine still gets EC2 (no warm pod / pod)"""
+        _started_online(online)
+        monkeypatch.setattr(svc, "_client_node", lambda ip, always=False: ("worker-pete", "100.83.96.97"))
+        monkeypatch.setattr(svc, "_try_warm_pod", lambda *a: pytest.fail("warm pod used in online class"))
+
+        result = svc.create_session(world.user.id, world.aws_lab.id, client_ip="100.83.96.97")
+        assert result["run_target"] == "aws" and len(fake_sky.launched) == 1

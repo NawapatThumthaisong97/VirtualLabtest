@@ -9,6 +9,7 @@ import shlex
 import sky
 import time
 from sky.exceptions import ClusterDoesNotExist
+from sky.skylet.autostop_lib import AutostopWaitFor
 
 from app.adapters.ecr_adapter import get_ecr_token
 from app.configs.settings import settings
@@ -274,6 +275,14 @@ class SessionService:
         )
         if enrollment is None:
             raise ForbiddenError("ต้องลงทะเบียนในวิชานี้ก่อนเริ่ม lab")
+
+        # คาบ online: มีเครื่องที่ scheduler เปิดรอไว้ให้คนนี้ → รับเครื่องนั้นเลย (docs/AWS_PRELAUNCH.md)
+        # ต้องมาก่อนเช็ก existing_session ไม่งั้นจะเจอเครื่องที่เปิดรอไว้แล้วตอบว่ามี session อยู่แล้ว
+        prelaunched = self._prelaunched_for(user_id, lab_id)
+        if prelaunched is not None:
+            claimed = self._claim_prelaunched(prelaunched, lab)
+            if claimed is not None:
+                return claimed
         
         existing_session = (
             self.db.query(SessionModel)
@@ -365,6 +374,10 @@ class SessionService:
         # กฎเดียวทุก lab: เครื่องแลป → K8s (warm pod / pod ตรง), ที่อื่น → EC2 (docs/archive/LAB_DIRECT_POD.md)
         # ต้องรู้เสมอว่ากดจากเครื่องแลปไหม ไม่ขึ้นกับ WARM_POD / LAB_ISOLATION
         node = self._client_node(client_ip, always=True)
+        if node is not None and self._in_online_class(lab):
+            # คาบ online แยกจากห้องแลปเด็ดขาด: กดจากเครื่องแลปก็ได้ EC2 (ไม่ใช้ warm pod ของคาบ on-site)
+            logger.info(f"[auto] Start from lab machine {node[0]} during online class -> aws")
+            node = None
         run_target = resolve_run_target(node)
         where = f"lab machine {node[0]}" if node else f"outside ({client_ip or 'unknown ip'})"
         logger.info(f"[auto] Start from {where} -> {run_target.value}")
@@ -489,6 +502,70 @@ class SessionService:
             "started_at": session.started_at,
             "expires_at": session.expires_at,
         }
+
+    def _prelaunched_for(self, user_id: UUID, lab_id: UUID) -> Optional[SessionModel]:
+        """เครื่องที่ prelaunch เปิดรอไว้ให้ user นี้ใน lab นี้ และยังไม่มีใครรับ (PENDING / RUNNING)"""
+        return (
+            self.db.query(SessionModel)
+            .filter(
+                SessionModel.user_id == user_id,
+                SessionModel.lab_id == lab_id,
+                SessionModel.prelaunched_at.isnot(None),
+                SessionModel.claimed_at.is_(None),
+                SessionModel.status.in_([SessionStatus.PENDING, SessionStatus.RUNNING]),
+                SessionModel.deleted_at.is_(None),
+            )
+            .order_by(SessionModel.started_at.desc())
+            .first()
+        )
+
+    def _claim_prelaunched(self, session: SessionModel, lab: Lab) -> Optional[dict]:
+        """รับเครื่องที่เปิดรอไว้ คืน dict เหมือน launch เสร็จ — เครื่องใช้ไม่ได้ (launch พัง) คืน None ให้ launch ใหม่
+
+        ยัง PENDING = thread ของ scheduler กำลัง launch อยู่ รอจนเสร็จแทนการเปิดเครื่องซ้อน
+        รับแล้วตั้ง autostop ใหม่ตาม lifespan ของ image (ตอนเปิดรอตั้งไว้สั้น ๆ แค่กันตก)
+        """
+        deadline = time.monotonic() + JOB_START_TIMEOUT.total_seconds()
+        while session.status == SessionStatus.PENDING and time.monotonic() < deadline:
+            time.sleep(JOB_POLL_SECONDS)
+            # thread ของ scheduler commit ผ่าน DB session ของมันเอง ต้องอ่านใหม่จาก DB
+            self.db.expire(session)
+            self.db.refresh(session)
+        if session.status != SessionStatus.RUNNING:
+            logger.info(f"[prelaunch] {session.sky_cluster_name} not usable ({session.status.name}), launching new")
+            return None
+
+        lab_image = self.lab_image_repository.find_by_id(session.lab_image_id)
+        lifespan = (lab_image.lifespan_minutes if lab_image else None) or 60
+        try:
+            sky.get(sky.autostop(session.sky_cluster_name, idle_minutes=lifespan,
+                                 wait_for=AutostopWaitFor.NONE, down=True))
+        except Exception as e:
+            # ไม่ตั้งใหม่ = เครื่องจะลบตัวเองตาม autostop สั้น ๆ ตอนเปิดรอ (กลางคาบ) ให้กดใหม่ดีกว่า
+            raise ClusterOperationError(f"ตั้งเวลาเครื่องที่เปิดรอไว้ไม่สำเร็จ ลองกด Start อีกครั้ง: {e}")
+
+        session.claimed_at = datetime.now(timezone.utc)
+        session.expires_at = datetime.utcnow() + timedelta(minutes=lifespan)
+        self.db.commit()
+        self.db.refresh(session)
+        logger.info(f"[prelaunch] user {session.user_id} claimed {session.sky_cluster_name}")
+        return self._sky_result(session, lab, lab_image, RunTarget.AWS)
+
+    def _in_online_class(self, lab: Lab) -> bool:
+        """วิชานี้กำลังมีคาบ online อยู่ตอนนี้ไหม (slot run_target AWS)"""
+        now = datetime.now(timezone.utc)
+        return (
+            self.db.query(ClassSlot.id)
+            .filter(
+                ClassSlot.course_id == lab.course_id,
+                ClassSlot.run_target == RunTarget.AWS,
+                ClassSlot.starts_at <= now,
+                ClassSlot.ends_at > now,
+                ClassSlot.status != ClassSlotStatus.CANCELLED,
+                ClassSlot.deleted_at.is_(None),
+            )
+            .first()
+        ) is not None
 
     def _current_slot_id(self, lab: Lab) -> Optional[UUID]:
         """คาบของวิชานี้ที่กำลังเรียนอยู่ตอนนี้ (หน้า admin ใช้บอกว่าห้องไหนใช้โดยคาบอะไร) ไม่มี = None

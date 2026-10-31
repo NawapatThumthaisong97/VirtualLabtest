@@ -53,6 +53,7 @@ class FakeSky:
         self.downed: list[str] = []
         self.status_calls: list[tuple[list[str], object]] = []
         self.tailed: list[tuple[str, int]] = []
+        self.autostops: list[tuple[str, int, bool]] = []
         self._next_job_id = 1
 
     def get(self, request: FakeRequest):
@@ -95,6 +96,10 @@ class FakeSky:
         if cluster_name not in self.clusters:
             return FakeRequest(exc=ClusterDoesNotExist(cluster_name))
         del self.clusters[cluster_name]
+        return FakeRequest(value=None)
+
+    def autostop(self, cluster_name, idle_minutes, wait_for=None, down=False):
+        self.autostops.append((cluster_name, idle_minutes, down))
         return FakeRequest(value=None)
 
     def tail_logs(self, cluster_name, job_id, follow, tail=0, output_stream=None):
