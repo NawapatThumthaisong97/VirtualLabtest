@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { colors, type StatusTone } from './theme';
 import { Card, StatusDot, cellBorder } from './ui';
 import InfraMap from './InfraMap';
+import RoomFloor from './RoomFloor';
 import { formatThaiTime } from './SystemTable';
 import type { InfraMap as InfraMapData, RoomUsage, ServiceHealth, SystemStatus } from '../../services/adminDashboard';
 
@@ -39,6 +40,9 @@ export default function InfraVisualizer({
 }) {
   const rooms = usage?.rooms ?? [];
   const [picked, setPicked] = useState<string | null>(null);
+  // กดห้องในแผนผัง → แสดงผังเครื่องของห้องนั้นแทนแผนผัง กดชื่อห้องเพื่อกลับ
+  const [floor, setFloor] = useState<string | null>(null);
+  const floorRoom = map?.clusters.find((c) => c.type === 'k3s')?.rooms?.find((r) => r.room === floor);
   const selected = rooms.find((r) => r.room === picked) ?? rooms[0];
   const resources = (status?.services ?? []).filter((s) => s.key in RESOURCE_KEYS);
 
@@ -46,10 +50,21 @@ export default function InfraVisualizer({
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', borderBottom: cellBorder }}>
         <span style={{ color: colors.blue }}>Infrastructure Visualizer</span>
-        <span style={{ color: colors.muted, fontSize: 11 }}>คลิกห้องเพื่อดูรายละเอียด · Alt + scroll ซูม</span>
+        <span style={{ color: colors.muted, fontSize: 11 }}>คลิกห้องเพื่อดูผังเครื่อง · Alt + scroll ซูม</span>
       </div>
 
-      <InfraMap data={map} selected={selected?.room ?? null} onSelect={setPicked} />
+      {floorRoom ? (
+        <RoomFloor room={floorRoom.room} machines={floorRoom.machines ?? []} onBack={() => setFloor(null)} />
+      ) : (
+        <InfraMap
+          data={map}
+          selected={selected?.room ?? null}
+          onSelect={(room) => {
+            setPicked(room);
+            setFloor(room);
+          }}
+        />
+      )}
 
       <div style={{ padding: '14px 0 4px' }}>
         <div style={{ fontWeight: 600, marginBottom: 10, padding: '0 14px' }}>ClusterName : {selected?.room ?? '-'}</div>

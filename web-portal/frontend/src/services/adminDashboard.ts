@@ -32,6 +32,13 @@ export interface SystemStatus {
 
 export type RoomStatus = 'ok' | 'warn' | 'down';
 
+/** คอม 1 เครื่องในห้อง (worker 1 ตัว) สำหรับผังห้องแลป */
+export interface RoomMachine {
+  name: string;
+  ready: boolean;
+  inUse: boolean;
+}
+
 export interface RoomMapItem {
   room: string;
   status: RoomStatus;
@@ -39,6 +46,7 @@ export interface RoomMapItem {
   pcsReady: number;
   pcsInUse: number;
   nodes: string[];
+  machines?: RoomMachine[];
 }
 
 export interface ClusterMapItem {
