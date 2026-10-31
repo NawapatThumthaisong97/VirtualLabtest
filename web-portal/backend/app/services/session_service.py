@@ -60,6 +60,8 @@ POD_POLL_SECONDS = 2
 # และ server ไม่เห็น request ที่พังเลย (น่าจะใช้ connection keep-alive ที่ server ปิดไปแล้วซ้ำ)
 # ถ้าไม่ลองใหม่: launch สำเร็จแต่ job_status พัง → ตั้ง FAILED แล้ว sky.down ก็พังอีก → EC2 ค้างจน autostop
 SKY_RETRY_ATTEMPTS = 3
+# reconciler ตามลบเครื่องของ session ที่ FAILED ย้อนหลังกี่ชั่วโมง (เครื่องที่เก่ากว่า autostop ลบไปแล้ว)
+LEAK_LOOKBACK = timedelta(hours=2)
 SKY_RETRY_SECONDS = 1
 
 T = TypeVar("T")
@@ -908,6 +910,8 @@ class SessionService:
         if warm:
             self._reconcile_warm(warm, result)
 
+        self._down_leaked_failed(result)
+
         # ไม่มีชื่อ cluster = record ที่ไม่ได้มาจาก launch จริง (เช่น seed) ไม่ใช่งานของ reconciler
         running = [
             s for s in active
@@ -929,6 +933,35 @@ class SessionService:
                 self._end_session(session, SessionStatus.STOPPED, self._gone_reason(session))
                 result["stopped"].append(session.sky_cluster_name)
         return result
+
+    def _down_leaked_failed(self, result: dict) -> None:
+        """session ที่ launch พังแต่ sky.down ตอนนั้นไม่สำเร็จ (ต่อ API server ไม่ได้) → เครื่องยังอยู่ ลบซ้ำ
+
+        ดูเฉพาะที่จบภายใน LEAK_LOOKBACK เครื่องที่เก่ากว่านั้น autostop ลบไปแล้ว
+        ถาม sky.status ไม่ได้ = ข้ามรอบนี้ (รอบหน้าลองใหม่)
+        """
+        since = datetime.utcnow() - LEAK_LOOKBACK
+        failed = [
+            s.sky_cluster_name for s in self.db.query(SessionModel).filter(
+                SessionModel.status == SessionStatus.FAILED,
+                SessionModel.sky_cluster_name.isnot(None),
+                SessionModel.ended_at >= since,
+            )
+        ]
+        result["leaked_downed"] = []
+        if not failed:
+            return
+        try:
+            records = sky_call(lambda: sky.get(sky.status(cluster_names=failed,
+                                                          refresh=sky.StatusRefreshMode.NONE)))
+        except Exception as e:
+            logger.warning(f"[reconcile] cannot check failed clusters: {e}")
+            return
+        for record in records:
+            name = record.get("name")
+            logger.warning(f"[reconcile] cluster {name} of a failed session is still up, downing")
+            self._down_quietly(name)
+            result["leaked_downed"].append(name)
 
     def _reconcile_warm(self, sessions: list[SessionModel], result: dict) -> None:
         """session ของ warm pod: ไม่มี autostop ของ SkyPilot ต้องลบ pod เองเมื่อถึง expires_at

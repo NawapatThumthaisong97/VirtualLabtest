@@ -3,7 +3,10 @@
 
 เจอบน VM 2026-11-01: launch EC2 สำเร็จ แต่ job_status ถัดมาพัง → session FAILED + sky.down พังอีก → EC2 ค้าง
 """
+from datetime import datetime, timedelta
+
 import pytest
+import sky
 from sky.exceptions import ApiServerConnectionError
 
 from app.exceptions.domain import ClusterOperationError
@@ -68,3 +71,33 @@ class TestRetry:
         with pytest.raises(RuntimeError):
             session_service.sky_call(boom)
         assert calls == [1]
+
+
+class TestLeakSweep:
+    """Reconciler downs clusters of FAILED sessions that are still up (down failed at launch time)"""
+
+    def _failed(self, db, add_session, cluster, ended_ago):
+        s = add_session(SessionStatus.FAILED, cluster=cluster)
+        s.end_reason = SessionEndReason.LAUNCH_FAILED
+        s.ended_at = datetime.utcnow() - ended_ago
+        db.commit()
+        return s
+
+    def test_leaked_cluster_downed(self, svc, db, fake_sky, add_session):
+        """FAILED 10 min ago, cluster still UP -> downed by reconciler"""
+        self._failed(db, add_session, "music-lab-leak", timedelta(minutes=10))
+        fake_sky.clusters["music-lab-leak"] = sky.ClusterStatus.UP
+
+        result = svc.reconcile_sessions()
+        assert result["leaked_downed"] == ["music-lab-leak"] and "music-lab-leak" not in fake_sky.clusters
+
+    def test_old_failed_ignored(self, svc, db, fake_sky, add_session):
+        """FAILED 3 hours ago -> not checked (autostop has removed it)"""
+        self._failed(db, add_session, "music-lab-old-fail", timedelta(hours=3))
+        result = svc.reconcile_sessions()
+        assert result["leaked_downed"] == [] and fake_sky.downed == []
+
+    def test_failed_without_cluster_left(self, svc, db, fake_sky, add_session):
+        """FAILED and cluster already gone -> nothing to do"""
+        self._failed(db, add_session, "music-lab-cleaned", timedelta(minutes=5))
+        assert svc.reconcile_sessions()["leaked_downed"] == [] and fake_sky.downed == []
