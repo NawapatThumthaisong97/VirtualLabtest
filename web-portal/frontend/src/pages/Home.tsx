@@ -231,7 +231,7 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
               aria-hidden={tab !== 'helpdesk'}
               className={`col-start-1 row-start-1 flex flex-col gap-3.5 ${tab === 'helpdesk' ? styles.fadeUp : 'invisible'}`}
             >
-              <img src={supportLogo} alt="Virtual Lab Support" className="h-auto w-[200px] select-none" draggable={false} />
+              <img src={supportLogo} alt="Virtual Lab Support" className="h-auto w-[300px] select-none" draggable={false} />
               <div className="flex flex-wrap gap-4">
                 {HELP_CARDS.map((card) => (
                   <div
