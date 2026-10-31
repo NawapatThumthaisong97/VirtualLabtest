@@ -124,12 +124,18 @@ export const router = createBrowserRouter([
         ],
       },
       // Lab workspace pages: navbar only, no footer
+      // หน้าแลปของนักศึกษา — อาจารย์เด้งไป /instructor (ดูเอกสารผ่านปุ่ม Instruction ในหน้าวิชาแทน)
       {
-        element: <RootLayout showFooter={false} />,
+        element: <ProtectedRoute allowedRoles={['student', 'admin']} redirectTo="/instructor" />,
         children: [
           {
-            path: '/labs/:labId',
-            element: <LabDetailPage />,
+            element: <RootLayout showFooter={false} />,
+            children: [
+              {
+                path: '/labs/:labId',
+                element: <LabDetailPage />,
+              },
+            ],
           },
         ],
       },
