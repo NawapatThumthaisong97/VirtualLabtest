@@ -119,16 +119,18 @@ class SessionService:
         env: str = "production",
         run_target: RunTarget = RunTarget.KUBERNETES,
         pin_node: Optional[str] = None,
+        autostop_minutes: Optional[int] = None,
     ) -> dict:
         """สร้าง SkyPilot task config (dict) จาก LabImage ตาม run_target ของ lab
 
         pin_node = ชื่อ node ที่ต้องให้ pod ลง (K3s เท่านั้น ดู LAB_ISOLATION_ENABLED)
+        autostop_minutes = อายุเครื่องแทน lifespan_minutes (AWS เท่านั้น — เครื่องที่ prelaunch เปิดรอไว้)
 
         คืนเป็น dict แล้วส่งเข้า sky.Task.from_yaml_config ตรง ๆ แทนการต่อ YAML ด้วย
         f-string แบบเดิม ซึ่งพังเมื่อค่า env มี ':' หรือ '#' และเมื่อ entrypoint มีหลายบรรทัด
         """
         if run_target == RunTarget.AWS:
-            return self._build_aws_task(lab_image, app_name, env)
+            return self._build_aws_task(lab_image, app_name, env, autostop_minutes)
         return self._build_k8s_task(lab_image, app_name, env, pin_node)
 
     def _lab_envs(self, lab_image: LabImage, env: str) -> dict[str, str]:
@@ -136,11 +138,11 @@ class SessionService:
         envs["APP_ENV"] = env
         return envs
 
-    def _autostop(self, lab_image: LabImage) -> dict:
+    def _autostop(self, lab_image: LabImage, minutes: Optional[int] = None) -> dict:
         # wait_for: none = ลบ cluster เมื่อครบ idle_minutes โดยไม่รอ job หรือ SSH
         # lifespan_minutes จึงเป็นอายุสูงสุดของ lab ไม่ใช่เวลานับหลังเลิกใช้
         return {
-            "idle_minutes": lab_image.lifespan_minutes or 60,
+            "idle_minutes": minutes or lab_image.lifespan_minutes or 60,
             "down": True,
             "wait_for": "none",
         }
@@ -181,7 +183,8 @@ class SessionService:
             }}}
         return task
 
-    def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str) -> dict:
+    def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str,
+                        autostop_minutes: Optional[int] = None) -> dict:
         """AWS: VM mode บน EC2 ใน private subnet
 
         ไม่ใช้ image_id: docker: เพราะแบบนั้น SkyPilot ต้องลง runtime ลงใน container ใหม่
@@ -217,7 +220,7 @@ class SessionService:
             "instance_type": settings.AWS_INSTANCE_TYPE,
             "disk_size": settings.AWS_DISK_SIZE,
             "image_id": settings.AWS_LAB_AMI,
-            "autostop": self._autostop(lab_image),
+            "autostop": self._autostop(lab_image, autostop_minutes),
         }
         if ports:
             resources["ports"] = ports
@@ -387,7 +390,8 @@ class SessionService:
 
     def _new_sky_session(self, user_id: UUID, lab: Lab, lab_image: LabImage, run_target: RunTarget,
                          pin_node: Optional[str], class_slot_id: Optional[UUID],
-                         prelaunched_at: Optional[datetime] = None) -> tuple[SessionModel, Any]:
+                         prelaunched_at: Optional[datetime] = None,
+                         autostop_minutes: Optional[int] = None) -> tuple[SessionModel, Any]:
         """สร้าง task ของ SkyPilot + record PENDING (ยังไม่ launch) คืน (session, task)
 
         แยกจาก _run_sky_launch ให้ prelaunch scheduler สร้าง record ทุกคนก่อน แล้วค่อย launch ใน thread
@@ -401,6 +405,7 @@ class SessionService:
             env="staging",
             run_target=run_target,
             pin_node=pin_node,
+            autostop_minutes=autostop_minutes,
         )
         # ขอ token ก่อนสร้าง record จะได้ไม่มี session ค้างถ้าแค่ขอ token ไม่ผ่าน
         secrets = None
@@ -432,7 +437,8 @@ class SessionService:
         self.db.refresh(new_session)
         return new_session, task
 
-    def _run_sky_launch(self, new_session: SessionModel, task: Any, lab_image: LabImage) -> None:
+    def _run_sky_launch(self, new_session: SessionModel, task: Any, lab_image: LabImage,
+                        lifetime_minutes: Optional[int] = None) -> None:
         """sky launch + รอ job RUNNING + endpoints แล้วตั้ง session เป็น RUNNING (พัง = FAILED + down แล้ว raise)"""
         cluster_name = new_session.sky_cluster_name
         job_id = None
@@ -461,7 +467,7 @@ class SessionService:
         new_session.status = SessionStatus.RUNNING
         # autostop เริ่มนับตอน launch เสร็จ (wait_for: none) หน้าเว็บใช้นับถอยหลังได้
         new_session.expires_at = datetime.utcnow() + timedelta(
-            minutes=lab_image.lifespan_minutes or 60
+            minutes=lifetime_minutes or lab_image.lifespan_minutes or 60
         )
         self.db.commit()
         self.db.refresh(new_session)

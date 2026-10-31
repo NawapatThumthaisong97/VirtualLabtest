@@ -119,6 +119,12 @@ class TestAwsTask:
             "autostop": {"idle_minutes": 60, "down": True, "wait_for": "none"},
         }
 
+    def test_autostop_override(self, service, make_image):
+        """Pre-launched machine: autostop_minutes replaces lifespan (short safety net until claimed)"""
+        task = service.create_fastapi_task(make_image(), "music-lab-1", run_target=RunTarget.AWS,
+                                           autostop_minutes=30)
+        assert task["resources"]["autostop"]["idle_minutes"] == 30
+
     def test_env_goes_to_container_not_vm(self, service, make_image):
         """Lab env goes to the container (docker run -e), not task envs
 
