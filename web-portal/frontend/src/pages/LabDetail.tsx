@@ -136,7 +136,7 @@ export default function LabDetailPage() {
             disabled={isClosing}
             className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[15px] font-light text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
           >
-            {isClosing ? 'กำลังปิด...' : 'ปิด lab'}
+            {isClosing ? 'กำลังปิด...' : 'Close Lab'}
           </button>
         ) : (
           <button
