@@ -57,14 +57,29 @@ POD_POLL_SECONDS = 2
 
 # SDK ของ SkyPilot บางครั้งโยน ApiServerConnectionError ทันที (0 วินาที) ทั้งที่ API server ยังดีอยู่
 # เทสบน VM 2026-11-01: เรียก sky.status ทุก 5 วินาที พัง 4/24 ครั้ง ขณะที่ curl /api/health ผ่าน 60/60
-# และ server ไม่เห็น request ที่พังเลย (น่าจะใช้ connection keep-alive ที่ server ปิดไปแล้วซ้ำ)
+# และ server ไม่เห็น request ที่พังเลย
+# ต้นเหตุ: ก่อนทุก request SDK เช็ก /api/health และ cache ผลไว้ 5 วินาที (sky/server/common.py
+# get_api_server_status_response, TTLCache ttl=5) — cache ผลที่ "ต่อไม่ได้" ด้วย health check พลาดครั้งเดียว
+# (connection keep-alive ที่ server ปิดไปแล้ว) ทุก request ใน 5 วินาทีถัดไปจึงพังทันที ลองใหม่เร็ว ๆ ก็โดน cache เดิม
 # ถ้าไม่ลองใหม่: launch สำเร็จแต่ job_status พัง → ตั้ง FAILED แล้ว sky.down ก็พังอีก → EC2 ค้างจน autostop
 SKY_RETRY_ATTEMPTS = 3
+SKY_RETRY_SECONDS = 1
+# ล้าง cache ของ SDK ไม่ได้ (SDK เวอร์ชันอื่นเปลี่ยนชื่อ) → รอให้ cache หมดอายุเองแทน
+SKY_HEALTH_CACHE_SECONDS = 5
 # reconciler ตามลบเครื่องของ session ที่ FAILED ย้อนหลังกี่ชั่วโมง (เครื่องที่เก่ากว่า autostop ลบไปแล้ว)
 LEAK_LOOKBACK = timedelta(hours=2)
-SKY_RETRY_SECONDS = 1
 
 T = TypeVar("T")
+
+
+def _forget_failed_health_check() -> bool:
+    """ล้าง cache ผล /api/health ของ SDK (ฟังก์ชันภายในของ SkyPilot 0.12) คืน False ถ้าทำไม่ได้"""
+    try:
+        from sky.server import common as sky_server_common
+        sky_server_common.get_api_server_status_response.cache_clear()
+        return True
+    except Exception:
+        return False
 
 
 def sky_call(fn: Callable[[], T]) -> T:
@@ -78,8 +93,10 @@ def sky_call(fn: Callable[[], T]) -> T:
         except ApiServerConnectionError as e:
             if attempt == SKY_RETRY_ATTEMPTS:
                 raise
-            logger.warning(f"[sky] cannot reach API server (attempt {attempt}/{SKY_RETRY_ATTEMPTS}), retrying: {e}")
-            time.sleep(SKY_RETRY_SECONDS)
+            cleared = _forget_failed_health_check()
+            logger.warning(f"[sky] cannot reach API server (attempt {attempt}/{SKY_RETRY_ATTEMPTS}), "
+                           f"retrying{'' if cleared else ' after health cache expires'}: {e}")
+            time.sleep(SKY_RETRY_SECONDS if cleared else SKY_HEALTH_CACHE_SECONDS + 1)
     raise AssertionError("unreachable")
 
 

@@ -101,3 +101,34 @@ class TestLeakSweep:
         """FAILED and cluster already gone -> nothing to do"""
         self._failed(db, add_session, "music-lab-cleaned", timedelta(minutes=5))
         assert svc.reconcile_sessions()["leaked_downed"] == [] and fake_sky.downed == []
+
+
+class TestHealthCache:
+    """SDK caches a failed /api/health for 5 s — retry must clear it, or wait it out"""
+
+    @staticmethod
+    def _fails_once():
+        attempts = []
+
+        def flaky():
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise ApiServerConnectionError("http://fake")
+            return "ok"
+        return flaky
+
+    def test_clears_sdk_health_cache(self, fake_sky, monkeypatch):
+        """On connection error the SDK health cache is cleared, then a short wait"""
+        from sky.server import common as sky_server_common
+        cleared = []
+        monkeypatch.setattr(sky_server_common.get_api_server_status_response, "cache_clear",
+                            lambda: cleared.append(1))
+        assert session_service.sky_call(self._fails_once()) == "ok"
+        assert cleared == [1] and session_service.time.slept == session_service.SKY_RETRY_SECONDS
+
+    def test_waits_out_cache_when_cannot_clear(self, fake_sky, monkeypatch):
+        """Cannot clear (other SDK version) -> sleep longer than the 5 s cache"""
+        monkeypatch.setattr(session_service, "_forget_failed_health_check", lambda: False)
+        session_service.sky_call(self._fails_once())
+        assert session_service.time.slept > session_service.SKY_HEALTH_CACHE_SECONDS
+
