@@ -17,11 +17,13 @@ from app.schemas.booking_schema import (
     BookingCreate,
     BookingItem,
     BookingListResponse,
+    CalendarEvent,
     CalendarResponse,
     RejectBody,
     ScheduleCreate,
     ScheduleForm,
     SchedulerOptions,
+    SlotUpdate,
 )
 from app.schemas.response import ApiResponse
 from app.services import booking_service
@@ -107,6 +109,14 @@ def create_schedule(form: ScheduleCreate, background: BackgroundTasks, db: Sessi
     item = booking_service.create_direct(db, user, form, rooms)
     background.add_task(booking_service.send_decision_mail, item.id)
     return ok("Schedule created", item)
+
+
+@admin_router.patch("/slots/{slot_id}", response_model=ApiResponse[CalendarEvent], response_model_by_alias=True)
+def update_slot(slot_id: UUID, form: SlotUpdate, db: Session = Depends(get_db),
+                user: User = Depends(get_current_user),
+                rooms: Optional[dict[str, int]] = Depends(room_capacity)):
+    """แก้คาบ 1 คาบจากปฏิทิน (คาบที่ยังไม่เริ่มเท่านั้น)"""
+    return ok("Slot updated", booking_service.update_slot(db, slot_id, user, form, rooms))
 
 
 @admin_router.post("/slots/{slot_id}/cancel")

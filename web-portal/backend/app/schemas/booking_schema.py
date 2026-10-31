@@ -51,6 +51,18 @@ class ScheduleCreate(ScheduleForm):
     course_id: UUID
 
 
+class SlotUpdate(CamelModel):
+    """แก้คาบ 1 คาบจากปฏิทิน (Modal Class Scheduler โหมดแก้ไข) — ไม่กระทบคาบอื่นในตารางเดียวกัน"""
+    lab_id: UUID
+    mode: ClassMode = "onsite"
+    room: Optional[str] = Field(None, min_length=1, max_length=64)
+    machines: Optional[int] = Field(None, gt=0)
+    date: Date = Field(..., description="วันที่ของคาบ (เวลาไทย)")
+    start_time: time
+    end_time: time
+    note: Optional[str] = Field(None, max_length=1000)
+
+
 class RejectBody(CamelModel):
     reason: str = Field(..., min_length=1, max_length=1000)
 
@@ -94,6 +106,7 @@ class CalendarEvent(CamelModel):
     room: Optional[str]
     course_id: UUID
     course_name: str
+    lab_id: Optional[UUID] = Field(None, description="ใช้เติมฟอร์มตอนกดคาบในปฏิทิน")
     machines: int
     status: str
     mode: ClassMode = Field(..., description="online = slot ที่เปิด EC2 รอไว้ (run_target AWS)")

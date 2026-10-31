@@ -212,6 +212,58 @@ class TestCancelSlot:
             bs.cancel_slot(db, uuid.uuid4(), admin)
 
 
+class TestUpdateSlot:
+    """Admin edits one class from the calendar modal (pencil → Approve)"""
+
+    def _one(self, db, world, people, **kw):
+        item = bs.create_direct(db, people[1], ScheduleCreate(course_id=world.course.id,
+                                                              **form(world, until=MONDAY, **kw).model_dump()), ROOMS)
+        return db.query(ClassSlot).filter(ClassSlot.schedule_id == item.class_schedule_id).one()
+
+    def _upd(self, world, **kw):
+        from app.schemas.booking_schema import SlotUpdate
+        data = dict(lab_id=world.k8s_lab.id, mode="onsite", room="LC-123", machines=10, date=MONDAY,
+                    start_time=time(9), end_time=time(11))
+        data.update(kw)
+        return SlotUpdate(**data)
+
+    def test_edit_time_room_machines(self, db, world, people):
+        """Move 13–16 to 09–11, 10 machines -> slot changed, calendar shows the new values"""
+        slot = self._one(db, world, people)
+        ev = bs.update_slot(db, slot.id, people[1], self._upd(world), ROOMS)
+        assert (ev.start, ev.end, ev.machines, ev.room, ev.lab_id) == ("09:00", "11:00", 10, "LC-123", world.k8s_lab.id)
+        assert slot.expected_seats == 10
+
+    def test_switch_to_online(self, db, world, people):
+        """On-site -> online: no room, machines = enrolled students, run_target AWS"""
+        slot = self._one(db, world, people)
+        ev = bs.update_slot(db, slot.id, people[1], self._upd(world, mode="online", room=None, machines=None), ROOMS)
+        assert (ev.mode, ev.room, ev.machines, slot.run_target) == ("online", None, 1, RunTarget.AWS)
+
+    def test_conflict_excludes_itself(self, db, world, people):
+        """Editing keeps its own time -> not a conflict with itself; overlapping another class -> 409"""
+        slot = self._one(db, world, people)
+        bs.update_slot(db, slot.id, people[1], self._upd(world, start_time=time(13), end_time=time(16)), ROOMS)
+        other = self._one(db, world, people, start_time=time(17), end_time=time(18))
+        with pytest.raises(bs.RoomConflictError):
+            bs.update_slot(db, other.id, people[1], self._upd(world, start_time=time(15), end_time=time(17)), ROOMS)
+
+    def test_started_cannot_edit(self, db, world, people):
+        """Class already started -> 409 (cancel and create a new one instead)"""
+        from datetime import datetime, timezone
+        slot = self._one(db, world, people)
+        slot.starts_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+        with pytest.raises(ConflictError, match="เริ่มไปแล้ว"):
+            bs.update_slot(db, slot.id, people[1], self._upd(world), ROOMS)
+
+    def test_calendar_has_lab_id(self, db, world, people):
+        """Calendar events carry labId so the modal can prefill the Labs field"""
+        self._one(db, world, people)
+        [ev] = bs.get_calendar(db, MONDAY.replace(day=1)).events
+        assert ev.lab_id == world.k8s_lab.id
+
+
 class TestMail:
     """Decision mail to course instructors; redirect while testing"""
 

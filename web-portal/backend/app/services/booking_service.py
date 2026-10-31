@@ -11,6 +11,7 @@ from typing import Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
@@ -37,6 +38,7 @@ from app.schemas.booking_schema import (
     ScheduleCreate,
     ScheduleForm,
     SchedulerOptions,
+    SlotUpdate,
 )
 from app.services import prelaunch_service
 from app.services.mail_service import send_mail
@@ -165,7 +167,7 @@ def _get(db: DbSession, booking_id: UUID) -> BookingRequest:
 
 
 def _conflicts(db: DbSession, room: Optional[str], course_id: UUID,
-               times: list[tuple[datetime, datetime]]) -> Optional[str]:
+               times: list[tuple[datetime, datetime]], exclude_id: Optional[UUID] = None) -> Optional[str]:
     """คาบแรกที่ชน (ห้องเดียวกัน หรือวิชาเดียวกัน) เป็นข้อความ — ไม่ชน = None
 
     room = None (คาบ online) เช็กแค่วิชาเดียวกัน — ห้ามเทียบ room == None เพราะจะชนกับทุกคาบที่ไม่มีห้อง
@@ -180,7 +182,8 @@ def _conflicts(db: DbSession, room: Optional[str], course_id: UUID,
         db.query(ClassSlot, Course)
         .join(Course, ClassSlot.course_id == Course.id)
         .filter(ClassSlot.deleted_at.is_(None), ClassSlot.status != ClassSlotStatus.CANCELLED,
-                ClassSlot.starts_at < end, ClassSlot.ends_at > start, same)
+                ClassSlot.starts_at < end, ClassSlot.ends_at > start, same,
+                ClassSlot.id != exclude_id if exclude_id else true())
         .all()
     )
     for slot, course in existing:
@@ -279,6 +282,51 @@ def create_direct(db: DbSession, admin: User, form: ScheduleCreate,
     return _to_item(db, b, slots_created=count)
 
 
+def update_slot(db: DbSession, slot_id: UUID, admin: User, form: SlotUpdate,
+                room_capacity: Optional[dict[str, int]]) -> CalendarEvent:
+    """แก้คาบ 1 คาบ (lab / ประเภท / ห้อง / เครื่อง / วันเวลา) — เฉพาะคาบที่ยังไม่เริ่ม
+
+    คาบที่เริ่มแล้วแก้ไม่ได้ (warm pod / เครื่องที่เปิดรอไว้กำลังใช้อยู่) ให้ยกเลิกแล้วสร้างใหม่แทน
+    คาบ online ที่เปิดเครื่องรอไว้แล้ว (ช่วงก่อนเริ่ม) แก้แล้วคืนเครื่องที่ยังไม่มีคนรับ รอบหน้า scheduler เปิดใหม่ตามค่าใหม่
+    """
+    slot = db.get(ClassSlot, slot_id)
+    if slot is None or slot.deleted_at is not None:
+        raise NotFoundError("ไม่พบคาบนี้")
+    if slot.status in (ClassSlotStatus.CANCELLED, ClassSlotStatus.DONE):
+        raise ConflictError(f"คาบนี้ {slot.status.name} ไปแล้ว")
+    if slot.starts_at <= datetime.now(timezone.utc):
+        raise ConflictError("คาบนี้เริ่มไปแล้ว แก้ไม่ได้ — ยกเลิกแล้วสร้างใหม่แทน")
+
+    lab = _lab_of_course(db, form.lab_id, slot.course_id)
+    _check_times(form.start_time, form.end_time, form.date, form.date)
+    room, machines = _room_and_machines(db, slot.course_id, form.mode, form.room, form.machines,
+                                        room_required=True)
+    if room is not None and room_capacity is not None:
+        if room not in room_capacity:
+            raise ValidationError(f"ไม่มีห้อง {room} (ห้องที่มี: {', '.join(sorted(room_capacity)) or '-'})")
+        if machines > room_capacity[room]:
+            raise ValidationError(f"ห้อง {room} มี {room_capacity[room]} เครื่อง ขอ {machines}")
+    starts_at, ends_at = _to_utc(form.date, form.start_time), _to_utc(form.date, form.end_time)
+    conflict = _conflicts(db, room, slot.course_id, [(starts_at, ends_at)], exclude_id=slot.id)
+    if conflict:
+        raise RoomConflictError(conflict)
+
+    slot.lab_id, slot.lab_image_id = lab.id, lab.image_id
+    slot.room, slot.expected_seats = room, machines
+    slot.run_target = RunTarget.AWS if form.mode == "online" else RunTarget.KUBERNETES
+    slot.starts_at, slot.ends_at = starts_at, ends_at
+    if form.note:
+        slot.note = form.note
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise RoomConflictError(f"ห้อง {room or '-'} หรือวิชานี้มีคาบเวลาทับกัน: {e.orig}") from e
+    released = prelaunch_service.release_unclaimed(db, slot.id)
+    logger.info(f"[booking] slot {slot.id} updated by {admin.email}, released {released}")
+    return _event(slot, db.get(Course, slot.course_id), lab)
+
+
 def cancel_slot(db: DbSession, slot_id: UUID, admin: User) -> dict:
     """ยกเลิกคาบ 1 คาบ (เช่นสร้างผิดเวลา) → CANCELLED: scheduler ไม่สนใจ ไม่นับว่าชนเวลา ไม่ขึ้นปฏิทิน
 
@@ -354,6 +402,16 @@ def send_decision_mail(booking_id: UUID, db: Optional[DbSession] = None) -> None
 
 # ---------- ปฏิทิน / ตัวเลือก ----------
 
+def _event(slot: ClassSlot, course: Course, lab: Optional[Lab]) -> CalendarEvent:
+    s, e = slot.starts_at.astimezone(TZ), slot.ends_at.astimezone(TZ)
+    return CalendarEvent(
+        id=slot.id, title=f"{course.name} – {lab.title}" if lab else course.name, date=s.date(),
+        start=f"{s:%H:%M}", end=f"{e:%H:%M}", room=slot.room, course_id=course.id, course_name=course.name,
+        lab_id=slot.lab_id, machines=slot.expected_seats, status=slot.status.value,
+        mode="online" if slot.run_target == RunTarget.AWS else "onsite",
+    )
+
+
 def get_calendar(db: DbSession, month: date) -> CalendarResponse:
     """คาบทั้งเดือน (เวลาไทย) สำหรับปฏิทิน — title = วิชา – lab"""
     first = datetime(month.year, month.month, 1, tzinfo=SCHEDULE_TZ)
@@ -367,15 +425,7 @@ def get_calendar(db: DbSession, month: date) -> CalendarResponse:
         .order_by(ClassSlot.starts_at)
         .all()
     )
-    events = []
-    for slot, course, lab in rows:
-        s, e = slot.starts_at.astimezone(TZ), slot.ends_at.astimezone(TZ)
-        events.append(CalendarEvent(
-            id=slot.id, title=f"{course.name} – {lab.title}" if lab else course.name, date=s.date(),
-            start=f"{s:%H:%M}", end=f"{e:%H:%M}", room=slot.room, course_id=course.id, course_name=course.name,
-            machines=slot.expected_seats, status=slot.status.value,
-            mode="online" if slot.run_target == RunTarget.AWS else "onsite",
-        ))
+    events = [_event(slot, course, lab) for slot, course, lab in rows]
     return CalendarResponse(month=f"{month.year:04d}-{month.month:02d}", events=events)
 
 
