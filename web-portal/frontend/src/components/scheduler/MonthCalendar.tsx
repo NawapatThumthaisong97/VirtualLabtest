@@ -13,12 +13,14 @@ interface Props {
   onNext: () => void;
   onToday: () => void;
   onSelect: (d: Date) => void;
+  /** กดคาบ → เปิด Modal ของคาบนั้น */
+  onEventClick?: (e: ClassEvent) => void;
 }
 
 const MAX_CHIPS = 2;
 const line = `1px solid ${colors.border}`;
 
-export default function MonthCalendar({ year, month, selected, today, eventsByDate, onPrev, onNext, onToday, onSelect }: Props) {
+export default function MonthCalendar({ year, month, selected, today, eventsByDate, onPrev, onNext, onToday, onSelect, onEventClick }: Props) {
   const dates = monthGrid(year, month);
 
   return (
@@ -61,9 +63,17 @@ export default function MonthCalendar({ year, month, selected, today, eventsByDa
               {shown.map((e) => {
                 const c = eventColors[e.color];
                 return (
-                  <div key={e.id} title={e.title} style={{ ...chip, borderLeft: `2px solid ${c.color}`, background: c.bg, color: c.color }}>
+                  <button
+                    key={e.id}
+                    type="button"
+                    title={e.title}
+                    aria-label={`Open ${e.title} ${e.start}`}
+                    // ไม่ให้ไปเลือกวันซ้ำ (onClick ของช่องวัน) — แค่เปิด Modal ของคาบ
+                    onClick={(ev) => { ev.stopPropagation(); onSelect(d); onEventClick?.(e); }}
+                    style={{ ...chip, border: 0, borderLeft: `2px solid ${c.color}`, background: c.bg, color: c.color, textAlign: 'left', fontFamily: 'inherit' }}
+                  >
                     {to12h(e.start).replace(':00 ', ' ')} - {e.title}
-                  </div>
+                  </button>
                 );
               })}
               {more > 0 && <div style={{ ...chip, background: colors.pageBg, borderLeft: line, color: colors.text }}>+ {more} More</div>}

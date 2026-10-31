@@ -199,6 +199,7 @@ export interface CalendarEventItem {
   room: string | null;
   courseId: string;
   courseName: string;
+  labId: string | null;
   machines: number;
   status: string;
   mode: ClassMode;
@@ -224,6 +225,22 @@ export interface ScheduleFormBody {
   note?: string;
 }
 
+export interface SlotUpdateBody {
+  labId: string;
+  mode: ClassMode;
+  room?: string;
+  machines?: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  note?: string;
+}
+
+async function patchData<T>(url: string, body: unknown): Promise<T> {
+  const res = (await apiClient.patch(url, body)) as unknown as ApiResponse<T>;
+  return res.data;
+}
+
 async function postData<T>(url: string, body: unknown): Promise<T> {
   const res = (await apiClient.post(url, body)) as unknown as ApiResponse<T>;
   return res.data;
@@ -237,6 +254,8 @@ export const bookingService = {
   approve: (id: string, body: ScheduleFormBody) => postData<BookingItem>(`/v1/admin/bookings/${id}/approve`, body),
   reject: (id: string, reason: string) => postData<BookingItem>(`/v1/admin/bookings/${id}/reject`, { reason }),
   create: (body: ScheduleFormBody) => postData<BookingItem>('/v1/admin/schedules', body),
+  /** แก้คาบ 1 คาบจากปฏิทิน (คาบที่ยังไม่เริ่มเท่านั้น) */
+  updateSlot: (slotId: string, body: SlotUpdateBody) => patchData<CalendarEventItem>(`/v1/admin/slots/${slotId}`, body),
   /** ยกเลิกคาบ 1 คาบ (id = id ของ event ในปฏิทิน) — คาบ online คืนเครื่องที่เปิดรอไว้แต่ยังไม่มีคนรับ */
   cancelSlot: (slotId: string) =>
     postData<{ slotId: string; status: string; released: string[] }>(`/v1/admin/slots/${slotId}/cancel`, {}),

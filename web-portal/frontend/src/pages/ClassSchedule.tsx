@@ -13,7 +13,7 @@ import Sidebar from '../components/scheduler/Sidebar';
 import MonthCalendar from '../components/scheduler/MonthCalendar';
 import CreateEventModal from '../components/scheduler/CreateEventModal';
 import ClassRequestModal from '../components/scheduler/ClassRequestModal';
-import { bookingService, type BookingItem, type ScheduleFormBody } from '../services/adminDashboard';
+import { bookingService, type BookingItem, type ScheduleFormBody, type SlotUpdateBody } from '../services/adminDashboard';
 
 const PALETTE: EventColor[] = ['purple', 'orange', 'cyan', 'green', 'blue'];
 /** สีคงที่ต่อวิชา */
@@ -46,6 +46,18 @@ const toBody = (f: EventForm): ScheduleFormBody => ({
   firstDate: f.date, startTime: f.start, endTime: f.end, until: f.until, note: f.note || undefined,
 });
 
+/** คาบในปฏิทิน → ฟอร์ม (โหมดดู / แก้ไขทีละคาบ) */
+const formFromEvent = (e: ClassEvent): EventForm => ({
+  slotId: e.id, courseId: e.courseId, labId: e.labId ?? '', mode: e.mode, room: e.room ?? '', machines: e.machines,
+  date: e.date, start: e.start, end: e.end, until: e.date, note: '',
+});
+
+const toSlotBody = (f: EventForm): SlotUpdateBody => ({
+  labId: f.labId, mode: f.mode,
+  ...(f.mode === 'onsite' ? { room: f.room, machines: f.machines } : {}),
+  date: f.date, startTime: f.start, endTime: f.end, note: f.note || undefined,
+});
+
 const apiError = (e: unknown) =>
   (e as { response?: { data?: { message?: string } } }).response?.data?.message ?? 'บันทึกไม่สำเร็จ';
 
@@ -72,6 +84,7 @@ export default function ClassSchedulePage() {
       id: e.id, title: e.mode === 'online' ? `${e.title} · Online` : e.room ? `${e.title} · ${e.room}` : e.title,
       date: e.date, start: e.start, end: e.end,
       color: colorOf(e.courseId),
+      courseId: e.courseId, labId: e.labId, mode: e.mode, room: e.room, machines: e.machines,
     })),
     [calendar.data],
   );
@@ -97,17 +110,27 @@ export default function ClassSchedulePage() {
   };
 
   const approve = useMutation({
-    mutationFn: (f: EventForm) => (f.bookingId ? bookingService.approve(f.bookingId, toBody(f)) : bookingService.create(toBody(f))),
-    onSuccess: (b, f) => done(`จองแล้ว ${b.slotsCreated ?? 0} คาบ — ส่งเมลแจ้งอาจารย์`, f.date),
+    mutationFn: async (f: EventForm): Promise<string> => {
+      if (f.slotId) {
+        await bookingService.updateSlot(f.slotId, toSlotBody(f));
+        return 'แก้คาบแล้ว';
+      }
+      const b = await (f.bookingId ? bookingService.approve(f.bookingId, toBody(f)) : bookingService.create(toBody(f)));
+      return `จองแล้ว ${b.slotsCreated ?? 0} คาบ — ส่งเมลแจ้งอาจารย์`;
+    },
+    onSuccess: (message, f) => done(message, f.date),
     onError: (e) => setError(apiError(e)),
   });
   const cancel = useMutation({
-    mutationFn: (e: ClassEvent) => bookingService.cancelSlot(e.id),
+    mutationFn: (slotId: string) => bookingService.cancelSlot(slotId),
     onSuccess: (r) => done(r.released.length ? `ยกเลิกคาบแล้ว คืนเครื่องที่เปิดรอไว้ ${r.released.length} เครื่อง` : 'ยกเลิกคาบแล้ว'),
-    onError: (e) => setNotice(apiError(e)),
+    onError: (e) => setError(apiError(e)),
   });
   const cancelEvent = (e: ClassEvent) => {
-    if (window.confirm(`ยกเลิกคาบ ${e.title} ${e.start}–${e.end} ?`)) cancel.mutate(e);
+    if (window.confirm(`ยกเลิกคาบ ${e.title} ${e.start}–${e.end} ?`)) cancel.mutate(e.id);
+  };
+  const deleteFromModal = (f: EventForm) => {
+    if (f.slotId && window.confirm(`ยกเลิกคาบวันที่ ${f.date} ${f.start}–${f.end} ?`)) cancel.mutate(f.slotId);
   };
 
   const reject = useMutation({
@@ -130,6 +153,13 @@ export default function ClassSchedulePage() {
   const openCreate = () => {
     setError(null);
     setForm(blankForm(selected));
+    setCreateOpen(true);
+  };
+
+  /** กดคาบในปฏิทิน → Modal ของคาบนั้น (ดูอย่างเดียว กดปากกาถึงแก้ได้) */
+  const openEvent = (e: ClassEvent) => {
+    setError(null);
+    setForm(formFromEvent(e));
     setCreateOpen(true);
   };
 
@@ -182,6 +212,7 @@ export default function ClassSchedulePage() {
           onNext={() => shift(1)}
           onToday={() => select(today)}
           onSelect={select}
+          onEventClick={openEvent}
         />
       </div>
 
@@ -190,10 +221,11 @@ export default function ClassSchedulePage() {
         initial={form}
         options={options.data}
         error={error}
-        busy={approve.isPending || reject.isPending}
+        busy={approve.isPending || reject.isPending || cancel.isPending}
         onClose={() => setCreateOpen(false)}
         onApprove={(f) => approve.mutate(f)}
         onReject={(f, reason) => reject.mutate({ f, reason })}
+        onDelete={deleteFromModal}
       />
       <ClassRequestModal open={requestsOpen} requests={requests} showNew onClose={() => setRequestsOpen(false)} onOpenDetail={openFromRequest} />
     </div>

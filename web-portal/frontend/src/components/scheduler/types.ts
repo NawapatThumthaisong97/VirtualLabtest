@@ -10,6 +10,12 @@ export interface ClassEvent {
   start: string;
   end: string;
   color: EventColor;
+  /** ข้อมูลของคาบ ใช้เติม Modal ตอนกดคาบในปฏิทิน */
+  courseId: string;
+  labId: string | null;
+  mode: ClassMode;
+  room: string | null;
+  machines: number;
 }
 
 export interface ClassRequest {
@@ -29,6 +35,8 @@ export interface ClassRequest {
 export interface EventForm {
   /** มี = เปิดจากคำขออาจารย์ (Approve / Reject) ไม่มี = Create new event */
   bookingId?: string;
+  /** มี = เปิดจากคาบในปฏิทิน (ปากกา → แก้ไข, Delete = ยกเลิกคาบ, Approve = บันทึก) */
+  slotId?: string;
   courseId: string;
   labId: string;
   /** onsite = ห้องแลป / online = ไม่มีห้อง เปิด EC2 ให้ทุกคนที่ลงทะเบียน */

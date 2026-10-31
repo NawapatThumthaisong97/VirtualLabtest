@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { Pencil } from 'lucide-react';
 import { colors } from './theme';
 import type { EventForm } from './types';
 import type { SchedulerOptions } from '../../services/adminDashboard';
@@ -17,6 +18,8 @@ interface Props {
   onApprove: (form: EventForm) => void;
   /** มีเฉพาะตอนเปิดจากคำขออาจารย์ */
   onReject?: (form: EventForm, reason: string) => void;
+  /** มีเฉพาะตอนเปิดจากคาบในปฏิทิน: ยกเลิกคาบนั้น */
+  onDelete?: (form: EventForm) => void;
 }
 
 const field: CSSProperties = {
@@ -44,14 +47,17 @@ function IconField({ icon, children }: { icon?: ReactNode; children: ReactNode }
 
 const bare: CSSProperties = { flex: 1, minWidth: 0, border: 0, outline: 'none', fontFamily: 'inherit', fontSize: 14, color: colors.text, background: 'transparent' };
 
-export default function CreateEventModal({ open, initial, options, error, busy, onClose, onApprove, onReject }: Props) {
+export default function CreateEventModal({ open, initial, options, error, busy, onClose, onApprove, onReject, onDelete }: Props) {
   const [form, setForm] = useState<EventForm>(initial);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  // คาบที่มีอยู่แล้ว: เปิดมาเป็นแบบดูอย่างเดียว กดปากกาถึงแก้ได้
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     setForm(initial);
     setRejecting(false);
     setReason('');
+    setEditing(false);
   }, [initial]);
 
   const set = (k: keyof EventForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -61,12 +67,31 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
   const labs = (options?.labs ?? []).filter((l) => l.courseId === form.courseId);
   const room = options?.rooms.find((r) => r.room === form.room);
   const fromRequest = Boolean(form.bookingId);
+  const fromEvent = Boolean(form.slotId);
+  const locked = fromEvent && !editing;
   const online = form.mode === 'online';
   // online ไม่มีห้อง / จำนวนเครื่อง (backend เปิดให้นักศึกษาที่ลงทะเบียนทุกคน)
   const ready = form.courseId && form.labId && (online || (form.room && form.machines > 0)) && form.date && form.until;
 
   return (
     <GradientModal open={open} onClose={onClose} icon="/flask.png" title="Class Scheduler">
+      {fromEvent && (
+        <button
+          type="button"
+          aria-label="Edit class"
+          aria-pressed={editing}
+          title={editing ? 'กำลังแก้ไข' : 'แก้ไขคาบนี้'}
+          onClick={() => setEditing((v) => !v)}
+          style={{
+            position: 'absolute', top: -44, right: 64, width: 34, height: 34, borderRadius: 8,
+            border: `1px solid ${editing ? colors.primary : colors.inputBorder}`,
+            background: editing ? '#EEF4FB' : '#fff', color: editing ? colors.primary : colors.text,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <Pencil size={16} />
+        </button>
+      )}
       <div style={{ padding: '28px 64px 40px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 48, fontSize: 14 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <label style={labelWrap}>
@@ -75,7 +100,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
               <select
                 aria-label="Course"
                 value={form.courseId}
-                disabled={fromRequest}
+                disabled={fromRequest || fromEvent}
                 onChange={(e) => setForm((f) => ({ ...f, courseId: e.target.value, labId: '' }))}
                 style={bare}
               >
@@ -95,7 +120,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
           <label style={labelWrap}>
             <span>Labs</span>
             <IconField>
-              <select aria-label="Lab" value={form.labId} onChange={set('labId')} style={bare}>
+              <select aria-label="Lab" value={form.labId} disabled={locked} onChange={set('labId')} style={bare}>
                 <option value="">เลือก lab</option>
                 {labs.map((l) => (
                   <option key={l.id} value={l.id} disabled={!l.hasImage}>
@@ -119,6 +144,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
                     type="button"
                     role="radio"
                     aria-checked={active}
+                    disabled={locked}
                     onClick={() => setForm((f) => ({ ...f, mode: value }))}
                     style={{
                       height: 44, borderRadius: 8, fontFamily: 'inherit', fontSize: 14, textAlign: 'center',
@@ -142,7 +168,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
           <div style={labelWrap}>
             <span>Classroom</span>
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24 }}>
-              <select aria-label="Room" value={form.room} onChange={set('room')} style={field}>
+              <select aria-label="Room" value={form.room} disabled={locked} onChange={set('room')} style={field}>
                 <option value="">เลือกห้อง</option>
                 {(options?.rooms ?? []).map((r) => (
                   <option key={r.room} value={r.room}>{r.room} ({r.pcsTotal} เครื่อง)</option>
@@ -151,6 +177,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
               <input
                 aria-label="Machines"
                 type="number"
+                disabled={locked}
                 min={1}
                 max={room?.pcsTotal}
                 value={form.machines || ''}
@@ -166,16 +193,19 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <label style={labelWrap}>
             <span>Date &amp; Time (คาบแรก)</span>
-            <input aria-label="First date" type="date" value={form.date} onChange={set('date')} style={{ ...field, paddingLeft: 40 }} />
+            <input aria-label="First date" type="date" value={form.date} disabled={locked} onChange={set('date')} style={{ ...field, paddingLeft: 40 }} />
           </label>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 30, marginTop: 6 }}>
-            <input aria-label="Start time" type="time" value={form.start} onChange={set('start')} style={{ ...field, paddingLeft: 40 }} />
-            <input aria-label="End time" type="time" value={form.end} onChange={set('end')} style={field} />
+            <input aria-label="Start time" type="time" value={form.start} disabled={locked} onChange={set('start')} style={{ ...field, paddingLeft: 40 }} />
+            <input aria-label="End time" type="time" value={form.end} disabled={locked} onChange={set('end')} style={field} />
           </div>
-          <label style={labelWrap}>
-            <span>ทุกสัปดาห์ถึงวันที่</span>
-            <input aria-label="Repeat until" type="date" min={form.date} value={form.until} onChange={set('until')} style={{ ...field, paddingLeft: 40 }} />
-          </label>
+          {/* คาบที่มีอยู่แล้วแก้ทีละคาบ ไม่มีการทำซ้ำ */}
+          {!fromEvent && (
+            <label style={labelWrap}>
+              <span>ทุกสัปดาห์ถึงวันที่</span>
+              <input aria-label="Repeat until" type="date" min={form.date} value={form.until} onChange={set('until')} style={{ ...field, paddingLeft: 40 }} />
+            </label>
+          )}
           {rejecting && (
             <input aria-label="Reject reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="เหตุผลที่ไม่อนุมัติ (ส่งในเมลถึงอาจารย์)" style={field} />
@@ -192,8 +222,22 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
                 {rejecting ? 'Confirm reject' : 'Reject'}
               </button>
             )}
+            {fromEvent && onDelete && (
+              // ลบได้เลยไม่ต้องกดปากกาก่อน (ถามยืนยันที่หน้า page)
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onDelete(form)}
+                style={{ width: 200, height: 44, borderRadius: 8, border: 0, background: '#F87171', color: '#fff', fontFamily: 'inherit', fontSize: 14, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}
+              >
+                Delete
+              </button>
+            )}
             {!rejecting && (
-              <PrimaryButton onClick={() => ready && !busy && onApprove(form)} style={{ width: 200, height: 44, opacity: ready && !busy ? 1 : 0.6 }}>
+              <PrimaryButton
+                onClick={() => ready && !busy && !locked && onApprove(form)}
+                style={{ width: 200, height: 44, opacity: ready && !busy && !locked ? 1 : 0.6 }}
+              >
                 {busy ? 'Saving…' : 'Approve'}
               </PrimaryButton>
             )}
