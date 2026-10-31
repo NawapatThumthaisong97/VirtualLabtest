@@ -4,7 +4,9 @@
  *
  * Title + description + the lab document rendered inline with pdf.js, so the
  * pages flow with the page instead of sitting inside the browser's PDF viewer.
- * Pressing "Start Lab work" hands the whole page over to the provisioning loader.
+ * Two tabs: Instruction (the document, always readable) and Dashboard (container
+ * ports). Pressing "Start Lab work" jumps to Dashboard, which shows the loader
+ * until the session is ready.
  * Navbar/Footer come from RootLayout, so this file renders page content only.
  */
 import { useState } from 'react';
@@ -61,6 +63,8 @@ export default function LabDetailPage() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const [portsOpen, setPortsOpen] = useState(true);
+  // Instruction = เอกสาร lab, Dashboard = พอร์ตของ container — สลับกันได้ตลอดขณะเปิด lab
+  const [view, setView] = useState<'instruction' | 'dashboard'>('instruction');
 
   // โหลดไฟล์เอกสารผ่าน apiClient เพื่อให้ token ติดไปด้วย ถ้าปล่อยให้ react-pdf
   // ไปโหลด URL เองจะโดน 401 เพราะมันไม่ผ่าน interceptor ของ axios
@@ -76,10 +80,12 @@ export default function LabDetailPage() {
   const handleStartLab = async () => {
     setIsLaunching(true);
     setLaunchError(null);
+    setView('dashboard');
     try {
       setSession(await sessionService.create(labId));
     } catch (err) {
       setLaunchError(readError(err));
+      setView('instruction');
     } finally {
       setIsLaunching(false);
     }
@@ -91,6 +97,7 @@ export default function LabDetailPage() {
     try {
       await sessionService.remove(session.session_id);
       setSession(null);
+      setView('instruction');
     } catch (err) {
       setLaunchError(readError(err));
     } finally {
@@ -111,8 +118,8 @@ export default function LabDetailPage() {
       <DashboardHeader
         title={`${lab.course.code} : ${lab.course.name}`}
         features={[
-          { label: 'Instruction', active: true },
-          { label: 'Dashboard', note: 'เร็ว ๆ นี้' },
+          { label: 'Instruction', active: view === 'instruction', onClick: () => setView('instruction') },
+          { label: 'Dashboard', active: view === 'dashboard', onClick: () => setView('dashboard') },
         ]}
         inner={{
           width: 'calc(min(1200px, 100%) - 64px)',
@@ -150,70 +157,76 @@ export default function LabDetailPage() {
         )}
       </DashboardHeader>
 
-      {isLaunching ? (
-        // heavier bottom padding lifts the block above true centre, where a
-        // lone element reads as "centred" to the eye
-        <div className="flex flex-1 items-center justify-center px-6 pt-10 pb-28">
-          <LabLoader size={48} label="Preparing your lab environment" />
-        </div>
-      ) : session ? (
-        <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
-          <h1 className="mb-2 text-[22px] font-semibold">{labHeading}</h1>
-          <p className="mb-6 text-[15px] text-[#6B6A66]">
-            สภาพแวดล้อมพร้อมใช้งานแล้ว — เปิดลิงก์ด้านล่างในแท็บใหม่
-          </p>
+      {view === 'dashboard' ? (
+        isLaunching ? (
+          // heavier bottom padding lifts the block above true centre, where a
+          // lone element reads as "centred" to the eye
+          <div className="flex flex-1 items-center justify-center px-6 pt-10 pb-28">
+            <LabLoader size={48} label="Preparing your lab environment" />
+          </div>
+        ) : session ? (
+          <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
+            <h1 className="mb-2 text-[22px] font-semibold">{labHeading}</h1>
+            <p className="mb-6 text-[15px] text-[#6B6A66]">
+              สภาพแวดล้อมพร้อมใช้งานแล้ว — เปิดลิงก์ด้านล่างในแท็บใหม่
+            </p>
 
-          {/* กล่อง Container port ตาม mockup ของ Pete — หัวดำกดพับ / กางได้ แต่ละพอร์ตเปิดในแท็บใหม่ */}
-          <section className="border border-[#D9D9D9] bg-white">
-            <button
-              type="button"
-              onClick={() => setPortsOpen((open) => !open)}
-              aria-expanded={portsOpen}
-              className="flex w-full cursor-pointer items-center justify-between border-0 bg-[#0B0B0B] px-3 py-2 text-left text-[15px] font-normal text-white"
-            >
-              Container port
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                aria-hidden="true"
-                className={`transition-transform ${portsOpen ? '' : '-rotate-90'}`}
+            {/* กล่อง Container port ตาม mockup ของ Pete — หัวดำกดพับ / กางได้ แต่ละพอร์ตเปิดในแท็บใหม่ */}
+            <section className="border border-[#D9D9D9] bg-white">
+              <button
+                type="button"
+                onClick={() => setPortsOpen((open) => !open)}
+                aria-expanded={portsOpen}
+                className="flex w-full cursor-pointer items-center justify-between border-0 bg-[#0B0B0B] px-3 py-2 text-left text-[15px] font-normal text-white"
               >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
+                Container port
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  aria-hidden="true"
+                  className={`transition-transform ${portsOpen ? '' : '-rotate-90'}`}
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
 
-            {portsOpen && (
-              <div className="flex flex-col gap-4 px-7 py-7">
-                {Object.entries(session.endpoints).map(([port, url]) => (
-                  <a
-                    key={port}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-6 border border-[#CFCFCF] px-4 py-2.5 text-[#111] no-underline shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition hover:border-[#185FA5]"
-                  >
-                    <ContainerIcon />
-                    <span className="flex-1 text-[17px] font-normal">{PORT_LABELS[port] ?? `Port ${port}`}</span>
-                    <span className="truncate text-[13px] text-[#333]">{url}</span>
-                  </a>
-                ))}
-              </div>
-            )}
-          </section>
+              {portsOpen && (
+                <div className="flex flex-col gap-4 px-7 py-7">
+                  {Object.entries(session.endpoints).map(([port, url]) => (
+                    <a
+                      key={port}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-6 border border-[#CFCFCF] px-4 py-2.5 text-[#111] no-underline shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition hover:border-[#185FA5]"
+                    >
+                      <ContainerIcon />
+                      <span className="flex-1 text-[17px] font-normal">{PORT_LABELS[port] ?? `Port ${port}`}</span>
+                      <span className="truncate text-[13px] text-[#333]">{url}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </section>
 
-          <p className="mt-6 text-[13px] text-[#9B9A93]">
-            cluster: {session.cluster_name} · image: {session.image_repository}:
-            {session.image_tag}
-          </p>
-        </div>
+            <p className="mt-6 text-[13px] text-[#9B9A93]">
+              cluster: {session.cluster_name} · image: {session.image_repository}:
+              {session.image_tag}
+            </p>
+          </div>
+        ) : (
+          <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
+            <DocMessage>ยังไม่ได้เปิด lab — กด Start Lab work ที่แถบด้านบนเพื่อเริ่ม</DocMessage>
+          </div>
+        )
       ) : (
         // คุมความกว้างคอลัมน์เท่าเดิมเพื่อให้ขนาดตัวหนังสือใน PDF อ่านสบาย
         // (pdf.js วาดหน้าเท่าความกว้างคอลัมน์ ปล่อยเต็มจอแล้วตัวโตเกินไป)
-        // ต่างจากเดิมตรงที่พื้นหน้าเป็นสีขาว ไม่มีกล่องขาวลอยบนพื้นเทาแล้ว
+        // เปิด lab อยู่ก็ยังอ่านเอกสารได้ — แท็บนี้ไม่ขึ้นกับ session
         <div className="mx-auto w-full max-w-[1200px] px-8 pt-6 pb-10">
           <article>
             <h1 className="mb-4 text-[22px] font-semibold">{labHeading}</h1>
