@@ -109,6 +109,12 @@ def create_schedule(form: ScheduleCreate, background: BackgroundTasks, db: Sessi
     return ok("Schedule created", item)
 
 
+@admin_router.post("/slots/{slot_id}/cancel")
+def cancel_slot(slot_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """ยกเลิกคาบ 1 คาบ (สร้างผิด / งดเรียน) — คาบ online คืนเครื่องที่เปิดรอไว้แต่ยังไม่มีคนรับ"""
+    return ok("Slot cancelled", booking_service.cancel_slot(db, slot_id, user))
+
+
 @admin_router.get("/calendar", response_model=ApiResponse[CalendarResponse], response_model_by_alias=True)
 def get_calendar(month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"), db: Session = Depends(get_db)):
     """คาบทั้งเดือน (เวลาไทย) ไม่ใส่ = เดือนนี้"""

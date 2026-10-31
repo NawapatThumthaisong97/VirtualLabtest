@@ -180,6 +180,38 @@ class TestOnlineMode:
         assert "online" in body and "LC-123" not in body and "คืนเครื่อง" in body
 
 
+class TestCancelSlot:
+    """Admin cancels one class (e.g. created at the wrong time)"""
+
+    def _slot(self, db, item):
+        return db.query(ClassSlot).filter(ClassSlot.schedule_id == item.class_schedule_id).order_by(ClassSlot.starts_at).first()
+
+    def test_cancel(self, db, world, people):
+        """Cancelled -> CANCELLED, gone from calendar, the same time can be booked again"""
+        admin = people[1]
+        item = bs.create_direct(db, admin, ScheduleCreate(course_id=world.course.id, **form(world, until=MONDAY).model_dump()), ROOMS)
+        slot = self._slot(db, item)
+        result = bs.cancel_slot(db, slot.id, admin)
+
+        assert result["status"] == "cancelled" and result["released"] == []
+        assert admin.email in slot.note
+        assert bs.get_calendar(db, MONDAY.replace(day=1)).events == []
+        again = bs.create_direct(db, admin, ScheduleCreate(course_id=world.course.id, **form(world, until=MONDAY).model_dump()), ROOMS)
+        assert again.status == "approved"
+
+    def test_twice_and_unknown(self, db, world, people):
+        """Cancel twice -> 409, unknown slot -> 404"""
+        from app.exceptions.domain import NotFoundError
+        admin = people[1]
+        item = bs.create_direct(db, admin, ScheduleCreate(course_id=world.course.id, **form(world, until=MONDAY).model_dump()), ROOMS)
+        slot = self._slot(db, item)
+        bs.cancel_slot(db, slot.id, admin)
+        with pytest.raises(ConflictError):
+            bs.cancel_slot(db, slot.id, admin)
+        with pytest.raises(NotFoundError):
+            bs.cancel_slot(db, uuid.uuid4(), admin)
+
+
 class TestMail:
     """Decision mail to course instructors; redirect while testing"""
 

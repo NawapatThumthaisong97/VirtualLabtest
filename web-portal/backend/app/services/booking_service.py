@@ -38,6 +38,7 @@ from app.schemas.booking_schema import (
     ScheduleForm,
     SchedulerOptions,
 )
+from app.services import prelaunch_service
 from app.services.mail_service import send_mail
 from app.services.schedule_service import SCHEDULE_TZ, _class_dates, _to_utc, generate_slots
 from app.utils.logger import logger
@@ -276,6 +277,25 @@ def create_direct(db: DbSession, admin: User, form: ScheduleCreate,
         db.rollback()
         raise
     return _to_item(db, b, slots_created=count)
+
+
+def cancel_slot(db: DbSession, slot_id: UUID, admin: User) -> dict:
+    """ยกเลิกคาบ 1 คาบ (เช่นสร้างผิดเวลา) → CANCELLED: scheduler ไม่สนใจ ไม่นับว่าชนเวลา ไม่ขึ้นปฏิทิน
+
+    คาบ online ที่เปิดเครื่องรอไว้แล้ว: เครื่องที่ยังไม่มีคนรับ → คืนเครื่องทันที (เครื่องที่นักศึกษารับไปแล้วไม่แตะ)
+    """
+    slot = db.get(ClassSlot, slot_id)
+    if slot is None or slot.deleted_at is not None:
+        raise NotFoundError("ไม่พบคาบนี้")
+    if slot.status in (ClassSlotStatus.CANCELLED, ClassSlotStatus.DONE):
+        raise ConflictError(f"คาบนี้ {slot.status.name} ไปแล้ว")
+    slot.status = ClassSlotStatus.CANCELLED
+    note = f"ยกเลิกโดย {admin.email} {datetime.now(TZ):%d/%m/%Y %H:%M}"
+    slot.note = f"{slot.note}\n{note}" if slot.note else note
+    db.commit()
+    released = prelaunch_service.release_unclaimed(db, slot.id)
+    logger.info(f"[booking] slot {slot.id} cancelled by {admin.email}, released {released}")
+    return {"slotId": str(slot.id), "status": slot.status.value, "released": released}
 
 
 # ---------- เมล ----------

@@ -150,6 +150,27 @@ def _expire_unclaimed(db: DbSession, now: datetime, background: Callable, result
         result["expired"].append(session.sky_cluster_name)
 
 
+def release_unclaimed(db: DbSession, slot_id: UUID,
+                      background: Optional[Callable[[Callable[[], None]], None]] = None) -> list[str]:
+    """คืนเครื่องที่เปิดรอไว้ของคาบนี้ที่ยังไม่มีคนรับ (ใช้ตอนยกเลิกคาบ) คืนชื่อ cluster ที่คืน
+
+    PENDING (launch ยังไม่เสร็จ) ข้าม — พอเป็น RUNNING แล้ว _expire_unclaimed จะคืนให้ตามเวลาเดิม
+    """
+    rows = db.query(SessionModel).filter(
+        SessionModel.class_slot_id == slot_id,
+        SessionModel.prelaunched_at.isnot(None),
+        SessionModel.claimed_at.is_(None),
+        SessionModel.status == SessionStatus.RUNNING,
+        SessionModel.deleted_at.is_(None),
+    ).all()
+    background = background or _run_in_background
+    svc = _service(db)
+    for session in rows:
+        svc._end_session(session, SessionStatus.STOPPED, SessionEndReason.PRELAUNCH_UNCLAIMED)
+        background(_down_job(session.sky_cluster_name))
+    return [s.sky_cluster_name for s in rows]
+
+
 def _move(slot: ClassSlot, status: ClassSlotStatus, changed: dict) -> None:
     if slot.status != status:
         changed[str(slot.id)] = f"{slot.status.name} -> {status.name}"

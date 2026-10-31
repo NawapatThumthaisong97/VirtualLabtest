@@ -267,3 +267,22 @@ class TestClaim:
 
         result = svc.create_session(world.user.id, world.aws_lab.id, client_ip="100.83.96.97")
         assert result["run_target"] == "aws" and len(fake_sky.launched) == 1
+
+
+class TestCancelReleases:
+    """Cancelling an online class releases machines nobody has claimed"""
+
+    def test_release_unclaimed_only(self, db, world, online, run_now, fake_sky):
+        """2 machines ready, 1 claimed -> cancel releases the other one only"""
+        slot = online()
+        pl.sync_prelaunch(db, NOW, background=run_now)
+        claimed, unclaimed = prelaunched(db, slot)
+        claimed.claimed_at = NOW
+        db.commit()
+
+        released = pl.release_unclaimed(db, slot.id, background=run_now)
+
+        assert released == [unclaimed.sky_cluster_name]
+        assert (unclaimed.status, unclaimed.end_reason) == (SessionStatus.STOPPED, SessionEndReason.PRELAUNCH_UNCLAIMED)
+        assert fake_sky.downed == [unclaimed.sky_cluster_name] and claimed.status == SessionStatus.RUNNING
+
