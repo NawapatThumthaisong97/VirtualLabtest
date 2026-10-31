@@ -171,8 +171,14 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
 
           <TabNav tabs={TABS} active={tab} onChange={setTab} />
 
-          {isService && (
-            <div key={tab} className={`flex flex-col gap-3.5 ${styles.fadeUp}`}>
+          {/* ทุกแท็บซ้อนอยู่ในช่องเดียวกัน แท็บ Service อยู่เสมอ (ซ่อนตอนไม่ได้เลือก)
+              hero จึงสูงเท่าแท็บ Service ทุกแท็บ สลับแท็บแล้วหน้าไม่ยุบ / กระโดด */}
+          <div className="grid">
+            <div
+              key={isService ? 'service' : 'service-hidden'}
+              aria-hidden={!isService}
+              className={`col-start-1 row-start-1 flex flex-col gap-3.5 ${isService ? styles.fadeUp : 'invisible'}`}
+            >
               <div className="flex items-center justify-between">
                 <div className="text-[19px] text-white">Virtual Environment</div>
                 {selectedService && (
@@ -197,7 +203,8 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
                 ))}
               </div>
             </div>
-          )}
+
+          </div>
         </div>
       </div>
 
