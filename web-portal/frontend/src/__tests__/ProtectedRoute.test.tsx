@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import ProtectedRoute from '../components/ProtectedRoute';
 import * as AuthContextModule from '../contexts/AuthContext';
 import type { CurrentUser } from '../services/auth';
+import { staffHomeFor } from '../utils/homePath';
 
 describe('ProtectedRoute & Route Protection (Issue #80 Acceptance Criteria 2)', () => {
   it('redirects unauthenticated users to /login automatically', () => {
@@ -122,6 +123,34 @@ describe('ProtectedRoute & Route Protection (Issue #80 Acceptance Criteria 2)', 
     expect(screen.getByText('Instructor Home')).toBeDefined();
     expect(screen.queryByText('Student Lab Page')).toBeNull();
     expect(screen.queryByText('Access Restricted')).toBeNull();
+  });
+
+  it('redirectTo as a function: each role goes to its own home (admin -> /admin)', () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      user: { id: 'usr-3', email: 'admin@tu.ac.th', name: 'Admin', studentId: null, role: 'admin' } as CurrentUser,
+      isLoading: false,
+      isAuthenticated: true,
+      login: vi.fn(),
+      loginWithSSO: vi.fn(),
+      handleSsoCallback: vi.fn(),
+      logout: vi.fn(),
+      refreshUser: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/courses/c1']}>
+        <Routes>
+          <Route path="/admin" element={<div>Admin Home</div>} />
+          <Route path="/instructor" element={<div>Instructor Home</div>} />
+          <Route element={<ProtectedRoute allowedRoles={['student']} redirectTo={staffHomeFor} />}>
+            <Route path="/courses/:courseId" element={<div>Student Course Page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('Admin Home')).toBeDefined();
+    expect(screen.queryByText('Student Course Page')).toBeNull();
   });
 });
 

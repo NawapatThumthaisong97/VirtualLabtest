@@ -5,3 +5,8 @@ export function homeFor(role: string | undefined, from?: string): string {
   if (from && from !== '/' && from !== '/login') return from;
   return role === 'admin' ? '/admin' : '/';
 }
+
+/** หน้าหลักของบุคลากร — ใช้ตอนอาจารย์ / admin เปิดหน้าที่เป็นของนักศึกษา (วิชาที่ลงเรียน / แลป) */
+export function staffHomeFor(role: string): string {
+  return role === 'admin' ? '/admin' : '/instructor';
+}
