@@ -5,6 +5,7 @@
 import { createBrowserRouter } from 'react-router-dom';
 import RootLayout from '../components/Layout.tsx';
 import ProtectedRoute from '../components/ProtectedRoute.tsx';
+import { staffHomeFor } from '../utils/homePath';
 import HomePage from '../pages/Home.tsx';
 import ImagesPage from '../pages/Images.tsx';
 import CoursesPage from '../pages/Courses.tsx';
@@ -46,13 +47,24 @@ export const router = createBrowserRouter([
             path: '/images',
             element: <ImagesPage />,
           },
+        ],
+      },
+      // หน้าของนักศึกษา (วิชาที่ลงเรียน) — อาจารย์ / admin เด้งไปหน้าของตัวเอง (staffHomeFor)
+      {
+        element: <ProtectedRoute allowedRoles={['student']} redirectTo={staffHomeFor} />,
+        children: [
           {
-            path: '/courses',
-            element: <CoursesPage />,
-          },
-          {
-            path: '/courses/:courseId',
-            element: <CourseDetailPage />,
+            element: <RootLayout />,
+            children: [
+              {
+                path: '/courses',
+                element: <CoursesPage />,
+              },
+              {
+                path: '/courses/:courseId',
+                element: <CourseDetailPage />,
+              },
+            ],
           },
         ],
       },
@@ -124,9 +136,9 @@ export const router = createBrowserRouter([
         ],
       },
       // Lab workspace pages: navbar only, no footer
-      // หน้าแลปของนักศึกษา — อาจารย์เด้งไป /instructor (ดูเอกสารผ่านปุ่ม Instruction ในหน้าวิชาแทน)
+      // หน้าแลปของนักศึกษา — อาจารย์ / admin เด้งไปหน้าของตัวเอง (ดูเอกสารผ่านปุ่ม Instruction ในหน้าวิชาแทน)
       {
-        element: <ProtectedRoute allowedRoles={['student', 'admin']} redirectTo="/instructor" />,
+        element: <ProtectedRoute allowedRoles={['student']} redirectTo={staffHomeFor} />,
         children: [
           {
             element: <RootLayout showFooter={false} />,
