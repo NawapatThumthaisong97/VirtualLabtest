@@ -12,6 +12,18 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Tailwind v4 ตั้ง cursor ของ <button> เป็น default — ให้ทุกอย่างที่กดได้เป็นรูปมือทั้งเว็บ
+   อยู่ใน @layer base เลย utility (cursor-not-allowed ฯลฯ) และ inline style ยัง override ได้ */
+@layer base {
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  select:not(:disabled),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #000000;

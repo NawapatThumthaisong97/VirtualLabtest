@@ -6,9 +6,12 @@ import type { ReactNode } from 'react';
 interface ProtectedRouteProps {
   children?: ReactNode;
   allowedRoles?: UserRole[];
+  /** role ไม่ผ่านแล้วพาไปหน้านี้แทนหน้า Access Restricted (เช่น อาจารย์เปิดลิงก์หน้าแลปนักศึกษา)
+   *  ส่งเป็นฟังก์ชันได้ ถ้าแต่ละ role ต้องไปคนละหน้า (admin → /admin, อาจารย์ → /instructor) */
+  redirectTo?: string | ((role: UserRole) => string);
 }
 
-export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, allowedRoles, redirectTo }: ProtectedRouteProps) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
 
@@ -29,6 +32,10 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
+    if (redirectTo) {
+      const to = typeof redirectTo === 'function' ? redirectTo(user.role) : redirectTo;
+      return <Navigate to={to} replace />;
+    }
     return (
       <div className="flex min-h-screen w-full items-center justify-center bg-[#0a0a0a] text-white">
         <div className="flex max-w-md flex-col items-center gap-3 text-center p-6">

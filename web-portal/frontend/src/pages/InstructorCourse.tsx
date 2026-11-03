@@ -9,7 +9,7 @@
  * กด Publish ที่แถวของ lab หลัง image สแกนผ่าน (backend กันไว้อีกชั้น)
  */
 import { Fragment, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { courseService } from '../services/course';
 import { labService } from '../services/lab';
@@ -44,6 +44,25 @@ const addButton =
 
 function formatDue(dueAt: string | null) {
   return dueAt ? new Date(dueAt).toLocaleDateString('en-GB') : '-';
+}
+
+/**
+ * เปิดเอกสาร lab ในแท็บใหม่ — อาจารย์เข้าหน้าแลปของนักศึกษา (/labs/:id) ไม่ได้แล้ว
+ * เปิดแท็บเปล่าก่อน await เพราะ window.open หลัง await จะโดน popup blocker
+ */
+async function openLabDoc(labId: string) {
+  const tab = window.open('', '_blank');
+  try {
+    const buf = await labService.fetchDoc(labId);
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+    if (tab) tab.location.href = url;
+    else window.open(url, '_blank');
+    // ให้แท็บใหม่โหลดเสร็จก่อนค่อยคืนหน่วยความจำ
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch {
+    tab?.close();
+    window.alert('เปิดเอกสารไม่สำเร็จ ลองใหม่อีกครั้ง');
+  }
 }
 
 export default function InstructorCoursePage() {
@@ -266,12 +285,15 @@ export default function InstructorCoursePage() {
                                         Publish
                                       </button>
                                     )}
-                                    <Link
-                                      to={`/labs/${lab.id}`}
-                                      className="bg-blue-600 px-6 py-1.5 text-[0.8rem] text-white no-underline hover:bg-blue-700"
+                                    <button
+                                      type="button"
+                                      onClick={() => openLabDoc(lab.id)}
+                                      disabled={!lab.docUrl}
+                                      title={lab.docUrl ? undefined : 'ยังไม่มีเอกสารสำหรับ lab นี้'}
+                                      className="cursor-pointer border-0 bg-blue-600 px-6 py-1.5 text-[0.8rem] text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                       Instruction
-                                    </Link>
+                                    </button>
                                   </div>
                                 </div>
                               </td>

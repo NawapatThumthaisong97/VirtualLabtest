@@ -4,17 +4,16 @@
  *
  * Title + description + the lab document rendered inline with pdf.js, so the
  * pages flow with the page instead of sitting inside the browser's PDF viewer.
- * Pressing "Start Lab work" hands the whole page over to the provisioning loader.
+ * Two tabs: Instruction (the document, always readable) and Dashboard (container
+ * ports). Pressing "Start Lab work" jumps to Dashboard, which shows the loader
+ * until the session is ready.
  * Navbar/Footer come from RootLayout, so this file renders page content only.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Document, Page, pdfjs } from 'react-pdf';
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
+import LabDocViewer, { DocMessage } from '../components/LabDocViewer.tsx';
 import LabLoader from '../components/LabLoader.tsx';
 import ContainerIcon from '../components/ContainerIcon.tsx';
 import DashboardHeader from '../components/admin/DashboardHeader';
@@ -34,19 +33,6 @@ function readError(err: unknown): string {
   const data = (err as { response?: { data?: { message?: string; detail?: string } } })
     ?.response?.data;
   return data?.message ?? data?.detail ?? 'เปิด lab ไม่สำเร็จ ลองใหม่อีกครั้ง';
-}
-
-// pdf.js parses the file off the main thread; Vite resolves the bundled worker via ?url.
-// ?mime=js: ไฟล์ worker เคยถูก nginx ส่งเป็น application/octet-stream พร้อม Cache-Control immutable 1 ปี
-// เบราว์เซอร์ที่ cache ตัวเสียไว้จะไม่ขอใหม่เอง (Ctrl+Shift+R ไม่ช่วยเพราะ worker ถูกโหลดจากใน JS) — เปลี่ยน URL บังคับโหลดใหม่
-pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?mime=js`;
-
-function DocMessage({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-80 items-center justify-center rounded-xl bg-[#F5F4EF] p-4 text-center text-[13px] text-[#9B9A93]">
-      {children}
-    </div>
-  );
 }
 
 function PageMessage({ children }: { children: ReactNode }) {
@@ -77,6 +63,8 @@ export default function LabDetailPage() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const [portsOpen, setPortsOpen] = useState(true);
+  // Instruction = เอกสาร lab, Dashboard = พอร์ตของ container — สลับกันได้ตลอดขณะเปิด lab
+  const [view, setView] = useState<'instruction' | 'dashboard'>('instruction');
 
   // โหลดไฟล์เอกสารผ่าน apiClient เพื่อให้ token ติดไปด้วย ถ้าปล่อยให้ react-pdf
   // ไปโหลด URL เองจะโดน 401 เพราะมันไม่ผ่าน interceptor ของ axios
@@ -86,43 +74,18 @@ export default function LabDetailPage() {
     enabled: Boolean(lab?.docUrl),
   });
 
-  // react-pdf จะโหลดไฟล์ใหม่ทุกครั้งที่ prop `file` เปลี่ยน reference
-  // ถ้าสร้าง object ใหม่ทุก render มันจะวนโหลดไม่จบ
-  const docFile = useMemo(
-    () => (docBuffer ? { data: new Uint8Array(docBuffer) } : null),
-    [docBuffer]
-  );
-
-  const docRef = useRef<HTMLDivElement>(null);
-  const [pageWidth, setPageWidth] = useState(0);
-  const [pageCount, setPageCount] = useState(0);
-
-  // pdf.js rasterises each page at a fixed pixel width, so the width has to be
-  // measured from the column and re-measured whenever the window resizes.
-  // The column only exists once the lab has loaded and while not launching,
-  // so both are dependencies — otherwise the observer watches a dead element
-  // and pageWidth stays 0, which renders nothing at all.
-  useEffect(() => {
-    const el = docRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver(([entry]) => {
-      setPageWidth(entry.contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [isLaunching, lab]);
-
   // สร้าง session = SkyPilot ไป schedule pod แล้ว pull image ใช้เวลาราว 1-2 นาที
   // backend รอจน pod พร้อมก่อนถึงจะตอบกลับ ไม่ได้ตอบทันทีแล้วให้ poll เอา
   // ฉะนั้นตรงนี้แค่ await ยาว ๆ โดยมี loader คั่นไว้ก็พอ
   const handleStartLab = async () => {
     setIsLaunching(true);
     setLaunchError(null);
+    setView('dashboard');
     try {
       setSession(await sessionService.create(labId));
     } catch (err) {
       setLaunchError(readError(err));
+      setView('instruction');
     } finally {
       setIsLaunching(false);
     }
@@ -134,6 +97,7 @@ export default function LabDetailPage() {
     try {
       await sessionService.remove(session.session_id);
       setSession(null);
+      setView('instruction');
     } catch (err) {
       setLaunchError(readError(err));
     } finally {
@@ -154,8 +118,14 @@ export default function LabDetailPage() {
       <DashboardHeader
         title={`${lab.course.code} : ${lab.course.name}`}
         features={[
-          { label: 'Instruction', active: true },
-          { label: 'Dashboard', note: 'เร็ว ๆ นี้' },
+          { label: 'Instruction', active: view === 'instruction', onClick: () => setView('instruction') },
+          // ยังไม่ได้ Start = ไม่มีอะไรให้ดู ไม่ใส่ onClick แท็บจะจางและกดไม่ได้ (ชี้แล้วขึ้น note)
+          {
+            label: 'Dashboard',
+            active: view === 'dashboard',
+            onClick: session || isLaunching ? () => setView('dashboard') : undefined,
+            note: 'กด Start Lab work ก่อน',
+          },
         ]}
         inner={{
           width: 'calc(min(1200px, 100%) - 64px)',
@@ -179,7 +149,7 @@ export default function LabDetailPage() {
             disabled={isClosing}
             className="cursor-pointer whitespace-nowrap border-0 bg-transparent px-0.5 py-1.5 text-[15px] font-light text-white hover:underline disabled:cursor-not-allowed disabled:opacity-60 disabled:no-underline"
           >
-            {isClosing ? 'กำลังปิด...' : 'ปิด lab'}
+            {isClosing ? 'กำลังปิด...' : 'Close Lab'}
           </button>
         ) : (
           <button
@@ -193,70 +163,68 @@ export default function LabDetailPage() {
         )}
       </DashboardHeader>
 
-      {isLaunching ? (
-        // heavier bottom padding lifts the block above true centre, where a
-        // lone element reads as "centred" to the eye
-        <div className="flex flex-1 items-center justify-center px-6 pt-10 pb-28">
-          <LabLoader size={48} label="Preparing your lab environment" />
-        </div>
-      ) : session ? (
-        <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
-          <h1 className="mb-2 text-[22px] font-semibold">{labHeading}</h1>
-          <p className="mb-6 text-[15px] text-[#6B6A66]">
-            สภาพแวดล้อมพร้อมใช้งานแล้ว — เปิดลิงก์ด้านล่างในแท็บใหม่
-          </p>
-
-          {/* กล่อง Container port ตาม mockup ของ Pete — หัวดำกดพับ / กางได้ แต่ละพอร์ตเปิดในแท็บใหม่ */}
-          <section className="border border-[#D9D9D9] bg-white">
-            <button
-              type="button"
-              onClick={() => setPortsOpen((open) => !open)}
-              aria-expanded={portsOpen}
-              className="flex w-full cursor-pointer items-center justify-between border-0 bg-[#0B0B0B] px-3 py-2 text-left text-[15px] font-normal text-white"
-            >
-              Container port
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                aria-hidden="true"
-                className={`transition-transform ${portsOpen ? '' : '-rotate-90'}`}
+      {view === 'dashboard' ? (
+        isLaunching ? (
+          // heavier bottom padding lifts the block above true centre, where a
+          // lone element reads as "centred" to the eye
+          <div className="flex flex-1 items-center justify-center px-6 pt-10 pb-28">
+            <LabLoader size={48} label="Preparing your lab environment" />
+          </div>
+        ) : session ? (
+          // Dashboard ไม่มีหัวข้อ lab ซ้ำ (tester ขอ) — ชื่อวิชาอยู่บนแถบฟ้าแล้ว
+          <div className="mx-auto w-full max-w-[824px] px-8 pt-10 pb-10">
+            {/* กล่อง Container port ตาม mockup ของ Pete — หัวดำกดพับ / กางได้ แต่ละพอร์ตเปิดในแท็บใหม่ */}
+            <section className="border border-[#D9D9D9] bg-white">
+              <button
+                type="button"
+                onClick={() => setPortsOpen((open) => !open)}
+                aria-expanded={portsOpen}
+                className="flex w-full cursor-pointer items-center justify-between border-0 bg-[#0B0B0B] px-3 py-2 text-left text-[15px] font-normal text-white"
               >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
+                Container port
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  aria-hidden="true"
+                  className={`transition-transform ${portsOpen ? '' : '-rotate-90'}`}
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
 
-            {portsOpen && (
-              <div className="flex flex-col gap-4 px-7 py-7">
-                {Object.entries(session.endpoints).map(([port, url]) => (
-                  <a
-                    key={port}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-6 border border-[#CFCFCF] px-4 py-2.5 text-[#111] no-underline shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition hover:border-[#185FA5]"
-                  >
-                    <ContainerIcon />
-                    <span className="flex-1 text-[17px] font-normal">{PORT_LABELS[port] ?? `Port ${port}`}</span>
-                    <span className="truncate text-[13px] text-[#333]">{url}</span>
-                  </a>
-                ))}
-              </div>
-            )}
-          </section>
+              {portsOpen && (
+                <div className="flex flex-col gap-4 px-7 py-7">
+                  {Object.entries(session.endpoints).map(([port, url]) => (
+                    <a
+                      key={port}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-6 border border-[#CFCFCF] px-4 py-2.5 text-[#111] no-underline shadow-[0_1px_2px_rgba(0,0,0,0.12)] transition hover:border-[#185FA5]"
+                    >
+                      <ContainerIcon />
+                      <span className="flex-1 text-[17px] font-normal">{PORT_LABELS[port] ?? `Port ${port}`}</span>
+                      <span className="truncate text-[13px] text-[#333]">{url}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </section>
 
-          <p className="mt-6 text-[13px] text-[#9B9A93]">
-            cluster: {session.cluster_name} · image: {session.image_repository}:
-            {session.image_tag}
-          </p>
-        </div>
+            <p className="mt-6 text-[13px] text-[#9B9A93]">
+              cluster: {session.cluster_name} · image: {session.image_repository}:
+              {session.image_tag}
+            </p>
+          </div>
+        ) : null
       ) : (
         // คุมความกว้างคอลัมน์เท่าเดิมเพื่อให้ขนาดตัวหนังสือใน PDF อ่านสบาย
         // (pdf.js วาดหน้าเท่าความกว้างคอลัมน์ ปล่อยเต็มจอแล้วตัวโตเกินไป)
-        // ต่างจากเดิมตรงที่พื้นหน้าเป็นสีขาว ไม่มีกล่องขาวลอยบนพื้นเทาแล้ว
+        // เปิด lab อยู่ก็ยังอ่านเอกสารได้ — แท็บนี้ไม่ขึ้นกับ session
         <div className="mx-auto w-full max-w-[1200px] px-8 pt-6 pb-10">
           <article>
             <h1 className="mb-4 text-[22px] font-semibold">{labHeading}</h1>
@@ -274,41 +242,15 @@ export default function LabDetailPage() {
             )}
 
             {/* Lab document — pdf.js draws each page straight into the article */}
-            <div ref={docRef}>
-              {!lab.docUrl ? (
-                <DocMessage>ยังไม่มีเอกสารสำหรับ lab นี้</DocMessage>
-              ) : isDocError ? (
-                <DocMessage>เปิดเอกสารไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง</DocMessage>
-              ) : !docFile ? (
-                <DocMessage>กำลังโหลดเอกสาร...</DocMessage>
-              ) : (
-                <Document
-                  file={docFile}
-                  onLoadSuccess={({ numPages }) => setPageCount(numPages)}
-                  externalLinkTarget="_blank"
-                  loading={<DocMessage>กำลังโหลดเอกสาร...</DocMessage>}
-                  error={<DocMessage>เปิดเอกสารไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง</DocMessage>}
-                  noData={<DocMessage>ยังไม่มีเอกสารสำหรับ lab นี้</DocMessage>}
-                  className="flex flex-col"
-                >
-                  {pageWidth > 0 &&
-                    Array.from({ length: pageCount }, (_, i) => (
-                      <div
-                        key={i}
-                        className={i > 0 ? 'mt-7 border-t border-[#F0EEE7] pt-7' : ''}
-                      >
-                        <Page 
-                          pageNumber={i + 1} 
-                          width={pageWidth} 
-                          loading=""
-                          renderAnnotationLayer={false}
-                          renderTextLayer={false}
-                        />
-                      </div>
-                    ))}
-                </Document>
-              )}
-            </div>
+            {!lab.docUrl ? (
+              <DocMessage>ยังไม่มีเอกสารสำหรับ lab นี้</DocMessage>
+            ) : isDocError ? (
+              <DocMessage>เปิดเอกสารไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง</DocMessage>
+            ) : !docBuffer ? (
+              <DocMessage>กำลังโหลดเอกสาร...</DocMessage>
+            ) : (
+              <LabDocViewer buffer={docBuffer} />
+            )}
           </article>
         </div>
       )}
