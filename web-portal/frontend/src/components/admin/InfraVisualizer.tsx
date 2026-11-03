@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { colors, type StatusTone } from './theme';
 import { Card, StatusDot, cellBorder } from './ui';
 import InfraMap from './InfraMap';
+import RoomFloor from './RoomFloor';
 import { formatThaiTime } from './SystemTable';
-import type { InfraMap as InfraMapData, RoomUsage, ServiceHealth, SystemStatus } from '../../services/adminDashboard';
+import type { InfraMap as InfraMapData, RoomClass, RoomClassStatus, RoomUsage, ServiceHealth, SystemStatus } from '../../services/adminDashboard';
 
 type LatencyLevel = 'bad' | 'good' | 'warn';
 const latencyBg: Record<LatencyLevel, string> = { bad: colors.cellRed, good: colors.cellGreen, warn: colors.cellYellow };
@@ -12,6 +13,20 @@ const healthLabel: Record<ServiceHealth, string> = { ok: 'reachable', degraded: 
 
 /** service ใน health check ที่เป็นทรัพยากรของ cluster (ตาราง Cluster Resources) */
 const RESOURCE_KEYS: Record<string, string> = { registry: 'Docker reg.', k8s: 'Kubernetes API', skypilot: 'SkyPilot API' };
+
+const classStatus: Record<RoomClassStatus, { tone: StatusTone; label: string; hint: string }> = {
+  pending: { tone: 'neutral', label: 'Pending', hint: 'ยังไม่ถึงเวลาเตรียมเครื่อง' },
+  preparing: { tone: 'warning', label: 'Preparing', hint: 'กำลังเตรียม warm pod ลงเครื่องในห้อง' },
+  ready: { tone: 'info', label: 'Ready', hint: 'เครื่องพร้อมแล้ว รอคาบเริ่ม' },
+  in_class: { tone: 'success', label: 'In class', hint: 'กำลังเรียน เครื่องพร้อมครบ' },
+  incomplete: { tone: 'error', label: 'Incomplete', hint: 'คาบเริ่มแล้วแต่เครื่องพร้อมไม่ครบ' },
+  done: { tone: 'neutral', label: 'Done', hint: 'จบแล้ว — ตัวเลขคือคนที่เปิดแลปในคาบ' },
+};
+
+function classHint(c: RoomClass): string {
+  const base = classStatus[c.status].hint;
+  return c.status === 'incomplete' ? `${base} (พร้อม ${c.pcsReady}/${c.seats} เครื่อง)` : base;
+}
 
 function latencyLevel(ms: number | null): LatencyLevel {
   if (ms === null || ms >= 2000) return 'bad';
@@ -39,6 +54,9 @@ export default function InfraVisualizer({
 }) {
   const rooms = usage?.rooms ?? [];
   const [picked, setPicked] = useState<string | null>(null);
+  // กดห้องในแผนผัง → แสดงผังเครื่องของห้องนั้นแทนแผนผัง กดชื่อห้องเพื่อกลับ
+  const [floor, setFloor] = useState<string | null>(null);
+  const floorRoom = map?.clusters.find((c) => c.type === 'k3s')?.rooms?.find((r) => r.room === floor);
   const selected = rooms.find((r) => r.room === picked) ?? rooms[0];
   const resources = (status?.services ?? []).filter((s) => s.key in RESOURCE_KEYS);
 
@@ -46,10 +64,21 @@ export default function InfraVisualizer({
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', borderBottom: cellBorder }}>
         <span style={{ color: colors.blue }}>Infrastructure Visualizer</span>
-        <span style={{ color: colors.muted, fontSize: 11 }}>คลิกห้องเพื่อดูรายละเอียด · Alt + scroll ซูม</span>
+        <span style={{ color: colors.muted, fontSize: 11 }}>คลิกห้องเพื่อดูผังเครื่อง · Alt + scroll ซูม</span>
       </div>
 
-      <InfraMap data={map} selected={selected?.room ?? null} onSelect={setPicked} />
+      {floorRoom ? (
+        <RoomFloor room={floorRoom.room} machines={floorRoom.machines ?? []} onBack={() => setFloor(null)} />
+      ) : (
+        <InfraMap
+          data={map}
+          selected={selected?.room ?? null}
+          onSelect={(room) => {
+            setPicked(room);
+            setFloor(room);
+          }}
+        />
+      )}
 
       <div style={{ padding: '14px 0 4px' }}>
         <div style={{ fontWeight: 600, marginBottom: 10, padding: '0 14px' }}>ClusterName : {selected?.room ?? '-'}</div>
@@ -64,21 +93,35 @@ export default function InfraVisualizer({
           </thead>
           <tbody>
             {selected ? (
-              <tr>
-                <td style={{ ...td, textAlign: 'center' }}>
-                  {selected.pcsInUse}/{selected.pcsTotal}
-                </td>
-                <td style={td}>
-                  <StatusDot
-                    tone={selected.state === 'launched' ? 'success' : 'warning'}
-                    label={selected.state === 'launched' ? 'Launched' : 'Idle'}
-                  />
-                </td>
-                <td style={td}>{selected.slot?.course ?? (selected.state === 'launched' ? 'นอกคาบ' : '-')}</td>
-                <td style={{ ...td, ...last, whiteSpace: 'nowrap' }}>
-                  {selected.slot ? timeRange(selected.slot.startsAt, selected.slot.endsAt) : '-'}
-                </td>
-              </tr>
+              <>
+                {/* คาบของห้องนี้วันนี้ แถวละคาบ — ขึ้นตั้งแต่ก่อนคาบ ไม่ต้องรอให้มีคนเปิดแลป */}
+                {(selected.classes ?? []).map((c) => (
+                  <tr key={c.id} title={classHint(c)}>
+                    <td style={{ ...td, textAlign: 'center' }}>{c.inUse}/{c.seats}</td>
+                    <td style={td}>
+                      <StatusDot tone={classStatus[c.status].tone} label={classStatus[c.status].label} />
+                    </td>
+                    <td style={td}>{c.course}</td>
+                    <td style={{ ...td, ...last, whiteSpace: 'nowrap' }}>{timeRange(c.startsAt, c.endsAt)}</td>
+                  </tr>
+                ))}
+                {(selected.outsideClass ?? 0) > 0 && (
+                  <tr title="เปิดแลปตอนที่ไม่มีคาบของวิชานั้น">
+                    <td style={{ ...td, textAlign: 'center' }}>{selected.outsideClass}/{selected.pcsTotal}</td>
+                    <td style={td}><StatusDot tone="success" label="Launched" /></td>
+                    <td style={td}>นอกคาบ</td>
+                    <td style={{ ...td, ...last }}>-</td>
+                  </tr>
+                )}
+                {!(selected.classes ?? []).length && !(selected.outsideClass ?? 0) && (
+                  <tr>
+                    <td style={{ ...td, textAlign: 'center' }}>0/{selected.pcsTotal}</td>
+                    <td style={td}><StatusDot tone="neutral" label="Idle" /></td>
+                    <td style={td}>-</td>
+                    <td style={{ ...td, ...last, color: colors.muted }}>วันนี้ไม่มีคาบในห้องนี้</td>
+                  </tr>
+                )}
+              </>
             ) : (
               <tr>
                 <td colSpan={4} style={{ ...td, ...last, textAlign: 'center', color: colors.muted }}>

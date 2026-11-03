@@ -7,18 +7,22 @@ Admin Monitor Service
 คอม 1 เครื่องในห้อง = 1 worker node
 """
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session as DbSession
 
 from app.configs.settings import settings
-from app.models.class_slot import ClassSlot
+from app.models.class_slot import ClassSlot, ClassSlotStatus
 from app.models.courses import Course
 from app.models.session import Session as SessionModel, SessionStatus
 from app.schemas.admin_monitor_schema import (
     ClusterMapItem,
     ControlPlane,
     InfraMapResponse,
+    RoomClass,
+    RoomMachine,
     RoomMapItem,
     RoomSlot,
     RoomUsageItem,
@@ -28,6 +32,8 @@ from app.services.prewarm_service import CONTROL_PLANE_LABEL
 from app.utils.logger import logger
 
 ROOM_LABEL = "vlab/room"
+# "วันนี้" ของตารางคาบในห้อง = วันตามเวลาไทย
+TH_TZ = ZoneInfo("Asia/Bangkok")
 UNASSIGNED_ROOM = "unassigned"
 K3S_CLUSTER_ID = "k3s-main"
 
@@ -88,6 +94,10 @@ class AdminMonitorService:
                 pcs_ready=ready,
                 pcs_in_use=sum(1 for n in members if in_use[n.metadata.name] > 0),
                 nodes=sorted(n.metadata.name for n in members),
+                machines=[
+                    RoomMachine(name=n.metadata.name, ready=_is_ready(n), in_use=in_use[n.metadata.name] > 0)
+                    for n in sorted(members, key=lambda n: n.metadata.name)
+                ],
             ))
         # unassigned ไว้ท้ายสุด
         return sorted(rooms, key=lambda r: (r.room == UNASSIGNED_ROOM, r.room))
@@ -159,7 +169,7 @@ class AdminMonitorService:
         return RoomSlot(course=course.name, starts_at=slot.starts_at, ends_at=slot.ends_at,
                         status=slot.status.value)
 
-    def get_rooms_usage(self) -> RoomUsageResponse:
+    def get_rooms_usage(self, now: Optional[datetime] = None) -> RoomUsageResponse:
         nodes = self._list_nodes()
         if nodes is None:
             return RoomUsageResponse(rooms=[])
@@ -171,5 +181,66 @@ class AdminMonitorService:
                 pcs_total=room.pcs_total,
                 state="launched" if room.pcs_in_use > 0 else "idle",
                 slot=self._room_slot(room.nodes) if room.pcs_in_use > 0 else None,
+                classes=self._room_classes(room, now or datetime.now(timezone.utc)),
+                outside_class=self._outside_class(room.nodes),
             ))
         return RoomUsageResponse(rooms=items)
+
+    def _room_classes(self, room: RoomMapItem, now: datetime) -> list[RoomClass]:
+        """คาบของห้องนี้วันนี้ (เวลาไทย) พร้อมสถานะตามเวลา + ความพร้อมของเครื่อง"""
+        day_start = now.astimezone(TH_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        lead = timedelta(minutes=settings.PREWARM_LEAD_MINUTES)
+        rows = (
+            self.db.query(ClassSlot, Course)
+            .join(Course, ClassSlot.course_id == Course.id)
+            .filter(
+                ClassSlot.room == room.room,
+                ClassSlot.deleted_at.is_(None),
+                ClassSlot.status != ClassSlotStatus.CANCELLED,
+                ClassSlot.starts_at >= day_start,
+                ClassSlot.starts_at < day_start + timedelta(days=1),
+            )
+            .order_by(ClassSlot.starts_at)
+            .all()
+        )
+        classes = []
+        for slot, course in rows:
+            running = now < slot.ends_at
+            in_use = (
+                self.db.query(SessionModel.id).filter(
+                    SessionModel.class_slot_id == slot.id,
+                    SessionModel.status == SessionStatus.RUNNING,
+                    SessionModel.deleted_at.is_(None),
+                ).count()
+                if running else
+                # จบแล้ว: คนที่เคยเปิดแลปในคาบนี้ (นับคนไม่นับ session ที่เปิดซ้ำ)
+                self.db.query(SessionModel.user_id).filter(
+                    SessionModel.class_slot_id == slot.id,
+                    SessionModel.status.in_([SessionStatus.RUNNING, SessionStatus.STOPPED]),
+                ).distinct().count()
+            )
+            seats = min(slot.expected_seats, room.pcs_total) or slot.expected_seats
+            if now >= slot.ends_at:
+                status = "done"
+            elif now >= slot.starts_at:
+                full = slot.status == ClassSlotStatus.READY and room.pcs_ready >= seats
+                status = "in_class" if full else "incomplete"
+            elif now >= slot.starts_at - lead:
+                status = "ready" if slot.status == ClassSlotStatus.READY else "preparing"
+            else:
+                status = "pending"
+            classes.append(RoomClass(
+                id=slot.id, course=f"{course.code} {course.name}", starts_at=slot.starts_at, ends_at=slot.ends_at,
+                status=status, in_use=in_use, seats=seats, pcs_ready=room.pcs_ready,
+            ))
+        return classes
+
+    def _outside_class(self, node_names: list[str]) -> int:
+        return (
+            self.db.query(SessionModel.node_name).filter(
+                SessionModel.status == SessionStatus.RUNNING,
+                SessionModel.node_name.in_(node_names),
+                SessionModel.class_slot_id.is_(None),
+                SessionModel.deleted_at.is_(None),
+            ).distinct().count()
+        )

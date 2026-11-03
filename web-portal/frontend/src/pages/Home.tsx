@@ -5,7 +5,7 @@
  * then two list cards whose top third overlaps the hero.
  * The navbar comes from RootLayout, so it is not repeated here.
  */
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
@@ -20,6 +20,7 @@ import { activityService, toEntry } from '../services/activity.ts';
 import type { Entry } from '../components/EntryBox.tsx';
 import styles from './Home.module.css';
 import heroBg from '../assets/B1.jpg';
+import supportLogo from '../assets/home/support.png';
 
 
 const TABS: Tab[] = [
@@ -54,6 +55,26 @@ const INSTRUCTOR_CONSOLE: Service = {
 };
 
 // อาจารย์ / admin ไม่มีงานแลปให้ทำเอง การ์ดแรกเลยเป็นหน้าจัดการวิชา (Pete ให้ Instructor Console ขึ้นก่อน)
+/** การ์ดแนะนำในแท็บ Help Desk — ขนาด / ตัวอักษรเท่าการ์ด Service ข้อความ 1 ประโยคพอ ๆ กัน */
+const HELP_CARDS: { title: string; text: ReactNode }[] = [
+  {
+    title: 'Can’t run your lab?',
+    text: 'Try Close Lab, then Start Lab work again. From home, give it about 2 minutes to boot.',
+  },
+  {
+    title: 'Contact us',
+    text: (
+      <>
+        Stuck or confused? Email{' '}
+        <a href="mailto:VirtualLabSupport@gmail.com" className="text-white underline underline-offset-2">
+          VirtualLabSupport@gmail.com
+        </a>{' '}
+        with your course and lab.
+      </>
+    ),
+  },
+];
+
 const STUDENT_SERVICES: Service[] = [LAB_WORK, COMPUTE];
 const INSTRUCTOR_SERVICES: Service[] = [INSTRUCTOR_CONSOLE, COMPUTE];
 
@@ -171,8 +192,14 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
 
           <TabNav tabs={TABS} active={tab} onChange={setTab} />
 
-          {isService && (
-            <div key={tab} className={`flex flex-col gap-3.5 ${styles.fadeUp}`}>
+          {/* ทุกแท็บซ้อนอยู่ในช่องเดียวกัน แท็บ Service อยู่เสมอ (ซ่อนตอนไม่ได้เลือก)
+              hero จึงสูงเท่าแท็บ Service ทุกแท็บ สลับแท็บแล้วหน้าไม่ยุบ / กระโดด */}
+          <div className="grid">
+            <div
+              key={isService ? 'service' : 'service-hidden'}
+              aria-hidden={!isService}
+              className={`col-start-1 row-start-1 flex flex-col gap-3.5 ${isService ? styles.fadeUp : 'invisible'}`}
+            >
               <div className="flex items-center justify-between">
                 <div className="text-[19px] text-white">Virtual Environment</div>
                 {selectedService && (
@@ -197,7 +224,27 @@ export default function HomePage({ studentName, greeting }: HomePageProps) {
                 ))}
               </div>
             </div>
-          )}
+
+            {/* Help Desk ก็อยู่ในผังเสมอเหมือน Service — hero สูงเท่ากันทุกแท็บแม้โลโก้สูงกว่าหัวข้อ Service */}
+            <div
+              key={tab === 'helpdesk' ? 'helpdesk' : 'helpdesk-hidden'}
+              aria-hidden={tab !== 'helpdesk'}
+              className={`col-start-1 row-start-1 flex flex-col gap-3.5 ${tab === 'helpdesk' ? styles.fadeUp : 'invisible'}`}
+            >
+              <img src={supportLogo} alt="Virtual Lab Support" className="h-auto w-[300px] select-none" draggable={false} />
+              <div className="flex flex-wrap gap-4">
+                {HELP_CARDS.map((card) => (
+                  <div
+                    key={card.title}
+                    className="w-[340px] rounded-[10px] border-[1.5px] border-white/32 bg-white/12 p-[22px] text-left backdrop-blur-sm"
+                  >
+                    <div className="mb-2 text-[17px] font-semibold text-white">{card.title}</div>
+                    <div className="text-[13.5px] leading-relaxed text-white/75">{card.text}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

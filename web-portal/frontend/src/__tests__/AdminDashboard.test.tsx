@@ -36,8 +36,10 @@ const map: InfraMap = {
 const usage: RoomUsage = {
   rooms: [
     { room: 'LC-123', pcsInUse: 1, pcsTotal: 1, state: 'launched',
-      slot: { course: 'Software Engineering', startsAt: '2026-10-23T06:00:00Z', endsAt: '2026-10-23T09:00:00Z', status: 'ready' } },
-    { room: 'LC-207', pcsInUse: 0, pcsTotal: 2, state: 'idle', slot: null },
+      slot: { course: 'Software Engineering', startsAt: '2026-10-23T06:00:00Z', endsAt: '2026-10-23T09:00:00Z', status: 'ready' },
+      classes: [{ id: 'c1', course: 'Software Engineering', startsAt: '2026-10-23T06:00:00Z', endsAt: '2026-10-23T09:00:00Z',
+                  status: 'in_class', inUse: 1, seats: 1, pcsReady: 1 }], outsideClass: 0 },
+    { room: 'LC-207', pcsInUse: 0, pcsTotal: 2, state: 'idle', slot: null, classes: [], outsideClass: 0 },
   ],
 };
 
