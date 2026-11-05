@@ -8,7 +8,8 @@
  * ปุ่มเพิ่มเปิด modal ของ Pete (components/lab-builder) lab ใหม่เป็น draft เสมอ
  * กด Publish ที่แถวของ lab หลัง image สแกนผ่าน (backend กันไว้อีกชั้น)
  */
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Settings } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { courseService } from '../services/course';
@@ -106,6 +107,38 @@ export default function InstructorCoursePage() {
     onSuccess: refresh,
   });
 
+  // ฟันเฟืองของแต่ละ lab: ลบ lab / ลบ image ของ lab (ของเดิมมีแค่ในหน้า /instructor แบบเก่า)
+  const [notice, setNotice] = useState<string | null>(null);
+  const deleteLab = useMutation({
+    mutationFn: (labId: string) => labService.delete(labId),
+    onSuccess: () => {
+      setNotice('ลบ lab แล้ว');
+      setOpenLabId(null);
+      refresh();
+    },
+    onError: (e) => setNotice(`ลบ lab ไม่สำเร็จ: ${apiErrorMessage(e)}`),
+  });
+  const deleteImage = useMutation({
+    mutationFn: (imageId: string) => labImageService.remove(imageId),
+    onSuccess: ({ detachedLabs }) => {
+      setNotice(detachedLabs > 0 ? `ลบ image แล้ว — ปลดออกจาก ${detachedLabs} lab (lab เหล่านั้นต้องเลือก image ใหม่ก่อน publish)` : 'ลบ image แล้ว');
+      refresh();
+    },
+    onError: (e) => setNotice(`ลบ image ไม่สำเร็จ: ${apiErrorMessage(e)}`),
+  });
+  const confirmDeleteLab = (lab: LabSummary) => {
+    if (window.confirm(`ลบ lab "${lab.title}" ?\nนักศึกษาจะมองไม่เห็น lab นี้อีก`)) deleteLab.mutate(lab.id);
+  };
+  const confirmDeleteImage = (lab: LabSummary) => {
+    if (!lab.imageId) return;
+    const image = imageById.get(lab.imageId);
+    const users = labs.filter((l) => l.imageId === lab.imageId).map((l) => l.title);
+    const name = image ? `${image.repository}:${image.tag}` : 'image นี้';
+    if (window.confirm(`ลบ ${name} ?\nจะลบไฟล์ image ออกจากระบบจริง (กู้คืนไม่ได้)\nlab ที่ใช้อยู่ (${users.length}): ${users.join(', ')}`)) {
+      deleteImage.mutate(lab.imageId);
+    }
+  };
+
   const { data: courseDocs = [] } = useQuery({
     queryKey: ['course-documents', courseId],
     queryFn: () => courseDocumentService.list(courseId),
@@ -200,6 +233,12 @@ export default function InstructorCoursePage() {
         </div>
 
         <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          {notice && (
+            <div role="status" className="flex items-center justify-between gap-4 border-b border-gray-200 bg-[#EEF5E6] px-5 py-2 text-[0.82rem] text-gray-800">
+              {notice}
+              <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="cursor-pointer border-0 bg-transparent text-gray-500">✕</button>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-5">
             <h2 className="m-0 text-lg font-bold text-gray-800">Lab Image</h2>
             <button type="button" onClick={() => setModal('lab')} className={`inline-flex items-center gap-2 ${addButton}`}>
@@ -273,7 +312,13 @@ export default function InstructorCoursePage() {
                                       <p className="m-0 text-[0.78rem] text-red-600">{apiErrorMessage(publish.error)}</p>
                                     )}
                                   </div>
-                                  <div className="flex shrink-0 gap-2">
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    <LabGearMenu
+                                      lab={lab}
+                                      busy={deleteLab.isPending || deleteImage.isPending}
+                                      onDeleteLab={() => confirmDeleteLab(lab)}
+                                      onDeleteImage={() => confirmDeleteImage(lab)}
+                                    />
                                     {lab.status === 'draft' && (
                                       <button
                                         type="button"
@@ -335,6 +380,59 @@ export default function InstructorCoursePage() {
 type ImageMap = Map<string, Parameters<typeof isImageReady>[0]>;
 
 /** publish ได้: lab อ่านอย่างเดียว (ไม่มี image) หรือ image สแกนผ่านแล้ว */
+/** ฟันเฟืองท้ายแถว lab: ลบ lab / ลบ image ของ lab นี้ (ถาม confirm ที่ตัวเรียก) */
+function LabGearMenu({ lab, busy, onDeleteLab, onDeleteImage }: {
+  lab: LabSummary;
+  busy: boolean;
+  onDeleteLab: () => void;
+  onDeleteImage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // กดที่อื่นแล้วเมนูปิด
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const item = 'block w-full cursor-pointer border-0 bg-white px-4 py-2 text-left text-[0.82rem] text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-white';
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label={`Settings for ${lab.title}`}
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+      >
+        <Settings size={16} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 bottom-[36px] z-10 w-[190px] overflow-hidden rounded border border-gray-200 bg-white shadow-md">
+          <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); onDeleteLab(); }}>
+            ลบ lab นี้
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`${item} border-t border-gray-100`}
+            disabled={!lab.imageId}
+            title={lab.imageId ? undefined : 'lab นี้ยังไม่มี image'}
+            onClick={() => { setOpen(false); onDeleteImage(); }}
+          >
+            ลบ image ของ lab นี้
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function canPublish(lab: LabSummary, imageById: ImageMap) {
   if (!lab.imageId) return true;
   const image = imageById.get(lab.imageId);
