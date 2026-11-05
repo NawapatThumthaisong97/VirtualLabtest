@@ -16,20 +16,23 @@ interface Props {
   onSelect: (d: Date) => void;
   onCreate: () => void;
   onRequests: () => void;
+  /** หน้าอาจารย์ใช้คำอื่น (Send new request / My requests) */
+  createLabel?: string;
+  requestsLabel?: string;
 }
 
 const card = { background: '#fff', borderRadius: '0 0 14px 14px', fontSize: 11 } as const;
 
-export default function Sidebar({ year, month, selected, today, selectedEvents, unread, onPrev, onNext, onSelect, onCreate, onRequests }: Props) {
+export default function Sidebar({ year, month, selected, today, selectedEvents, unread, onPrev, onNext, onSelect, onCreate, onRequests, createLabel = '+ Create new event', requestsLabel = 'Class Request' }: Props) {
   const dates = monthGrid(year, month);
   const title = sameDay(selected, today) ? "Today's Events" : `${selected.getDate()} ${MONTHS[selected.getMonth()]} ${selected.getFullYear()}`;
 
   return (
     <aside style={{ width: 236, flexShrink: 0, background: colors.pageBg, padding: '28px 20px', display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <PrimaryButton onClick={onCreate}>+ Create new event</PrimaryButton>
+        <PrimaryButton onClick={onCreate}>{createLabel}</PrimaryButton>
         <PrimaryButton onClick={onRequests} style={{ position: 'relative' }}>
-          Class Request
+          {requestsLabel}
           {unread > 0 && (
             <span style={{ position: 'absolute', top: -7, right: -7, minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9, background: colors.danger, color: '#fff', fontSize: 11, fontWeight: 500, lineHeight: '18px', textAlign: 'center', border: `2px solid ${colors.pageBg}` }}>
               {unread}

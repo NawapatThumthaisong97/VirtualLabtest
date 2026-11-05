@@ -20,6 +20,9 @@ interface Props {
   onReject?: (form: EventForm, reason: string) => void;
   /** มีเฉพาะตอนเปิดจากคาบในปฏิทิน: ยกเลิกคาบนั้น */
   onDelete?: (form: EventForm) => void;
+  /** หน้าอาจารย์: ปุ่ม "Send request" แทน Approve และล็อกวิชาไว้ที่วิชานี้ */
+  submitLabel?: string;
+  lockCourse?: boolean;
 }
 
 const field: CSSProperties = {
@@ -47,7 +50,7 @@ function IconField({ icon, children }: { icon?: ReactNode; children: ReactNode }
 
 const bare: CSSProperties = { flex: 1, minWidth: 0, border: 0, outline: 'none', fontFamily: 'inherit', fontSize: 14, color: colors.text, background: 'transparent' };
 
-export default function CreateEventModal({ open, initial, options, error, busy, onClose, onApprove, onReject, onDelete }: Props) {
+export default function CreateEventModal({ open, initial, options, error, busy, onClose, onApprove, onReject, onDelete, submitLabel = 'Approve', lockCourse = false }: Props) {
   const [form, setForm] = useState<EventForm>(initial);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
@@ -110,7 +113,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
               <select
                 aria-label="Course"
                 value={form.courseId}
-                disabled={fromRequest || fromEvent}
+                disabled={fromRequest || fromEvent || lockCourse}
                 onChange={(e) => setForm((f) => ({ ...f, courseId: e.target.value, labId: '' }))}
                 style={bare}
               >
@@ -256,7 +259,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
                 onClick={() => ready && !busy && !locked && onApprove(form)}
                 style={{ width: 200, height: 44, opacity: ready && !busy && !locked ? 1 : 0.6 }}
               >
-                {busy ? 'Saving…' : 'Approve'}
+                {busy ? 'Saving…' : submitLabel}
               </PrimaryButton>
             )}
           </div>

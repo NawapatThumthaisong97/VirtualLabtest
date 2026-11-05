@@ -69,8 +69,15 @@ export default function MonthCalendar({ year, month, selected, today, eventsByDa
                     title={e.title}
                     aria-label={`Open ${e.title} ${e.start}`}
                     // ไม่ให้ไปเลือกวันซ้ำ (onClick ของช่องวัน) — แค่เปิด Modal ของคาบ
-                    onClick={(ev) => { ev.stopPropagation(); onSelect(d); onEventClick?.(e); }}
-                    style={{ ...chip, border: 0, borderLeft: `2px solid ${c.color}`, background: c.bg, color: c.color, textAlign: 'left', fontFamily: 'inherit' }}
+                    onClick={(ev) => { ev.stopPropagation(); onSelect(d); if (!e.busy) onEventClick?.(e); }}
+                    style={{
+                      ...chip, border: 0, textAlign: 'left', fontFamily: 'inherit',
+                      // วิชาอื่น = เทา / คำขอรออนุมัติ = กรอบเส้นประ
+                      ...(e.busy
+                        ? { borderLeft: '2px solid #B5B5B5', background: '#F2F2F2', color: '#8A8A8A', cursor: 'default' }
+                        : { borderLeft: `2px solid ${c.color}`, background: c.bg, color: c.color }),
+                      ...(e.pending ? { border: `1px dashed ${c.color}`, background: '#fff' } : {}),
+                    }}
                   >
                     {to12h(e.start).replace(':00 ', ' ')} - {e.title}
                   </button>
