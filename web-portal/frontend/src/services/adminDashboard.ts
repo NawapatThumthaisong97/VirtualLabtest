@@ -188,6 +188,9 @@ export const adminLogService = {
 
 // ---------- จองห้อง (หน้า /admin/scheduler) ----------
 
+/** onsite = เรียนในห้องแลป (warm pod) / online = เปิด EC2 รอไว้ให้นักศึกษาทุกคน (docs/AWS_PRELAUNCH.md) */
+export type ClassMode = 'onsite' | 'online';
+
 export interface BookingItem {
   id: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -204,6 +207,7 @@ export interface BookingItem {
   validUntil: string;
   machines: number;
   room: string | null;
+  mode: ClassMode;
   note: string | null;
   decisionNote: string | null;
   classScheduleId: string | null;
@@ -221,8 +225,10 @@ export interface CalendarEventItem {
   room: string | null;
   courseId: string;
   courseName: string;
+  labId: string | null;
   machines: number;
   status: string;
+  mode: ClassMode;
 }
 
 export interface SchedulerOptions {
@@ -234,13 +240,31 @@ export interface SchedulerOptions {
 export interface ScheduleFormBody {
   courseId?: string;
   labId: string;
-  room: string;
-  machines: number;
+  mode: ClassMode;
+  /** online ไม่ส่ง — ไม่มีห้อง และ backend นับจำนวนนักศึกษาเอง */
+  room?: string;
+  machines?: number;
   firstDate: string;
   startTime: string;
   endTime: string;
   until: string;
   note?: string;
+}
+
+export interface SlotUpdateBody {
+  labId: string;
+  mode: ClassMode;
+  room?: string;
+  machines?: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  note?: string;
+}
+
+async function patchData<T>(url: string, body: unknown): Promise<T> {
+  const res = (await apiClient.patch(url, body)) as unknown as ApiResponse<T>;
+  return res.data;
 }
 
 async function postData<T>(url: string, body: unknown): Promise<T> {
@@ -256,4 +280,9 @@ export const bookingService = {
   approve: (id: string, body: ScheduleFormBody) => postData<BookingItem>(`/v1/admin/bookings/${id}/approve`, body),
   reject: (id: string, reason: string) => postData<BookingItem>(`/v1/admin/bookings/${id}/reject`, { reason }),
   create: (body: ScheduleFormBody) => postData<BookingItem>('/v1/admin/schedules', body),
+  /** แก้คาบ 1 คาบจากปฏิทิน (คาบที่ยังไม่เริ่มเท่านั้น) */
+  updateSlot: (slotId: string, body: SlotUpdateBody) => patchData<CalendarEventItem>(`/v1/admin/slots/${slotId}`, body),
+  /** ยกเลิกคาบ 1 คาบ (id = id ของ event ในปฏิทิน) — คาบ online คืนเครื่องที่เปิดรอไว้แต่ยังไม่มีคนรับ */
+  cancelSlot: (slotId: string) =>
+    postData<{ slotId: string; status: string; released: string[] }>(`/v1/admin/slots/${slotId}/cancel`, {}),
 };

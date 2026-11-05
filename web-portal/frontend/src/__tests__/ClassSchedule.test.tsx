@@ -5,12 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ClassSchedulePage from '../pages/ClassSchedule';
 import * as AuthContextModule from '../contexts/AuthContext';
 import { bookingService, type BookingItem } from '../services/adminDashboard';
+import { toISO } from '../components/scheduler/date';
 
 const booking: BookingItem = {
   id: 'b1', status: 'pending', requesterName: 'Dr. Napat Srisuk', requesterEmail: 'napat@dome.tu.ac.th',
   courseId: 'c1', courseName: 'Web Development', labId: 'l1', labTitle: 'React Fundamentals',
   weekday: 2, startTime: '09:00:00', endTime: '12:00:00', validFrom: '2026-11-02', validUntil: '2027-02-24',
-  machines: 25, room: 'LC-123', note: null, decisionNote: null, classScheduleId: null, slotsCreated: null,
+  machines: 25, room: 'LC-123', mode: 'onsite', note: null, decisionNote: null, classScheduleId: null, slotsCreated: null,
   mailStatus: null, createdAt: '2026-10-24T10:00:00Z',
 };
 
@@ -61,7 +62,7 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     fireEvent.click(screen.getByText('Approve'));
     expect(await screen.findByRole('alert')).toBeDefined();
     expect(approve).toHaveBeenCalledWith('b1', expect.objectContaining({
-      room: 'LC-123', machines: 25, firstDate: '2026-11-04', startTime: '09:00', endTime: '12:00', until: '2027-02-24',
+      mode: 'onsite', room: 'LC-123', machines: 25, firstDate: '2026-11-04', startTime: '09:00', endTime: '12:00', until: '2027-02-24',
     }));
   });
 
@@ -74,5 +75,57 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     fireEvent.change(screen.getByLabelText('Reject reason'), { target: { value: 'ห้องเต็ม' } });
     fireEvent.click(screen.getByText('Confirm reject'));
     await waitFor(() => expect(reject).toHaveBeenCalledWith('b1', 'ห้องเต็ม'));
+  });
+
+  it('Online class: no classroom fields, sends mode online without room / machines', async () => {
+    const approve = vi.spyOn(bookingService, 'approve').mockResolvedValue({ ...booking, status: 'approved', mode: 'online' });
+    renderPage();
+    fireEvent.click(await screen.findByText('Class Request'));
+    fireEvent.click(await screen.findByLabelText('Open request from Dr. Napat Srisuk'));
+    fireEvent.click(screen.getByRole('radio', { name: /Online/ }));
+    expect(screen.queryByLabelText('Room')).toBeNull();
+    fireEvent.click(screen.getByText('Approve'));
+    await waitFor(() => expect(approve).toHaveBeenCalled());
+    const body = approve.mock.calls[0][1];
+    expect(body.mode).toBe('online');
+    expect(body).not.toHaveProperty('room');
+    expect(body).not.toHaveProperty('machines');
+  });
+
+  const onsiteToday = () => vi.spyOn(bookingService, 'getCalendar').mockResolvedValue({ month: '2026-11', events: [{
+    id: 's2', title: 'Web Development – React Fundamentals', date: toISO(new Date()),
+    start: '09:00', end: '12:00', room: 'LC-123', courseId: 'c1', courseName: 'Web Development', labId: 'l1', machines: 20,
+    status: 'scheduled', mode: 'onsite',
+  }] });
+
+  it('Click a class on the calendar: modal is read-only until the pencil, Approve saves that class', async () => {
+    onsiteToday();
+    const update = vi.spyOn(bookingService, 'updateSlot').mockResolvedValue({} as never);
+    renderPage();
+    fireEvent.click(await screen.findByLabelText(/Open Web Development – React Fundamentals · LC-123 09:00/));
+
+    const machines = screen.getByLabelText('Machines') as HTMLInputElement;
+    expect(machines.value).toBe('20');
+    expect(machines.disabled).toBe(true);
+    expect(screen.queryByLabelText('Repeat until')).toBeNull();
+    expect((screen.getByLabelText('Course') as HTMLSelectElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByLabelText('Edit class'));
+    fireEvent.change(machines, { target: { value: '12' } });
+    fireEvent.click(screen.getByText('Approve'));
+    await waitFor(() => expect(update).toHaveBeenCalledWith('s2', expect.objectContaining({
+      labId: 'l1', mode: 'onsite', room: 'LC-123', machines: 12, startTime: '09:00', endTime: '12:00',
+    })));
+    expect(await screen.findByText('แก้คาบแล้ว')).toBeDefined();
+  });
+
+  it('Delete in the class modal cancels that class after confirming', async () => {
+    onsiteToday();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const cancelSlot = vi.spyOn(bookingService, 'cancelSlot').mockResolvedValue({ slotId: 's2', status: 'cancelled', released: [] });
+    renderPage();
+    fireEvent.click(await screen.findByLabelText(/Open Web Development/));
+    fireEvent.click(screen.getByText('Delete'));
+    await waitFor(() => expect(cancelSlot).toHaveBeenCalledWith('s2'));
   });
 });

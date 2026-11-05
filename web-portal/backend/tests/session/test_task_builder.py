@@ -119,6 +119,12 @@ class TestAwsTask:
             "autostop": {"idle_minutes": 60, "down": True, "wait_for": "none"},
         }
 
+    def test_autostop_override(self, service, make_image):
+        """Pre-launched machine: autostop_minutes replaces lifespan (short safety net until claimed)"""
+        task = service.create_fastapi_task(make_image(), "music-lab-1", run_target=RunTarget.AWS,
+                                           autostop_minutes=30)
+        assert task["resources"]["autostop"]["idle_minutes"] == 30
+
     def test_env_goes_to_container_not_vm(self, service, make_image):
         """Lab env goes to the container (docker run -e), not task envs
 
@@ -200,3 +206,12 @@ class TestClusterName:
 
         assert name.startswith(prefix)
         common_utils.check_cluster_name_is_valid(name)
+
+    def test_unique_names_same_second(self, service, make_image):
+        """unique=True (prelaunch): many machines in the same second get different, valid names"""
+        image = make_image()
+        names = {service._cluster_name(image, unique=True) for _ in range(20)}
+
+        assert len(names) == 20
+        for name in names:
+            common_utils.check_cluster_name_is_valid(name)

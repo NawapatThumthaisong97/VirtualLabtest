@@ -237,6 +237,16 @@ class Settings(BaseSettings):
     # รอ pod ตรง Ready สูงสุดกี่วินาที (รวม pull image ตอนไม่มีคาบ ~700 MB จาก registry ในบ้าน)
     DIRECT_POD_READY_TIMEOUT: int = 180
 
+    # คาบ online (docs/AWS_PRELAUNCH.md): เปิด EC2 รอไว้ให้นักศึกษาทุกคนที่ลงทะเบียนก่อนคาบ
+    # ปิดไว้เป็นค่าเริ่มต้น เพราะเปิดแล้วเสียเงิน AWS จริงทุกคาบ online ทำงานใน scheduler รอบเดียวกับ prewarm
+    PRELAUNCH_ENABLED: bool = False
+    # เปิด EC2 ก่อน class_slots.starts_at กี่นาที (launch ใช้ ~1.5–2 นาที เผื่อพลาดแล้วลองใหม่ได้)
+    PRELAUNCH_LEAD_MINUTES: int = 10
+    # หลังคาบเริ่มกี่นาที ใครยังไม่กด Start → sky down คืนเครื่อง (กดทีหลังได้ Sky launch ปกติ)
+    PRELAUNCH_CLAIM_MINUTES: int = 15
+    # launch พร้อมกันได้กี่เครื่อง (SkyPilot API server รับงานยาวพร้อมกันได้จำกัด)
+    PRELAUNCH_MAX_PARALLEL: int = 5
+
     # กันเครื่องอื่นเปิด lab ของเรา (นักศึกษาเครื่องข้าง ๆ เปิด IDE ผ่าน Tailscale IP ได้)
     # - warm pod: hostPort ผูกกับ 127.0.0.1 → เปิดได้แค่ http://localhost:<port> บนเครื่องนั้น
     # - launch ผ่าน SkyPilot จากเครื่องแลป: บังคับ pod ลงเครื่องที่กด Start (nodeSelector)
