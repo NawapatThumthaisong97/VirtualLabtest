@@ -71,7 +71,17 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
   const locked = fromEvent && !editing;
   const online = form.mode === 'online';
   // online ไม่มีห้อง / จำนวนเครื่อง (backend เปิดให้นักศึกษาที่ลงทะเบียนทุกคน)
-  const ready = form.courseId && form.labId && (online || (form.room && form.machines > 0)) && form.date && form.until;
+  // ฟอร์มยังไม่ครบ = บอกว่าขาดอะไร (เดิมปุ่มแค่จาง กดแล้วเงียบ — Pete เจอตอนห้องว่างเพราะเครื่องในห้องปิด)
+  const missing = [
+    !form.courseId && 'วิชา',
+    !form.labId && 'lab',
+    !online && !form.room && 'ห้อง',
+    !online && !(form.machines > 0) && 'จำนวนเครื่อง',
+    !form.date && 'วันที่',
+    !form.until && 'ทุกสัปดาห์ถึงวันที่',
+  ].filter(Boolean) as string[];
+  const ready = missing.length === 0;
+  const noRooms = !online && options !== undefined && options.rooms.length === 0;
 
   return (
     <GradientModal open={open} onClose={onClose} icon="/flask.png" title="Class Scheduler">
@@ -209,6 +219,14 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
           {rejecting && (
             <input aria-label="Reject reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="เหตุผลที่ไม่อนุมัติ (ส่งในเมลถึงอาจารย์)" style={field} />
+          )}
+          {noRooms && (
+            <div role="status" style={{ color: colors.danger, fontSize: 12 }}>
+              ไม่พบห้องแลป — เครื่องในห้องอาจปิดอยู่ หรือต่อ K3s ไม่ได้ (ลองรีหน้าเมื่อเปิดเครื่องแล้ว หรือเลือก Online)
+            </div>
+          )}
+          {!ready && !locked && !rejecting && (
+            <div style={{ color: colors.muted, fontSize: 12 }}>ยังขาด: {missing.join(', ')}</div>
           )}
           {error && <div role="alert" style={{ color: colors.danger, fontSize: 12 }}>{error}</div>}
           <div style={{ flex: 1 }} />
