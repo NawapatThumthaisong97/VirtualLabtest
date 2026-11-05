@@ -142,10 +142,11 @@ def create_request(db: DbSession, user: User, body: BookingCreate) -> BookingIte
     return _to_item(db, b)
 
 
-def my_requests(db: DbSession, user: User) -> list[BookingItem]:
-    rows = (db.query(BookingRequest).filter(BookingRequest.requested_by == user.id)
-            .order_by(BookingRequest.created_at.desc()).all())
-    return [_to_item(db, b) for b in rows]
+def my_requests(db: DbSession, user: User, course_id: Optional[UUID] = None) -> list[BookingItem]:
+    q = db.query(BookingRequest).filter(BookingRequest.requested_by == user.id)
+    if course_id is not None:
+        q = q.filter(BookingRequest.course_id == course_id)
+    return [_to_item(db, b) for b in q.order_by(BookingRequest.created_at.desc()).all()]
 
 
 # ---------- admin ----------
@@ -492,6 +493,22 @@ def get_options(db: DbSession, room_capacity: Optional[dict[str, int]]) -> Sched
     return SchedulerOptions(
         courses=[OptionCourse(id=c.id, code=c.code, name=c.name,
                               instructors=[u.name for u in _instructors(db, c.id)]) for c in courses],
+        labs=[OptionLab(id=lab.id, course_id=lab.course_id, title=lab.title, has_image=lab.image_id in approved)
+              for lab in labs],
+        rooms=[OptionRoom(room=r, pcs_total=n) for r, n in sorted((room_capacity or {}).items())],
+    )
+
+
+def get_course_options(db: DbSession, user: User, course_id: UUID,
+                       room_capacity: Optional[dict[str, int]]) -> SchedulerOptions:
+    """ตัวเลือกฟอร์มขอจองของอาจารย์: วิชานี้วิชาเดียว + lab ของวิชานี้ + ห้องทั้งหมด"""
+    course = _require_course_staff(db, user, course_id)
+    labs = (db.query(Lab).filter(Lab.course_id == course_id, Lab.deleted_at.is_(None))
+            .order_by(Lab.order_no).all())
+    approved = {i.id for i in db.query(LabImage.id).filter(LabImage.status == ImageStatus.APPROVED)}
+    return SchedulerOptions(
+        courses=[OptionCourse(id=course.id, code=course.code, name=course.name,
+                              instructors=[u.name for u in _instructors(db, course.id)])],
         labs=[OptionLab(id=lab.id, course_id=lab.course_id, title=lab.title, has_image=lab.image_id in approved)
               for lab in labs],
         rooms=[OptionRoom(room=r, pcs_total=n) for r, n in sorted((room_capacity or {}).items())],

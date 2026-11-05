@@ -311,6 +311,25 @@ class TestCourseCalendar:
         assert bs.get_course_calendar(db, people[1], world.course.id, MONDAY.replace(day=1)).events == []
 
 
+class TestCourseOptions:
+    """Instructor request form options and 'my requests' per course"""
+
+    def test_options_only_this_course(self, db, world, people):
+        """Options: just this course and its labs, every room"""
+        opts = bs.get_course_options(db, people[0], world.course.id, ROOMS)
+        assert [c.id for c in opts.courses] == [world.course.id]
+        assert {l.course_id for l in opts.labs} == {world.course.id}
+        assert [r.room for r in opts.rooms] == ["LC-123", "LC-207"]
+        with pytest.raises(ForbiddenError):
+            bs.get_course_options(db, world.user, world.course.id, ROOMS)
+
+    def test_my_requests_filter(self, db, world, people):
+        """my_requests(courseId) returns only that course's requests"""
+        bs.create_request(db, people[0], request_body(world))
+        assert len(bs.my_requests(db, people[0], world.course.id)) == 1
+        assert bs.my_requests(db, people[0], uuid.uuid4()) == []
+
+
 class TestMail:
     """Decision mail to course instructors; redirect while testing"""
 
