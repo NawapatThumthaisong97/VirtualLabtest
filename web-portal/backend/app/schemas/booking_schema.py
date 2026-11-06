@@ -110,6 +110,8 @@ class CalendarEvent(CamelModel):
     machines: int
     status: str
     mode: ClassMode = Field(..., description="online = slot ที่เปิด EC2 รอไว้ (run_target AWS)")
+    mine: bool = Field(True, description="ปฏิทินของอาจารย์: false = คาบวิชาอื่น (ไม่บอกชื่อวิชา แสดงแค่ไม่ว่าง)")
+    pending: bool = Field(False, description="คำขอจองที่ยังรอ admin อนุมัติ (id = id ของคำขอ)")
 
 
 class CalendarResponse(CamelModel):
