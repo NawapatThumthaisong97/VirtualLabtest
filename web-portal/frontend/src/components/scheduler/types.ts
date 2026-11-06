@@ -16,6 +16,10 @@ export interface ClassEvent {
   mode: ClassMode;
   room: string | null;
   machines: number;
+  /** ปฏิทินอาจารย์: คาบของวิชาอื่น (แสดงสีเทา "ไม่ว่าง" กดดูไม่ได้) */
+  busy?: boolean;
+  /** ปฏิทินอาจารย์: คำขอที่ยังรอ admin อนุมัติ (กรอบเส้นประ) */
+  pending?: boolean;
 }
 
 export interface ClassRequest {

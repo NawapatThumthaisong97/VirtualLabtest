@@ -264,6 +264,72 @@ class TestUpdateSlot:
         assert ev.lab_id == world.k8s_lab.id
 
 
+class TestCourseCalendar:
+    """Instructor calendar: every room, other courses anonymised, own pending requests shown"""
+
+    def _other_course_slot(self, db, world, people):
+        from datetime import datetime
+        from app.models.courses import Course
+        other = Course(code=f"X{uuid.uuid4().hex[:5]}", name="Secret Course", lecturer_name="Other",
+                       created_by=people[1].id)
+        db.add(other)
+        db.flush()
+        slot = ClassSlot(course_id=other.id, lab_image_id=world.k8s_image.id, room="LC-207",
+                         starts_at=datetime(2031, 1, 7, 2, tzinfo=bs.timezone.utc),
+                         ends_at=datetime(2031, 1, 7, 5, tzinfo=bs.timezone.utc),
+                         expected_seats=2, created_by=people[1].id)
+        db.add(slot)
+        db.commit()
+        return slot
+
+    def test_own_other_and_pending(self, db, world, people):
+        """Own class named; other course = 'ไม่ว่าง' with room/time only; pending request on each weekday"""
+        teacher, admin = people
+        bs.create_direct(db, admin, ScheduleCreate(course_id=world.course.id, **form(world, until=MONDAY).model_dump()), ROOMS)
+        self._other_course_slot(db, world, people)
+        bs.create_request(db, teacher, request_body(world, weekday=2, valid_from=MONDAY,
+                                                    valid_until=MONDAY + timedelta(weeks=1, days=2)))
+
+        cal = bs.get_course_calendar(db, teacher, world.course.id, MONDAY.replace(day=1))
+        own = [e for e in cal.events if e.mine and not e.pending]
+        other = [e for e in cal.events if not e.mine]
+        pending = [e for e in cal.events if e.pending]
+        assert [(e.date, e.room, e.course_name) for e in own] == [(MONDAY, "LC-123", world.course.name)]
+        assert [(e.title, e.course_name, e.room, e.lab_id) for e in other] == [("ไม่ว่าง", "ไม่ว่าง", "LC-207", None)]
+        # คำขอทุกวันพุธ 2 สัปดาห์ → 8 และ 15 ม.ค. 2031
+        assert [(e.date, e.status) for e in pending] == [(MONDAY + timedelta(days=2), "pending"),
+                                                         (MONDAY + timedelta(days=9), "pending")]
+
+    def test_forbidden(self, db, world, people):
+        """Student / instructor of another course -> 403; admin allowed"""
+        other_teacher = User(email=f"t2-{uuid.uuid4().hex[:6]}@dome.tu.ac.th", name="T2", role=UserRole.INSTRUCTOR)
+        db.add(other_teacher)
+        db.commit()
+        for who in (world.user, other_teacher):
+            with pytest.raises(ForbiddenError):
+                bs.get_course_calendar(db, who, world.course.id, MONDAY.replace(day=1))
+        assert bs.get_course_calendar(db, people[1], world.course.id, MONDAY.replace(day=1)).events == []
+
+
+class TestCourseOptions:
+    """Instructor request form options and 'my requests' per course"""
+
+    def test_options_only_this_course(self, db, world, people):
+        """Options: just this course and its labs, every room"""
+        opts = bs.get_course_options(db, people[0], world.course.id, ROOMS)
+        assert [c.id for c in opts.courses] == [world.course.id]
+        assert {l.course_id for l in opts.labs} == {world.course.id}
+        assert [r.room for r in opts.rooms] == ["LC-123", "LC-207"]
+        with pytest.raises(ForbiddenError):
+            bs.get_course_options(db, world.user, world.course.id, ROOMS)
+
+    def test_my_requests_filter(self, db, world, people):
+        """my_requests(courseId) returns only that course's requests"""
+        bs.create_request(db, people[0], request_body(world))
+        assert len(bs.my_requests(db, people[0], world.course.id)) == 1
+        assert bs.my_requests(db, people[0], uuid.uuid4()) == []
+
+
 class TestMail:
     """Decision mail to course instructors; redirect while testing"""
 

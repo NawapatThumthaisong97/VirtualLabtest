@@ -58,9 +58,27 @@ def create_booking(body: BookingCreate, db: Session = Depends(get_db), user: Use
 
 
 @router.get("/v1/bookings/mine", response_model=ApiResponse[list[BookingItem]], response_model_by_alias=True)
-def my_bookings(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """คำขอของฉัน + สถานะ"""
-    return ok("Booking requests retrieved", booking_service.my_requests(db, user))
+def my_bookings(course_id: Optional[UUID] = Query(None, alias="courseId"),
+                db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """คำขอของฉัน + สถานะ (courseId = เฉพาะวิชานั้น)"""
+    return ok("Booking requests retrieved", booking_service.my_requests(db, user, course_id))
+
+
+@router.get("/v1/scheduler/options", response_model=ApiResponse[SchedulerOptions], response_model_by_alias=True)
+def course_scheduler_options(course_id: UUID = Query(..., alias="courseId"), db: Session = Depends(get_db),
+                             user: User = Depends(get_current_user),
+                             rooms: Optional[dict[str, int]] = Depends(room_capacity)):
+    """ตัวเลือกฟอร์มขอจองของอาจารย์ (วิชานี้ + lab ของวิชา + ห้อง)"""
+    return ok("Scheduler options retrieved", booking_service.get_course_options(db, user, course_id, rooms))
+
+
+@router.get("/v1/calendar", response_model=ApiResponse[CalendarResponse], response_model_by_alias=True)
+def course_calendar(course_id: UUID = Query(..., alias="courseId"),
+                    month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
+                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """ปฏิทินห้องแลปของอาจารย์ (หน้าวิชา → Schedule): วิชาอื่นแสดงแค่ไม่ว่าง ไม่ใส่ month = เดือนนี้"""
+    first = date(int(month[:4]), int(month[5:]), 1) if month else date.today().replace(day=1)
+    return ok("Calendar retrieved", booking_service.get_course_calendar(db, user, course_id, first))
 
 
 # ---------- admin ----------

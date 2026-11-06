@@ -128,4 +128,16 @@ describe('ClassSchedule (/admin/scheduler)', () => {
     fireEvent.click(screen.getByText('Delete'));
     await waitFor(() => expect(cancelSlot).toHaveBeenCalledWith('s2'));
   });
+
+  it('Create new event: Approve says what is missing; no rooms -> warning', async () => {
+    vi.spyOn(bookingService, 'getOptions').mockResolvedValue({
+      courses: [{ id: 'c1', code: 'CN201', name: 'Web Development', instructors: [] }],
+      labs: [{ id: 'l1', courseId: 'c1', title: 'React Fundamentals', hasImage: true }],
+      rooms: [],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByText('+ Create new event'));
+    expect(await screen.findByText(/ไม่พบห้องแลป/)).toBeDefined();
+    expect(screen.getByText(/ยังขาด: วิชา, lab, ห้อง, จำนวนเครื่อง/)).toBeDefined();
+  });
 });

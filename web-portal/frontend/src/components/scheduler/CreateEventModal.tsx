@@ -20,6 +20,9 @@ interface Props {
   onReject?: (form: EventForm, reason: string) => void;
   /** มีเฉพาะตอนเปิดจากคาบในปฏิทิน: ยกเลิกคาบนั้น */
   onDelete?: (form: EventForm) => void;
+  /** หน้าอาจารย์: ปุ่ม "Send request" แทน Approve และล็อกวิชาไว้ที่วิชานี้ */
+  submitLabel?: string;
+  lockCourse?: boolean;
 }
 
 const field: CSSProperties = {
@@ -47,7 +50,7 @@ function IconField({ icon, children }: { icon?: ReactNode; children: ReactNode }
 
 const bare: CSSProperties = { flex: 1, minWidth: 0, border: 0, outline: 'none', fontFamily: 'inherit', fontSize: 14, color: colors.text, background: 'transparent' };
 
-export default function CreateEventModal({ open, initial, options, error, busy, onClose, onApprove, onReject, onDelete }: Props) {
+export default function CreateEventModal({ open, initial, options, error, busy, onClose, onApprove, onReject, onDelete, submitLabel = 'Approve', lockCourse = false }: Props) {
   const [form, setForm] = useState<EventForm>(initial);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
@@ -71,7 +74,17 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
   const locked = fromEvent && !editing;
   const online = form.mode === 'online';
   // online ไม่มีห้อง / จำนวนเครื่อง (backend เปิดให้นักศึกษาที่ลงทะเบียนทุกคน)
-  const ready = form.courseId && form.labId && (online || (form.room && form.machines > 0)) && form.date && form.until;
+  // ฟอร์มยังไม่ครบ = บอกว่าขาดอะไร (เดิมปุ่มแค่จาง กดแล้วเงียบ — Pete เจอตอนห้องว่างเพราะเครื่องในห้องปิด)
+  const missing = [
+    !form.courseId && 'วิชา',
+    !form.labId && 'lab',
+    !online && !form.room && 'ห้อง',
+    !online && !(form.machines > 0) && 'จำนวนเครื่อง',
+    !form.date && 'วันที่',
+    !form.until && 'ทุกสัปดาห์ถึงวันที่',
+  ].filter(Boolean) as string[];
+  const ready = missing.length === 0;
+  const noRooms = !online && options !== undefined && options.rooms.length === 0;
 
   return (
     <GradientModal open={open} onClose={onClose} icon="/flask.png" title="Class Scheduler">
@@ -100,7 +113,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
               <select
                 aria-label="Course"
                 value={form.courseId}
-                disabled={fromRequest || fromEvent}
+                disabled={fromRequest || fromEvent || lockCourse}
                 onChange={(e) => setForm((f) => ({ ...f, courseId: e.target.value, labId: '' }))}
                 style={bare}
               >
@@ -210,6 +223,14 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
             <input aria-label="Reject reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="เหตุผลที่ไม่อนุมัติ (ส่งในเมลถึงอาจารย์)" style={field} />
           )}
+          {noRooms && (
+            <div role="status" style={{ color: colors.danger, fontSize: 12 }}>
+              ไม่พบห้องแลป — เครื่องในห้องอาจปิดอยู่ หรือต่อ K3s ไม่ได้ (ลองรีหน้าเมื่อเปิดเครื่องแล้ว หรือเลือก Online)
+            </div>
+          )}
+          {!ready && !locked && !rejecting && (
+            <div style={{ color: colors.muted, fontSize: 12 }}>ยังขาด: {missing.join(', ')}</div>
+          )}
           {error && <div role="alert" style={{ color: colors.danger, fontSize: 12 }}>{error}</div>}
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
@@ -238,7 +259,7 @@ export default function CreateEventModal({ open, initial, options, error, busy, 
                 onClick={() => ready && !busy && !locked && onApprove(form)}
                 style={{ width: 200, height: 44, opacity: ready && !busy && !locked ? 1 : 0.6 }}
               >
-                {busy ? 'Saving…' : 'Approve'}
+                {busy ? 'Saving…' : submitLabel}
               </PrimaryButton>
             )}
           </div>

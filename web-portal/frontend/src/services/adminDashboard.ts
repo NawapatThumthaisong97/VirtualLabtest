@@ -229,6 +229,10 @@ export interface CalendarEventItem {
   machines: number;
   status: string;
   mode: ClassMode;
+  /** ปฏิทินอาจารย์: false = คาบวิชาอื่น (title = ไม่ว่าง) */
+  mine?: boolean;
+  /** ปฏิทินอาจารย์: คำขอที่ยังรออนุมัติ */
+  pending?: boolean;
 }
 
 export interface SchedulerOptions {
@@ -248,6 +252,21 @@ export interface ScheduleFormBody {
   startTime: string;
   endTime: string;
   until: string;
+  note?: string;
+}
+
+/** อาจารย์ขอจอง (POST /v1/bookings) — weekday 0 = จันทร์ เวลาไทย */
+export interface BookingRequestBody {
+  courseId: string;
+  labId: string;
+  mode: ClassMode;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  validFrom: string;
+  validUntil: string;
+  room?: string;
+  machines?: number;
   note?: string;
 }
 
@@ -280,6 +299,12 @@ export const bookingService = {
   approve: (id: string, body: ScheduleFormBody) => postData<BookingItem>(`/v1/admin/bookings/${id}/approve`, body),
   reject: (id: string, reason: string) => postData<BookingItem>(`/v1/admin/bookings/${id}/reject`, { reason }),
   create: (body: ScheduleFormBody) => postData<BookingItem>('/v1/admin/schedules', body),
+  // ---------- อาจารย์ (หน้าวิชา → Schedule) ----------
+  courseCalendar: (courseId: string, month: string) =>
+    getData<{ month: string; events: CalendarEventItem[] }>(`/v1/calendar?courseId=${courseId}&month=${month}`),
+  courseOptions: (courseId: string) => getData<SchedulerOptions>(`/v1/scheduler/options?courseId=${courseId}`),
+  myRequests: (courseId: string) => getData<BookingItem[]>(`/v1/bookings/mine?courseId=${courseId}`),
+  sendRequest: (body: BookingRequestBody) => postData<BookingItem>('/v1/bookings', body),
   /** แก้คาบ 1 คาบจากปฏิทิน (คาบที่ยังไม่เริ่มเท่านั้น) */
   updateSlot: (slotId: string, body: SlotUpdateBody) => patchData<CalendarEventItem>(`/v1/admin/slots/${slotId}`, body),
   /** ยกเลิกคาบ 1 คาบ (id = id ของ event ในปฏิทิน) — คาบ online คืนเครื่องที่เปิดรอไว้แต่ยังไม่มีคนรับ */

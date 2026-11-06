@@ -15,6 +15,7 @@ import LoginPage from '../pages/Login.tsx';
 import SSOCallbackPage from '../pages/SSOCallback.tsx';
 import InstructorPage from '../pages/Instructor.tsx';
 import InstructorCoursePage from '../pages/InstructorCourse.tsx';
+import InstructorSchedulePage from '../pages/InstructorSchedule.tsx';
 import AdminMonitorPage from '../pages/AdminMonitor.tsx';
 import AdminDashboardPage from '../pages/AdminDashboard.tsx';
 import ClassSchedulePage from '../pages/ClassSchedule.tsx';
@@ -93,6 +94,11 @@ export const router = createBrowserRouter([
               {
                 path: '/instructor/courses/:courseId',
                 element: <InstructorCoursePage />,
+              },
+              {
+                // ปฏิทินห้องแลป + ส่งคำขอจองคาบ (docs/INSTRUCTOR_SCHEDULE.md)
+                path: '/instructor/courses/:courseId/schedule',
+                element: <InstructorSchedulePage />,
               },
             ],
           },
