@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.exceptions.domain import ValidationError
 from app.models.class_schedule import ClassSchedule
 from app.models.class_slot import ClassSlot
+from app.models.lab import RunTarget
 
 # ตารางเรียนเป็นเวลาไทย แต่ class_slots เก็บเป็น UTC ไม่ hardcode +7 เผื่อวันหนึ่งใช้ timezone อื่น
 SCHEDULE_TZ = ZoneInfo("Asia/Bangkok")
@@ -58,6 +59,8 @@ def generate_slots(db: Session, schedule: ClassSchedule) -> list[ClassSlot]:
             ends_at=_to_utc(day, schedule.end_time),
             expected_seats=schedule.expected_seats,
             room=schedule.room,
+            # online = เปิด EC2 รอไว้ (prelaunch) / onsite = warm pod ในห้อง (prewarm scheduler ดูเฉพาะ K8s)
+            run_target=RunTarget.AWS if schedule.mode == "online" else RunTarget.KUBERNETES,
             created_by=schedule.created_by,
         ))
 

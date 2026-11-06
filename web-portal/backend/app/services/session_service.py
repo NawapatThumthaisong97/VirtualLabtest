@@ -1,14 +1,15 @@
 from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
+from typing import Callable, Optional, Any, TypeVar
 import io
 import os
 import re
 import shlex
 import sky
 import time
-from sky.exceptions import ClusterDoesNotExist
+from sky.exceptions import ApiServerConnectionError, ClusterDoesNotExist
+from sky.skylet.autostop_lib import AutostopWaitFor
 
 from app.adapters.ecr_adapter import get_ecr_token
 from app.configs.settings import settings
@@ -53,6 +54,50 @@ FAILED_LOG_TAIL_LINES = 50
 
 # pod ตรง / รอ warm pod: เช็กสถานะ pod ทุกกี่วินาที
 POD_POLL_SECONDS = 2
+
+# SDK ของ SkyPilot บางครั้งโยน ApiServerConnectionError ทันที (0 วินาที) ทั้งที่ API server ยังดีอยู่
+# เทสบน VM 2026-11-01: เรียก sky.status ทุก 5 วินาที พัง 4/24 ครั้ง ขณะที่ curl /api/health ผ่าน 60/60
+# และ server ไม่เห็น request ที่พังเลย
+# ต้นเหตุ: ก่อนทุก request SDK เช็ก /api/health และ cache ผลไว้ 5 วินาที (sky/server/common.py
+# get_api_server_status_response, TTLCache ttl=5) — cache ผลที่ "ต่อไม่ได้" ด้วย health check พลาดครั้งเดียว
+# (connection keep-alive ที่ server ปิดไปแล้ว) ทุก request ใน 5 วินาทีถัดไปจึงพังทันที ลองใหม่เร็ว ๆ ก็โดน cache เดิม
+# ถ้าไม่ลองใหม่: launch สำเร็จแต่ job_status พัง → ตั้ง FAILED แล้ว sky.down ก็พังอีก → EC2 ค้างจน autostop
+SKY_RETRY_ATTEMPTS = 3
+SKY_RETRY_SECONDS = 1
+# ล้าง cache ของ SDK ไม่ได้ (SDK เวอร์ชันอื่นเปลี่ยนชื่อ) → รอให้ cache หมดอายุเองแทน
+SKY_HEALTH_CACHE_SECONDS = 5
+# reconciler ตามลบเครื่องของ session ที่ FAILED ย้อนหลังกี่ชั่วโมง (เครื่องที่เก่ากว่า autostop ลบไปแล้ว)
+LEAK_LOOKBACK = timedelta(hours=2)
+
+T = TypeVar("T")
+
+
+def _forget_failed_health_check() -> bool:
+    """ล้าง cache ผล /api/health ของ SDK (ฟังก์ชันภายในของ SkyPilot 0.12) คืน False ถ้าทำไม่ได้"""
+    try:
+        from sky.server import common as sky_server_common
+        sky_server_common.get_api_server_status_response.cache_clear()
+        return True
+    except Exception:
+        return False
+
+
+def sky_call(fn: Callable[[], T]) -> T:
+    """เรียก SkyPilot (เช่น lambda: sky.get(sky.down(name))) ลองใหม่เมื่อต่อ API server ไม่ได้ชั่วคราว
+
+    ไม่ใช้กับ sky.launch — ถ้า request ไปถึง server แล้วแต่ตอบกลับไม่ถึง การลองใหม่จะ launch ซ้ำ
+    """
+    for attempt in range(1, SKY_RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except ApiServerConnectionError as e:
+            if attempt == SKY_RETRY_ATTEMPTS:
+                raise
+            cleared = _forget_failed_health_check()
+            logger.warning(f"[sky] cannot reach API server (attempt {attempt}/{SKY_RETRY_ATTEMPTS}), "
+                           f"retrying{'' if cleared else ' after health cache expires'}: {e}")
+            time.sleep(SKY_RETRY_SECONDS if cleared else SKY_HEALTH_CACHE_SECONDS + 1)
+    raise AssertionError("unreachable")
 
 
 def get_warm_pod_service() -> WarmPodService:
@@ -119,16 +164,18 @@ class SessionService:
         env: str = "production",
         run_target: RunTarget = RunTarget.KUBERNETES,
         pin_node: Optional[str] = None,
+        autostop_minutes: Optional[int] = None,
     ) -> dict:
         """สร้าง SkyPilot task config (dict) จาก LabImage ตาม run_target ของ lab
 
         pin_node = ชื่อ node ที่ต้องให้ pod ลง (K3s เท่านั้น ดู LAB_ISOLATION_ENABLED)
+        autostop_minutes = อายุเครื่องแทน lifespan_minutes (AWS เท่านั้น — เครื่องที่ prelaunch เปิดรอไว้)
 
         คืนเป็น dict แล้วส่งเข้า sky.Task.from_yaml_config ตรง ๆ แทนการต่อ YAML ด้วย
         f-string แบบเดิม ซึ่งพังเมื่อค่า env มี ':' หรือ '#' และเมื่อ entrypoint มีหลายบรรทัด
         """
         if run_target == RunTarget.AWS:
-            return self._build_aws_task(lab_image, app_name, env)
+            return self._build_aws_task(lab_image, app_name, env, autostop_minutes)
         return self._build_k8s_task(lab_image, app_name, env, pin_node)
 
     def _lab_envs(self, lab_image: LabImage, env: str) -> dict[str, str]:
@@ -136,11 +183,11 @@ class SessionService:
         envs["APP_ENV"] = env
         return envs
 
-    def _autostop(self, lab_image: LabImage) -> dict:
+    def _autostop(self, lab_image: LabImage, minutes: Optional[int] = None) -> dict:
         # wait_for: none = ลบ cluster เมื่อครบ idle_minutes โดยไม่รอ job หรือ SSH
         # lifespan_minutes จึงเป็นอายุสูงสุดของ lab ไม่ใช่เวลานับหลังเลิกใช้
         return {
-            "idle_minutes": lab_image.lifespan_minutes or 60,
+            "idle_minutes": minutes or lab_image.lifespan_minutes or 60,
             "down": True,
             "wait_for": "none",
         }
@@ -181,7 +228,8 @@ class SessionService:
             }}}
         return task
 
-    def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str) -> dict:
+    def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str,
+                        autostop_minutes: Optional[int] = None) -> dict:
         """AWS: VM mode บน EC2 ใน private subnet
 
         ไม่ใช้ image_id: docker: เพราะแบบนั้น SkyPilot ต้องลง runtime ลงใน container ใหม่
@@ -217,7 +265,7 @@ class SessionService:
             "instance_type": settings.AWS_INSTANCE_TYPE,
             "disk_size": settings.AWS_DISK_SIZE,
             "image_id": settings.AWS_LAB_AMI,
-            "autostop": self._autostop(lab_image),
+            "autostop": self._autostop(lab_image, autostop_minutes),
         }
         if ports:
             resources["ports"] = ports
@@ -236,13 +284,15 @@ class SessionService:
             "run": f"{docker_run} {shlex.quote(image)}{command}\n",
         }
 
-    def _cluster_name(self, lab_image: LabImage) -> str:
+    def _cluster_name(self, lab_image: LabImage, unique: bool = False) -> str:
         # ชื่อ cluster ของ SkyPilot ต้องเป็นตัวเล็ก ตัวเลข และ '-' ขึ้นต้นด้วยตัวอักษร
         slug = re.sub(r"[^a-z0-9-]+", "-", lab_image.repository.split("/")[-1].lower()).strip("-")
         if not slug[:1].isalpha():
             # เช่น repo "2048-game" SkyPilot ไม่รับชื่อที่ขึ้นต้นด้วยตัวเลข
             slug = f"lab-{slug}".rstrip("-")
-        return f"{slug}-{int(time.time())}"
+        name = f"{slug}-{int(time.time())}"
+        # unique: prelaunch เปิดหลายเครื่องในวินาทีเดียวกัน ชื่อซ้ำ = sky launch ใช้ cluster เดิมซ้ำแทนเปิดเครื่องใหม่
+        return f"{name}-{uuid4().hex[:4]}" if unique else name
 
     def create_session(self, user_id: UUID, lab_id: UUID, client_ip: Optional[str] = None) -> dict:
         """สร้าง session ใหม่ - launch pod และบันทึกลง database
@@ -269,6 +319,14 @@ class SessionService:
         )
         if enrollment is None:
             raise ForbiddenError("ต้องลงทะเบียนในวิชานี้ก่อนเริ่ม lab")
+
+        # คาบ online: มีเครื่องที่ scheduler เปิดรอไว้ให้คนนี้ → รับเครื่องนั้นเลย (docs/AWS_PRELAUNCH.md)
+        # ต้องมาก่อนเช็ก existing_session ไม่งั้นจะเจอเครื่องที่เปิดรอไว้แล้วตอบว่ามี session อยู่แล้ว
+        prelaunched = self._prelaunched_for(user_id, lab_id)
+        if prelaunched is not None:
+            claimed = self._claim_prelaunched(prelaunched, lab)
+            if claimed is not None:
+                return claimed
         
         existing_session = (
             self.db.query(SessionModel)
@@ -309,8 +367,8 @@ class SessionService:
         if existing_session and existing_session.sky_cluster_name:
 
             try:
-                request_id = sky.status(cluster_names=[existing_session.sky_cluster_name])
-                cluster_records = sky.get(request_id)
+                cluster_records = sky_call(lambda: sky.get(
+                    sky.status(cluster_names=[existing_session.sky_cluster_name])))
 
                 if not cluster_records:
 
@@ -360,6 +418,10 @@ class SessionService:
         # กฎเดียวทุก lab: เครื่องแลป → K8s (warm pod / pod ตรง), ที่อื่น → EC2 (docs/archive/LAB_DIRECT_POD.md)
         # ต้องรู้เสมอว่ากดจากเครื่องแลปไหม ไม่ขึ้นกับ WARM_POD / LAB_ISOLATION
         node = self._client_node(client_ip, always=True)
+        if node is not None and self._in_online_class(lab):
+            # คาบ online แยกจากห้องแลปเด็ดขาด: กดจากเครื่องแลปก็ได้ EC2 (ไม่ใช้ warm pod ของคาบ on-site)
+            logger.info(f"[auto] Start from lab machine {node[0]} during online class -> aws")
+            node = None
         run_target = resolve_run_target(node)
         where = f"lab machine {node[0]}" if node else f"outside ({client_ip or 'unknown ip'})"
         logger.info(f"[auto] Start from {where} -> {run_target.value}")
@@ -379,9 +441,22 @@ class SessionService:
                 "ปิดการเปิด lab บน AWS ชั่วคราว (admin ปิด burst เช่นใช้เกิน budget) — ใช้เครื่องในห้องแลปแทน"
             )
 
-        cluster_name = self._cluster_name(lab_image)
-        is_cloud = run_target == RunTarget.AWS
         pin_node = node[0] if node is not None and settings.LAB_ISOLATION_ENABLED else None
+        new_session, task = self._new_sky_session(user_id, lab, lab_image, run_target, pin_node,
+                                                  class_slot_id=self._current_slot_id(lab))
+        self._run_sky_launch(new_session, task, lab_image)
+        return self._sky_result(new_session, lab, lab_image, run_target)
+
+    def _new_sky_session(self, user_id: UUID, lab: Lab, lab_image: LabImage, run_target: RunTarget,
+                         pin_node: Optional[str], class_slot_id: Optional[UUID],
+                         prelaunched_at: Optional[datetime] = None,
+                         autostop_minutes: Optional[int] = None) -> tuple[SessionModel, Any]:
+        """สร้าง task ของ SkyPilot + record PENDING (ยังไม่ launch) คืน (session, task)
+
+        แยกจาก _run_sky_launch ให้ prelaunch scheduler สร้าง record ทุกคนก่อน แล้วค่อย launch ใน thread
+        """
+        cluster_name = self._cluster_name(lab_image, unique=prelaunched_at is not None)
+        is_cloud = run_target == RunTarget.AWS
 
         task_config = self.create_fastapi_task(
             lab_image=lab_image,
@@ -389,6 +464,7 @@ class SessionService:
             env="staging",
             run_target=run_target,
             pin_node=pin_node,
+            autostop_minutes=autostop_minutes,
         )
         # ขอ token ก่อนสร้าง record จะได้ไม่มี session ค้างถ้าแค่ขอ token ไม่ผ่าน
         secrets = None
@@ -403,7 +479,7 @@ class SessionService:
         # (บน AWS cluster ที่ไม่มี record คือ EC2 ที่เปิดค้างเสียเงินโดยไม่มีใครเห็น)
         new_session = SessionModel(
             user_id=user_id,
-            lab_id=lab_id,
+            lab_id=lab.id,
             lab_image_id=lab_image.id,
             service_type=ServiceType.LAB,
             sky_cluster_name=cluster_name,
@@ -412,18 +488,24 @@ class SessionService:
             is_remote=False,
             is_cloud=is_cloud,
 
-            class_slot_id=self._current_slot_id(lab),
+            class_slot_id=class_slot_id,
+            prelaunched_at=prelaunched_at,
         )
         self.db.add(new_session)
         self.db.commit()
         self.db.refresh(new_session)
+        return new_session, task
 
+    def _run_sky_launch(self, new_session: SessionModel, task: Any, lab_image: LabImage,
+                        lifetime_minutes: Optional[int] = None) -> None:
+        """sky launch + รอ job RUNNING + endpoints แล้วตั้ง session เป็น RUNNING (พัง = FAILED + down แล้ว raise)"""
+        cluster_name = new_session.sky_cluster_name
         job_id = None
         try:
             request_id = sky.launch(task, cluster_name=cluster_name)
             job_id, handle = sky.stream_and_get(request_id)
             self._wait_job_running(cluster_name, job_id)
-            endpoints = sky.get(sky.endpoints(cluster=cluster_name))
+            endpoints = sky_call(lambda: sky.get(sky.endpoints(cluster=cluster_name)))
         except Exception as e:
             self._end_session(new_session, SessionStatus.FAILED, SessionEndReason.LAUNCH_FAILED)
             if job_id is not None:
@@ -444,25 +526,90 @@ class SessionService:
         new_session.status = SessionStatus.RUNNING
         # autostop เริ่มนับตอน launch เสร็จ (wait_for: none) หน้าเว็บใช้นับถอยหลังได้
         new_session.expires_at = datetime.utcnow() + timedelta(
-            minutes=lab_image.lifespan_minutes or 60
+            minutes=lifetime_minutes or lab_image.lifespan_minutes or 60
         )
         self.db.commit()
         self.db.refresh(new_session)
 
+    def _sky_result(self, session: SessionModel, lab: Lab, lab_image: LabImage, run_target: RunTarget) -> dict:
         return {
-            "session_id": new_session.id,
-            "cluster_name": cluster_name,
+            "session_id": session.id,
+            "cluster_name": session.sky_cluster_name,
             "launch_mode": "skypilot",
             "run_target": run_target.value,
-            "lab_id": lab_id,
+            "lab_id": lab.id,
             "lab_title": lab.title,
             "image_repository": lab_image.repository,
             "image_tag": lab_image.tag,
-            "endpoints": formatted_endpoints,
+            "endpoints": session.endpoints,
             "status": "running",
-            "started_at": new_session.started_at,
-            "expires_at": new_session.expires_at,
+            "started_at": session.started_at,
+            "expires_at": session.expires_at,
         }
+
+    def _prelaunched_for(self, user_id: UUID, lab_id: UUID) -> Optional[SessionModel]:
+        """เครื่องที่ prelaunch เปิดรอไว้ให้ user นี้ใน lab นี้ และยังไม่มีใครรับ (PENDING / RUNNING)"""
+        return (
+            self.db.query(SessionModel)
+            .filter(
+                SessionModel.user_id == user_id,
+                SessionModel.lab_id == lab_id,
+                SessionModel.prelaunched_at.isnot(None),
+                SessionModel.claimed_at.is_(None),
+                SessionModel.status.in_([SessionStatus.PENDING, SessionStatus.RUNNING]),
+                SessionModel.deleted_at.is_(None),
+            )
+            .order_by(SessionModel.started_at.desc())
+            .first()
+        )
+
+    def _claim_prelaunched(self, session: SessionModel, lab: Lab) -> Optional[dict]:
+        """รับเครื่องที่เปิดรอไว้ คืน dict เหมือน launch เสร็จ — เครื่องใช้ไม่ได้ (launch พัง) คืน None ให้ launch ใหม่
+
+        ยัง PENDING = thread ของ scheduler กำลัง launch อยู่ รอจนเสร็จแทนการเปิดเครื่องซ้อน
+        รับแล้วตั้ง autostop ใหม่ตาม lifespan ของ image (ตอนเปิดรอตั้งไว้สั้น ๆ แค่กันตก)
+        """
+        deadline = time.monotonic() + JOB_START_TIMEOUT.total_seconds()
+        while session.status == SessionStatus.PENDING and time.monotonic() < deadline:
+            time.sleep(JOB_POLL_SECONDS)
+            # thread ของ scheduler commit ผ่าน DB session ของมันเอง ต้องอ่านใหม่จาก DB
+            self.db.expire(session)
+            self.db.refresh(session)
+        if session.status != SessionStatus.RUNNING:
+            logger.info(f"[prelaunch] {session.sky_cluster_name} not usable ({session.status.name}), launching new")
+            return None
+
+        lab_image = self.lab_image_repository.find_by_id(session.lab_image_id)
+        lifespan = (lab_image.lifespan_minutes if lab_image else None) or 60
+        try:
+            sky_call(lambda: sky.get(sky.autostop(session.sky_cluster_name, idle_minutes=lifespan,
+                                                  wait_for=AutostopWaitFor.NONE, down=True)))
+        except Exception as e:
+            # ไม่ตั้งใหม่ = เครื่องจะลบตัวเองตาม autostop สั้น ๆ ตอนเปิดรอ (กลางคาบ) ให้กดใหม่ดีกว่า
+            raise ClusterOperationError(f"ตั้งเวลาเครื่องที่เปิดรอไว้ไม่สำเร็จ ลองกด Start อีกครั้ง: {e}")
+
+        session.claimed_at = datetime.now(timezone.utc)
+        session.expires_at = datetime.utcnow() + timedelta(minutes=lifespan)
+        self.db.commit()
+        self.db.refresh(session)
+        logger.info(f"[prelaunch] user {session.user_id} claimed {session.sky_cluster_name}")
+        return self._sky_result(session, lab, lab_image, RunTarget.AWS)
+
+    def _in_online_class(self, lab: Lab) -> bool:
+        """วิชานี้กำลังมีคาบ online อยู่ตอนนี้ไหม (slot run_target AWS)"""
+        now = datetime.now(timezone.utc)
+        return (
+            self.db.query(ClassSlot.id)
+            .filter(
+                ClassSlot.course_id == lab.course_id,
+                ClassSlot.run_target == RunTarget.AWS,
+                ClassSlot.starts_at <= now,
+                ClassSlot.ends_at > now,
+                ClassSlot.status != ClassSlotStatus.CANCELLED,
+                ClassSlot.deleted_at.is_(None),
+            )
+            .first()
+        ) is not None
 
     def _current_slot_id(self, lab: Lab) -> Optional[UUID]:
         """คาบของวิชานี้ที่กำลังเรียนอยู่ตอนนี้ (หน้า admin ใช้บอกว่าห้องไหนใช้โดยคาบอะไร) ไม่มี = None
@@ -691,7 +838,7 @@ class SessionService:
         """
         deadline = time.monotonic() + JOB_START_TIMEOUT.total_seconds()
         while True:
-            status = sky.get(sky.job_status(cluster_name, [job_id])).get(job_id)
+            status = sky_call(lambda: sky.get(sky.job_status(cluster_name, [job_id]))).get(job_id)
             status = getattr(status, "value", status)
             if status == "RUNNING":
                 return
@@ -747,7 +894,7 @@ class SessionService:
     def _down_quietly(self, cluster_name: str) -> None:
         """ลบ cluster ที่ launch พัง ถ้าลบไม่ได้ก็แค่ log ไว้ ไม่ทับ error ของ launch"""
         try:
-            sky.get(sky.down(cluster_name))
+            sky_call(lambda: sky.get(sky.down(cluster_name)))
         except ClusterDoesNotExist:
             pass
         except Exception as e:
@@ -780,6 +927,8 @@ class SessionService:
         if warm:
             self._reconcile_warm(warm, result)
 
+        self._down_leaked_failed(result)
+
         # ไม่มีชื่อ cluster = record ที่ไม่ได้มาจาก launch จริง (เช่น seed) ไม่ใช่งานของ reconciler
         running = [
             s for s in active
@@ -790,10 +939,10 @@ class SessionService:
 
         # AUTO = refresh เฉพาะ cluster ที่ตั้ง autostop ไว้ ซึ่ง lab ทุกตัวตั้ง ไม่ refresh
         # แล้ว API server จะยังเห็นเครื่องที่ skylet ลบตัวเองไปแล้วเป็น UP อยู่
-        records = sky.get(sky.status(
+        records = sky_call(lambda: sky.get(sky.status(
             cluster_names=[s.sky_cluster_name for s in running],
             refresh=sky.StatusRefreshMode.AUTO,
-        ))
+        )))
         alive = {r.get("name"): r.get("status") for r in records}
         for session in running:
             # AUTOSTOPPING ยังไม่นับว่าหาย เคยเห็นค้างสถานะนี้ตอน autostop ลบเครื่องไม่สำเร็จ
@@ -801,6 +950,35 @@ class SessionService:
                 self._end_session(session, SessionStatus.STOPPED, self._gone_reason(session))
                 result["stopped"].append(session.sky_cluster_name)
         return result
+
+    def _down_leaked_failed(self, result: dict) -> None:
+        """session ที่ launch พังแต่ sky.down ตอนนั้นไม่สำเร็จ (ต่อ API server ไม่ได้) → เครื่องยังอยู่ ลบซ้ำ
+
+        ดูเฉพาะที่จบภายใน LEAK_LOOKBACK เครื่องที่เก่ากว่านั้น autostop ลบไปแล้ว
+        ถาม sky.status ไม่ได้ = ข้ามรอบนี้ (รอบหน้าลองใหม่)
+        """
+        since = datetime.utcnow() - LEAK_LOOKBACK
+        failed = [
+            s.sky_cluster_name for s in self.db.query(SessionModel).filter(
+                SessionModel.status == SessionStatus.FAILED,
+                SessionModel.sky_cluster_name.isnot(None),
+                SessionModel.ended_at >= since,
+            )
+        ]
+        result["leaked_downed"] = []
+        if not failed:
+            return
+        try:
+            records = sky_call(lambda: sky.get(sky.status(cluster_names=failed,
+                                                          refresh=sky.StatusRefreshMode.NONE)))
+        except Exception as e:
+            logger.warning(f"[reconcile] cannot check failed clusters: {e}")
+            return
+        for record in records:
+            name = record.get("name")
+            logger.warning(f"[reconcile] cluster {name} of a failed session is still up, downing")
+            self._down_quietly(name)
+            result["leaked_downed"].append(name)
 
     def _reconcile_warm(self, sessions: list[SessionModel], result: dict) -> None:
         """session ของ warm pod: ไม่มี autostop ของ SkyPilot ต้องลบ pod เองเมื่อถึง expires_at
@@ -859,7 +1037,7 @@ class SessionService:
             elif session.sky_cluster_name:
                 try:
                     # sky.down คืน request_id ต้อง sky.get ถึงจะรู้ว่าลบเสร็จหรือพังจริง
-                    sky.get(sky.down(session.sky_cluster_name))
+                    sky_call(lambda: sky.get(sky.down(session.sky_cluster_name)))
                     cluster_stopped = True
                 except ClusterDoesNotExist:
                     # autostop ลบไปเองแล้ว ไม่มีอะไรให้ปิด

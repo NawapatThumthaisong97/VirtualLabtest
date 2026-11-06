@@ -195,13 +195,14 @@ async def lifespan(app: FastAPI):
             run_reconciler(settings.SESSION_RECONCILE_INTERVAL_SECONDS, reconciler_stop)
         )
     prewarm_task = None
-    if settings.PREWARM_ENABLED and settings.PREWARM_INTERVAL_SECONDS > 0:
+    # รอบเดียวกันทำทั้ง prewarm (คาบ on-site) และ prelaunch (คาบ online) เปิดตัวไหนก็ต้องมี scheduler
+    if (settings.PREWARM_ENABLED or settings.PRELAUNCH_ENABLED) and settings.PREWARM_INTERVAL_SECONDS > 0:
         prewarm_task = asyncio.create_task(
             run_prewarm_scheduler(settings.PREWARM_INTERVAL_SECONDS, reconciler_stop)
         )
     else:
         # บอกไว้ใน log จะได้ไม่งงว่าทำไมไม่มี DaemonSet ขึ้น
-        logger.info("Prewarm scheduler disabled (set PREWARM_ENABLED=true to enable)")
+        logger.info("Prewarm scheduler disabled (set PREWARM_ENABLED / PRELAUNCH_ENABLED=true to enable)")
     scan_task = None
     if (
         settings.LAB_IMAGE_SCAN_ENABLED

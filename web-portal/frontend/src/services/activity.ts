@@ -41,6 +41,7 @@ const END_REASON: Record<string, string> = {
   lost: 'เครื่องหลุด',
   launch_failed: 'เปิดไม่สำเร็จ',
   stale_pending: 'เปิดค้าง',
+  prelaunch_unclaimed: 'ไม่ได้มารับเครื่อง',
 };
 
 /** "28 ต.ค. 14:05" ตามเวลาเครื่องผู้ใช้ */

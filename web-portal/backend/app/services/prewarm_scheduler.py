@@ -25,6 +25,7 @@ from app.configs.settings import settings
 from app.models.class_slot import ClassSlot, ClassSlotStatus
 from app.models.lab import RunTarget
 from app.services.kubernetes_service import get_kubernetes_service
+from app.services.prelaunch_service import sync_prelaunch
 from app.services.prewarm_service import PrewarmService, k8s_image_ref
 from app.services.warm_pod_service import WarmPodService
 from app.utils.logger import logger
@@ -185,9 +186,19 @@ def sync_once() -> Optional[dict]:
         try:
             db = SessionLocal()
             try:
-                k8s = get_kubernetes_service()
-                warm = WarmPodService(k8s) if settings.WARM_POD_ENABLED else None
-                return sync_prewarm(PrewarmService(k8s), db, warm=warm)
+                result: dict = {}
+                if settings.PREWARM_ENABLED:
+                    k8s = get_kubernetes_service()
+                    warm = WarmPodService(k8s) if settings.WARM_POD_ENABLED else None
+                    result = sync_prewarm(PrewarmService(k8s), db, warm=warm)
+                if settings.PRELAUNCH_ENABLED:
+                    # คาบ online ไม่ขึ้นกับ K3s — ต่อ K3s ไม่ได้ก็ยังต้องเปิด / คืน EC2 ตามเวลา
+                    try:
+                        result["prelaunch"] = sync_prelaunch(db)
+                    except Exception as e:
+                        db.rollback()
+                        logger.warning(f"Prelaunch failed: {e}")
+                return result
             finally:
                 db.close()
         finally:
@@ -199,14 +210,18 @@ async def run_prewarm_scheduler(interval_seconds: int, stop: asyncio.Event) -> N
 
     kubernetes client เป็นแบบ blocking เลยรันใน thread ไม่ให้ event loop ของ FastAPI ค้าง
     """
-    logger.info(f"Prewarm scheduler started (every {interval_seconds}s, lead "
-                f"{settings.PREWARM_LEAD_MINUTES} min, {len(settings.PREWARM_TARGETS)} .env targets, "
-                f"warm pod {'on' if settings.WARM_POD_ENABLED else 'off'})")
+    logger.info(f"Prewarm scheduler started (every {interval_seconds}s, "
+                f"prewarm {'on' if settings.PREWARM_ENABLED else 'off'} lead {settings.PREWARM_LEAD_MINUTES} min, "
+                f"{len(settings.PREWARM_TARGETS)} .env targets, "
+                f"warm pod {'on' if settings.WARM_POD_ENABLED else 'off'}, "
+                f"prelaunch {'on' if settings.PRELAUNCH_ENABLED else 'off'})")
     while not stop.is_set():
         try:
             result = await asyncio.to_thread(sync_once)
-            if result and any(result.get(k) for k in
-                              ("created", "removed", "slots", "warm_created", "warm_removed")):
+            prelaunch = (result or {}).get("prelaunch") or {}
+            if result and (any(result.get(k) for k in
+                               ("created", "removed", "slots", "warm_created", "warm_removed"))
+                           or any(prelaunch.values())):
                 logger.info(f"Prewarm scheduler: {result}")
         except Exception as e:
             # รอบนี้พัง (เช่น ต่อ K3s ไม่ได้) ลองใหม่รอบหน้า

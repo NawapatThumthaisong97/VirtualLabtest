@@ -25,6 +25,8 @@ class ClassSchedule(Base):
     default_lab_image_id = Column(UUID(as_uuid=True), ForeignKey("lab_images.id"), nullable=True)
     expected_seats = Column(Integer, nullable=False)
     room = Column(String(64), nullable=True)            # ห้องแลป (label vlab/room) จากการจอง — ไม่มี = ไม่ผูกห้อง
+    # onsite → slot เป็น KUBERNETES (warm pod) / online → slot เป็น AWS (เปิด EC2 รอไว้ให้ทุกคน)
+    mode = Column(String(16), nullable=False, default="onsite", server_default="onsite")
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -38,6 +40,7 @@ class ClassSchedule(Base):
         CheckConstraint("end_time > start_time", name="ck_class_schedules_time_order"),
         CheckConstraint("valid_until >= valid_from", name="ck_class_schedules_date_order"),
         CheckConstraint("expected_seats > 0", name="ck_class_schedules_seats"),
+        CheckConstraint("mode IN ('onsite', 'online')", name="ck_class_schedules_mode"),
     )
 
     def __repr__(self):
