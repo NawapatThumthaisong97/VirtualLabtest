@@ -142,10 +142,11 @@ def create_request(db: DbSession, user: User, body: BookingCreate) -> BookingIte
     return _to_item(db, b)
 
 
-def my_requests(db: DbSession, user: User) -> list[BookingItem]:
-    rows = (db.query(BookingRequest).filter(BookingRequest.requested_by == user.id)
-            .order_by(BookingRequest.created_at.desc()).all())
-    return [_to_item(db, b) for b in rows]
+def my_requests(db: DbSession, user: User, course_id: Optional[UUID] = None) -> list[BookingItem]:
+    q = db.query(BookingRequest).filter(BookingRequest.requested_by == user.id)
+    if course_id is not None:
+        q = q.filter(BookingRequest.course_id == course_id)
+    return [_to_item(db, b) for b in q.order_by(BookingRequest.created_at.desc()).all()]
 
 
 # ---------- admin ----------
@@ -412,11 +413,14 @@ def _event(slot: ClassSlot, course: Course, lab: Optional[Lab]) -> CalendarEvent
     )
 
 
-def get_calendar(db: DbSession, month: date) -> CalendarResponse:
-    """คาบทั้งเดือน (เวลาไทย) สำหรับปฏิทิน — title = วิชา – lab"""
+def _month_range(month: date) -> tuple[datetime, datetime]:
     first = datetime(month.year, month.month, 1, tzinfo=SCHEDULE_TZ)
-    end = first + timedelta(days=_calendar.monthrange(month.year, month.month)[1])
-    rows = (
+    return first, first + timedelta(days=_calendar.monthrange(month.year, month.month)[1])
+
+
+def _month_slots(db: DbSession, month: date):
+    first, end = _month_range(month)
+    return (
         db.query(ClassSlot, Course, Lab)
         .join(Course, ClassSlot.course_id == Course.id)
         .outerjoin(Lab, ClassSlot.lab_id == Lab.id)
@@ -425,7 +429,60 @@ def get_calendar(db: DbSession, month: date) -> CalendarResponse:
         .order_by(ClassSlot.starts_at)
         .all()
     )
-    events = [_event(slot, course, lab) for slot, course, lab in rows]
+
+
+def get_calendar(db: DbSession, month: date) -> CalendarResponse:
+    """คาบทั้งเดือน (เวลาไทย) สำหรับปฏิทิน — title = วิชา – lab"""
+    events = [_event(slot, course, lab) for slot, course, lab in _month_slots(db, month)]
+    return CalendarResponse(month=f"{month.year:04d}-{month.month:02d}", events=events)
+
+
+def _require_course_staff(db: DbSession, user: User, course_id: UUID) -> Course:
+    """อาจารย์ของวิชานี้ หรือ admin เท่านั้น"""
+    course = db.get(Course, course_id)
+    if course is None:
+        raise NotFoundError("ไม่พบวิชา")
+    if _role(user) != "admin" and user.id not in {u.id for u in _instructors(db, course_id)}:
+        raise ForbiddenError("ดูได้เฉพาะอาจารย์ของวิชานี้")
+    return course
+
+
+def _busy(slot: ClassSlot) -> CalendarEvent:
+    """คาบของวิชาอื่นในปฏิทินอาจารย์: บอกแค่ห้อง + เวลา ไม่บอกวิชา / lab"""
+    s, e = slot.starts_at.astimezone(TZ), slot.ends_at.astimezone(TZ)
+    return CalendarEvent(
+        id=slot.id, title="ไม่ว่าง", date=s.date(), start=f"{s:%H:%M}", end=f"{e:%H:%M}", room=slot.room,
+        course_id=slot.course_id, course_name="ไม่ว่าง", lab_id=None, machines=slot.expected_seats,
+        status=slot.status.value, mode="online" if slot.run_target == RunTarget.AWS else "onsite", mine=False,
+    )
+
+
+def _pending_events(db: DbSession, course: Course, month: date) -> list[CalendarEvent]:
+    """คำขอที่ยังรออนุมัติของวิชานี้ กระจายเป็นวันตาม weekday ภายในเดือน"""
+    first, end = _month_range(month)
+    events = []
+    for b in db.query(BookingRequest).filter(BookingRequest.course_id == course.id,
+                                             BookingRequest.status == "pending"):
+        lab = db.get(Lab, b.lab_id)
+        day = max(b.valid_from, first.date())
+        day += timedelta(days=(b.weekday - day.weekday()) % 7)
+        while day <= b.valid_until and day < end.date():
+            events.append(CalendarEvent(
+                id=b.id, title=f"{course.name} – {lab.title if lab else '-'}", date=day,
+                start=f"{b.start_time:%H:%M}", end=f"{b.end_time:%H:%M}", room=b.room, course_id=course.id,
+                course_name=course.name, lab_id=b.lab_id, machines=b.machines, status="pending",
+                mode=b.mode, pending=True,
+            ))
+            day += timedelta(weeks=1)
+    return events
+
+
+def get_course_calendar(db: DbSession, user: User, course_id: UUID, month: date) -> CalendarResponse:
+    """ปฏิทินของอาจารย์: ทุกห้องทุกวิชา (วิชาอื่นแสดงแค่ไม่ว่าง) + คำขอที่รออนุมัติของวิชานี้"""
+    course = _require_course_staff(db, user, course_id)
+    events = [_event(slot, c, lab) if c.id == course_id else _busy(slot) for slot, c, lab in _month_slots(db, month)]
+    events += _pending_events(db, course, month)
+    events.sort(key=lambda e: (e.date, e.start))
     return CalendarResponse(month=f"{month.year:04d}-{month.month:02d}", events=events)
 
 
@@ -436,6 +493,22 @@ def get_options(db: DbSession, room_capacity: Optional[dict[str, int]]) -> Sched
     return SchedulerOptions(
         courses=[OptionCourse(id=c.id, code=c.code, name=c.name,
                               instructors=[u.name for u in _instructors(db, c.id)]) for c in courses],
+        labs=[OptionLab(id=lab.id, course_id=lab.course_id, title=lab.title, has_image=lab.image_id in approved)
+              for lab in labs],
+        rooms=[OptionRoom(room=r, pcs_total=n) for r, n in sorted((room_capacity or {}).items())],
+    )
+
+
+def get_course_options(db: DbSession, user: User, course_id: UUID,
+                       room_capacity: Optional[dict[str, int]]) -> SchedulerOptions:
+    """ตัวเลือกฟอร์มขอจองของอาจารย์: วิชานี้วิชาเดียว + lab ของวิชานี้ + ห้องทั้งหมด"""
+    course = _require_course_staff(db, user, course_id)
+    labs = (db.query(Lab).filter(Lab.course_id == course_id, Lab.deleted_at.is_(None))
+            .order_by(Lab.order_no).all())
+    approved = {i.id for i in db.query(LabImage.id).filter(LabImage.status == ImageStatus.APPROVED)}
+    return SchedulerOptions(
+        courses=[OptionCourse(id=course.id, code=course.code, name=course.name,
+                              instructors=[u.name for u in _instructors(db, course.id)])],
         labs=[OptionLab(id=lab.id, course_id=lab.course_id, title=lab.title, has_image=lab.image_id in approved)
               for lab in labs],
         rooms=[OptionRoom(room=r, pcs_total=n) for r, n in sorted((room_capacity or {}).items())],

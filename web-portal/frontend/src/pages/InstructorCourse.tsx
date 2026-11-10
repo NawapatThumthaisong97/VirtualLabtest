@@ -140,6 +140,8 @@ export default function InstructorCoursePage() {
         features={[
           { label: 'Member', note: 'เร็ว ๆ นี้' },
           { label: 'appearance', onClick: () => setModal('appearance') },
+          // ปฏิทินห้องแลป + ขอจองคาบ (docs/INSTRUCTOR_SCHEDULE.md)
+          { label: 'Schedule', to: `/instructor/courses/${course.id}/schedule` },
         ]}
         inner={{ width: 'calc(min(1250px, 100%) - 48px)', margin: '0 auto', padding: '0 20px' }}
       />
