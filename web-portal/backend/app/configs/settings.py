@@ -2,9 +2,10 @@
 Application Settings
 Load environment variables and configuration
 """
+import ipaddress
 import os
 from datetime import datetime
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from typing import Literal, Optional
@@ -247,6 +248,19 @@ class Settings(BaseSettings):
     # launch พร้อมกันได้กี่เครื่อง (SkyPilot API server รับงานยาวพร้อมกันได้จำกัด)
     PRELAUNCH_MAX_PARALLEL: int = 5
 
+    # lab gateway (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md เฟส 1): lab AWS ได้ลิงก์ https://l-<token>-<port>.<domain>
+    # Traefik บน vlab-ts-router ดึงตาราง route จาก /api/internal/v1/gateway/routes
+    # ปิด = endpoint ของ lab AWS เป็น private IP (http://10.10.2.x) แบบเดิม
+    LAB_GATEWAY_ENABLED: bool = False
+    LAB_GATEWAY_DOMAIN: str = ""                      # เช่น bell-lab.space
+    # Traefik ส่งมาใน header X-Gateway-Token ต้อง ≥ 32 ตัวเมื่อเปิด (หลุด = เห็น token ในลิงก์ lab ของทุกคน)
+    LAB_GATEWAY_TOKEN: str = ""
+    # เปิดผ่าน gateway ได้เฉพาะพอร์ตในช่วงนี้ (กัน 22 ฯลฯ ออกอินเทอร์เน็ต) ต้องตรงกับ SG ของ router
+    LAB_GATEWAY_PORT_MIN: int = 3000
+    LAB_GATEWAY_PORT_MAX: int = 9999
+    # upstream ที่ Traefik ส่งต่อได้ = subnet ของเครื่อง lab บน AWS เท่านั้น (กัน router ถูกใช้ไปที่อื่น)
+    LAB_GATEWAY_UPSTREAM_CIDRS_STR: str = "10.10.2.0/24,10.10.3.0/24"
+
     # กันเครื่องอื่นเปิด lab ของเรา (นักศึกษาเครื่องข้าง ๆ เปิด IDE ผ่าน Tailscale IP ได้)
     # - warm pod: hostPort ผูกกับ 127.0.0.1 → เปิดได้แค่ http://localhost:<port> บนเครื่องนั้น
     # - launch ผ่าน SkyPilot จากเครื่องแลป: บังคับ pod ลงเครื่องที่กด Start (nodeSelector)
@@ -286,6 +300,30 @@ class Settings(BaseSettings):
             v = v.split("#")[0].strip().lower()
             return v or "lax"
         return v
+
+    @field_validator("LAB_GATEWAY_DOMAIN", mode="before")
+    @classmethod
+    def clean_lab_gateway_domain(cls, v):
+        # ".bell-lab.space" / "Bell-Lab.Space # comment" → "bell-lab.space"
+        if isinstance(v, str):
+            return v.split("#")[0].strip().strip(".").lower()
+        return v
+
+    @model_validator(mode="after")
+    def check_lab_gateway(self):
+        # ตั้งผิดตอนเปิด = backend ไม่ start ดีกว่ารันต่อแบบไม่ปลอดภัย (แนวเดียวกับ SECRET_KEY)
+        # ตรวจข้ามหลาย field จึงใช้ model_validator ไม่ใช่ Field(min_length) — ตอนปิด token ต้องว่างได้
+        if not self.LAB_GATEWAY_ENABLED:
+            return self
+        if not self.LAB_GATEWAY_DOMAIN:
+            raise ValueError("LAB_GATEWAY_DOMAIN is required when LAB_GATEWAY_ENABLED=true")
+        if len(self.LAB_GATEWAY_TOKEN) < 32:
+            raise ValueError("LAB_GATEWAY_TOKEN must be at least 32 characters when LAB_GATEWAY_ENABLED=true")
+        if not (1 <= self.LAB_GATEWAY_PORT_MIN <= self.LAB_GATEWAY_PORT_MAX <= 65535):
+            raise ValueError("LAB_GATEWAY_PORT_MIN/MAX must satisfy 1 <= MIN <= MAX <= 65535")
+        if not self.lab_gateway_upstream_cidrs:
+            raise ValueError("LAB_GATEWAY_UPSTREAM_CIDRS_STR must contain at least one CIDR")
+        return self
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"),
@@ -332,6 +370,15 @@ class Settings(BaseSettings):
         return [
             cidr.strip()
             for cidr in self.TAILSCALE_TRUSTED_PROXY_CIDRS_STR.split(",")
+            if cidr.strip()
+        ]
+
+    @property
+    def lab_gateway_upstream_cidrs(self) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+        """subnet ที่ Traefik ส่งต่อได้ CIDR ผิดรูปแบบ → ValueError (validator ตอน start จับให้เมื่อเปิด gateway)"""
+        return [
+            ipaddress.ip_network(cidr.strip())
+            for cidr in self.LAB_GATEWAY_UPSTREAM_CIDRS_STR.split(",")
             if cidr.strip()
         ]
     
