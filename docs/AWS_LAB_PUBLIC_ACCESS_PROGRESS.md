@@ -10,7 +10,7 @@
 
 | ส่วน | ขั้น | สถานะ |
 |---|---|---|
-| A: โค้ด backend | A1 ✅ A2 ✅ A3 ✅ A4 ✅ A5 ✅ / A6–A10 ⏳ | กำลังทำ — ถัดไป **A6** |
+| A: โค้ด backend | A1–A10 ✅ | **เสร็จ** (2026-11-11) — ถัดไป **B** (Ansible) หรือ C1 / D (Cloudflare) |
 | B: Ansible web-service | B1–B3 | ยังไม่เริ่ม |
 | C: เตรียม infra (Phase 0) | C1–C6 | ยังไม่เริ่ม |
 | D: Cloudflare | D1–D4 | ยังไม่เริ่ม |
@@ -285,12 +285,125 @@ static config บอก Traefik ว่า "ทุก 5 วิ ไปถาม `h
 **เทส (19 เคสใหม่ ใช้ DB `virtual_lab_test`):** ตารางว่าง / session ปกติได้ JSON ตรงทุกตัวอักษร / หลาย session ไม่ปนกัน / PENDING, STOPPED, FAILED, ลบแล้ว, K8s, ไม่มี token, ไม่มี upstreams ไม่อยู่ / prelaunch ยังไม่รับไม่อยู่ รับแล้วอยู่ / session ปิดแล้วหลุดในรอบถัดไป / upstream เพี้ยน 5 แบบ (นอก subnet, พอร์ต 22, IP ของ backend, key ไม่ใช่ตัวเลข, URL เป็น null) ถูกข้าม + มี warning + พอร์ตดีของ session เดียวกันยังอยู่ / session เพี้ยนไม่ทำให้ session อื่นหาย
 `test_lab_gateway.py`: 58 passed / `pytest tests/session`: **288 passed**
 
+### 2026-11-11 — ภาพรวมของ flow ทั้งหมด (ตอบคำถามระหว่างทำ)
+
+```
+                       ┌──────────────── AWS VPC ──────────────────────────────┐
+นักศึกษา (มือถือ 4G)    │   EC2 vlab-ts-router                     EC2 lab ของ นศ │
+   │ ① https://l-…     │  ┌──────────────────────────────┐                     │
+   ▼                   │  │ cloudflared ──③──> Traefik    │ ──⑤──> 10.10.2.14:8443
+Cloudflare ──② tunnel──┼─>│ (systemd)       127.0.0.1:8081│                     │
+(DNS *, cert https)    │  │                      │ ④ ทุก 5 วิ │                     │
+                       │  └──────────────────────┼────────┘                     │
+                       └─────────────────────────┼──────────────────────────────┘
+                                                 │ Tailscale (ACL: router → :8000 เท่านั้น)
+                                                 ▼
+                                vlab-web: FastAPI GET /api/internal/v1/gateway/routes → build_routes()
+```
+
+| เครื่อง | ตอนกด Start | ตอนกดลิงก์ `l-…` |
+|---|---|---|
+| `vlab-web` (FastAPI + Postgres) | สุ่ม token, สั่ง launch, บันทึก `endpoints` / `upstreams` | ตอบตาราง route ให้ Traefik |
+| k3s master | SkyPilot API server (`webservice_skypilot_endpoint` = `http://<master>:30880`) สั่งเปิด EC2 | **ไม่เกี่ยว** |
+| `vlab-ts-router` (EC2) | — | cloudflared + Traefik รับแล้วส่งต่อใน VPC |
+| EC2 lab | ถูกเปิด | ให้บริการ lab |
+| Cloudflare | — | DNS `*`, https, tunnel |
+
+- **cloudflared และ Traefik อยู่บน router ไม่ใช่ master** (ไม่ใช่ pod — เป็น systemd service) router เป็นเครื่องเดียวที่อยู่ทั้งใน VPC (ส่งถึง `10.10.2.x`) และใน Tailscale (ถาม backend ได้)
+- tunnel บน master ที่มีอยู่แล้วคือของ `skypilot.bell-lab.space` คนละเรื่องกัน
+- **FastAPI ไม่เคยเรียก router** — Traefik เป็นฝ่ายดึง (pull) ทุก 5 วิ: backend ไม่ต้องรู้ที่อยู่ router / router ไม่ต้องเปิดพอร์ตรับคำสั่ง / router รีบูตแล้วดึงตารางทั้งก้อนใหม่เอง / session ปิดแล้วหลุดเอง แลกกับช้าสุด 5 วิ (EC2 เปิดใช้ 1.5–3 นาทีอยู่แล้ว)
+- master ล่ม = กด Start lab AWS ใหม่ไม่ได้ แต่ lab ที่เปิดอยู่ยังใช้ได้ / `vlab-web` ล่ม = ตารางไม่อัปเดต
+- เฟส 1 ยังต้อง login + กด Start ผ่าน Tailscale (portal public คือเฟส 2) เทสโดยคนในทีมกด Start แล้วเปิดลิงก์บนมือถือ 4G
+- คนเข้าไปจัดการ router: Pete บอกว่า SSH ผ่าน Tailscale IP ได้เลย (ไม่ต้องใช้ SSM ใน E4) — ดู "เรื่องที่ค้าง"
+
+### 2026-11-11 — A6: endpoint ที่ Traefik เรียก ✅
+
+ไฟล์ใหม่ `app/routes/lab_gateway_route.py` + ลงทะเบียนใน `app/routes/__init__.py` → `GET /api/internal/v1/gateway/routes`
+
+#### `_token_ok(given) -> bool`
+
+**หน้าที่:** ตัดสินว่า request นี้มาจาก Traefik ของเราจริงไหม
+**หลักการ:** ผ่านเมื่อ flag เปิด **และ** server ตั้ง token ไว้ **และ** header ไม่ว่าง **และ** ตรงกันทุกตัว เทียบด้วย `hmac.compare_digest`
+**ทำไม `compare_digest`:** การเทียบ string ธรรมดา (`==`) หยุดทันทีที่เจอตัวแรกที่ไม่ตรง เวลาตอบจึงบอกได้ว่าเดาถูกกี่ตัวแรก (timing attack) `compare_digest` ใช้เวลาเท่ากันเสมอ
+**ทำไมเช็ก server token ว่าง:** กันกรณี token ไม่ได้ตั้งแล้ว header ว่างไปตรงกับค่าว่าง (`"" == ""`)
+
+#### `gateway_routes(x_gateway_token, db)`
+
+**หน้าที่:** endpoint ที่ Traefik (HTTP provider) เรียกทุก 5 วิ
+**หลักการ:** `_token_ok` ไม่ผ่าน → **404** / ผ่าน → คืน `build_routes(db)` ตรง ๆ
+**ทำไม:**
+- **ไม่ห่อ `ApiResponse`** เหมือน endpoint อื่น เพราะ Traefik อ่านรูปแบบ `{"http": {...}}` ของมันเองเท่านั้น
+- **ตอบ 404 ไม่ใช่ 401/403** — ไม่บอกคนที่ลองยิงว่ามี endpoint นี้อยู่
+- **ไม่ใช้ JWT** — Traefik ไม่ใช่ user ใช้รหัสลับร่วม (`LAB_GATEWAY_TOKEN` = `X-Gateway-Token` ใน `traefik.yml`) แทน
+- `include_in_schema=False` ไม่โผล่ใน `/docs`
+
+**เทส (11 เคส):** ลงทะเบียนใน `api_router` จริง / ไม่อยู่ใน OpenAPI / token ถูก 200 + ตาราง / ไม่มี lab ได้ตารางว่าง / token หาย, ว่าง, ผิด, สั้นไป 1 ตัว, ยาวไป 1 ตัว = 404 และไม่มีตารางหลุด / flag ปิด 404 / server ไม่ตั้ง token + header ว่าง 404
+
+### 2026-11-11 — A7: token ไหลเข้า task ของ AWS ✅
+
+ไฟล์: `app/services/session_service.py`
+
+| ฟังก์ชัน | แก้อะไร | ทำไม |
+|---|---|---|
+| `_new_sky_session` | `gateway_token = new_token() if LAB_GATEWAY_ENABLED and is_cloud else None` แล้วส่งเข้า `create_fastapi_task` และใส่ใน `SessionModel(...)` | token ต้องรู้**ก่อน**สร้าง task (env อยู่ใน `docker run`) แต่เดิม task ถูกสร้างก่อน record จึงสุ่มตรงจุดเริ่ม แล้วใช้ค่าเดียวกันทั้งสองที่ (runbook D3) |
+| `create_fastapi_task` | รับ `gateway_token` ส่งต่อ `_build_aws_task` เท่านั้น | K3s ไม่ผ่าน gateway (เปิดผ่าน localhost บนเครื่องแลป) |
+| `_build_aws_task` | `envs = _lab_envs(...)` แล้ว `envs.update(gateway_envs(token, ports))` ก่อนวนสร้าง `-e` | **ไม่แตะ `_lab_envs`** เพราะ K3s / warm pod / direct pod ใช้ร่วม |
+
+prelaunch (`prelaunch_service`) เรียก `_new_sky_session` ตัวเดียวกัน จึงได้ token ตั้งแต่ PENDING โดยไม่ต้องแก้
+
+### 2026-11-11 — A8: แยก `endpoints` กับ `upstreams` ✅
+
+`_run_sky_launch` หลังได้ `formatted_endpoints` จาก `sky.endpoints` (`{"8080": "http://10.10.2.14:8080"}`):
+- **มี token:** `upstreams = formatted_endpoints` (IP ภายใน ให้ Traefik) / `endpoints = public_endpoints(token, ports)` (ลิงก์ที่นักศึกษาเห็น) / พอร์ตนอกช่วง → log warning `[gateway] … ports ['80'] outside 3000-9999, no public link` (runbook D13)
+- **ไม่มี token:** `endpoints = formatted_endpoints` แบบเดิม
+
+**ไม่ต้องแก้:** `_claim_prelaunched` (คืน `session.endpoints` ที่ตั้งไว้แล้ว), `_sky_result` (คืน `endpoints` ซึ่งตอนนี้เป็นลิงก์ public แล้ว), `session_reconciler.py`, **frontend** (แสดงปุ่มจาก `endpoints` อยู่แล้ว)
+
+> ต้องยืนยันตอน F3: runbook ถือว่า `sky.endpoints` ของ lab AWS คืน **private IP** `10.10.2.x` (lab อยู่ใน private subnet) ถ้าคืน IP อื่น `upstream_ok` จะตัดทิ้ง ลิงก์จะได้ 404 และมี warning `not allowed` ใน log ของ backend
+
+### 2026-11-11 — A9: ซ่อนใน หน้า admin ✅
+
+`app/main.py` `SessionAdmin`:
+```python
+column_list = get_model_columns(Session, exclude=["endpoints", "gateway_token", "upstreams"])
+column_details_exclude_list = ["gateway_token", "upstreams"]
+form_excluded_columns = ["gateway_token", "upstreams"]
+```
+**ทำไม:** หน้า admin เดิมแสดงทุก column ยกเว้น `endpoints` (runbook D9) — `gateway_token` คือกุญแจเข้า lab ของนักศึกษา ใครเห็นก็เปิด lab คนอื่นได้
+**ต่างจาก runbook:** ใส่ใน `exclude` ของ `column_list` แทน `column_exclude_list` เพราะ sqladmin ไม่ให้ตั้งทั้งสองอย่างพร้อมกัน และเพิ่ม details / form ด้วย
+
+### 2026-11-11 — A10: เทสทั้งหมด ✅
+
+`tests/session/test_lab_gateway.py` รวม **83 เคส**:
+
+| กลุ่ม | ขั้น | จำนวน |
+|---|---|---|
+| token / port / ลิงก์ / env / upstream | A4 | 39 |
+| ตาราง route (DB) | A5 | 19 |
+| endpoint | A6 | 11 |
+| env ใน task (AWS มี token / ไม่มี / K3s ไม่มีแม้ส่ง token) | A7 | 3 |
+| กด Start ทั้งเส้นด้วย sky ปลอม: AWS ได้ลิงก์ public + upstreams, task ใช้ token เดียวกับ record, เข้าตาราง route, flag ปิดเหมือนเดิม, K3s ไม่มี token, พอร์ต 80 ถูกตัด + warning, token ใหม่ทุกครั้ง, prelaunch มี token ตั้งแต่ PENDING แต่เข้าตารางหลังรับเครื่อง | A7–A8 | 8 |
+| ไม่หลุด: `SessionResponse` / `SessionDetailResponse` ไม่มี 2 field / response ของ Start ไม่มี IP ภายใน | A8 | 2 |
+| หน้า admin | A9 | 1 |
+
+ผล:
+- `pytest tests/session`: **313 passed**
+- `pytest tests` (ทั้ง repo): **703 passed, 2 failed, 3 skipped** — 2 ตัวที่ fail คือ `test_siem_layer1_collector` / `test_siem_layer3_processing` (`*_strict_binary_validation`) ต้องเรียก `docker` แต่ WSL ไม่มี (Docker Desktop ยังไม่เปิด WSL integration) **ไม่เกี่ยวกับ gateway**
+
+เจอระหว่างเทส: **run target มาจากที่ที่กด Start (IP) ไม่ใช่ตัว lab** — กดจากข้างนอกได้ AWS เสมอ แม้ lab ตั้งเป็น K3s เคส "SkyPilot บน K3s" เกิดได้เฉพาะกดจากเครื่องแลปตอน `LAB_MACHINE_LAUNCH=skypilot` เทสจึงเรียก `_new_sky_session` ด้วย `KUBERNETES` ตรง ๆ
+
+**ยังไม่ได้ทำ:** `curl` endpoint จริงบน server ที่รันอยู่ (เกณฑ์ของ A6 ในแผน) — ครอบด้วย TestClient แล้ว จะเห็นของจริงตอน B3 (deploy flag ปิด ต้องได้ 404) และ F2 (flag เปิด ต้องได้ตารางว่าง)
+
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
 
 - [ ] **C1** (Panupong): ดู record `*.bell-lab.space` ใน Cloudflare แล้วจดค่าเดิม
 - [ ] **C2** (Pete): ยืนยัน backend ยังอยู่ที่ `vlab-web` `100.102.72.39` บน ThinkPad + ตอบคำถามที่ค้างในข้อ 0.1 ของ runbook
+- [ ] **router ใน tailnet** (Pete): Pete บอกว่า setup router ได้ด้วย SSH ผ่าน Tailscale IP (ไม่ต้องใช้ SSM ใน E4)
+      `tailscale status` (2026-11-11) ไม่มีเครื่องชื่อ `vlab-ts-router` ตัวที่น่าจะใช่คือ `ip-10-10-1-234` `100.84.123.59` (account Pete, ยังไม่ติด tag)
+      → ยืนยันกับ Pete ว่าเป็น router จริง (= `<ROUTER_TS_IP>`) และขอให้ใส่ public key ของ Panupong ใน `~ubuntu/.ssh/authorized_keys` (หรือเปิด Tailscale SSH)
+      ตอนเช็ก router / `vlab-web` / master / worker offline ทั้งหมด (Pete น่าจะปิดเครื่องไว้) — ต้องเปิดก่อน C4–C6 และ E
 - [ ] ลบ `FILM.md` ออกจาก repo (ติดมาใน `a0be92c`) หรือย้ายไป `.git/info/exclude`
 - [ ] ก่อนใช้สอนจริง: ย้าย `vlab-web` ไปเครื่องที่เปิดตลอด (ThinkPad ปิด = portal ล่ม)
 - [ ] `CICD_ARGOCD_SOLUTION.md` ข้อ 0 วางแผนย้าย web-portal เข้า K3s — สวนกับการตัดสินใจ 2026-11-10 และ runbook (backend อยู่ที่ `vlab-web`) ถ้าแผน CI/CD เดินหน้า ต้องแก้เรื่อง IP จริงหลัง kube-proxy และ ACL/URL ของ Traefik
@@ -310,11 +423,11 @@ static config บอก Traefik ว่า "ทุก 5 วิ ไปถาม `h
 | A3 ✅ | model `gateway_token`, `upstreams` + migration | upgrade / downgrade ผ่าน |
 | A4 ✅ | `lab_gateway_service.py`: token, ลิงก์, เช็ก upstream | unit test ผ่าน |
 | A5 ✅ | `build_routes()` | RUNNING อยู่ในตาราง / PENDING, STOPPED, IP นอก ไม่อยู่ |
-| A6 | route `/internal/v1/gateway/routes` | ไม่มี token 404 / token ถูกได้ JSON |
-| A7 | `session_service.py`: token ไหล `_new_sky_session` → `create_fastapi_task` → `_build_aws_task` | `docker run` มี `-e VLAB_PUBLIC_URL_...` / K8s ไม่มี |
-| A8 | `_run_sky_launch`: แยก `endpoints` / `upstreams` | endpoint `https://l-...` / API ไม่คืน `upstreams` |
-| A9 | `main.py`: ซ่อน 2 column ในหน้า admin | หน้า admin ไม่เห็น |
-| A10 | test ทั้งหมด | เก่าไม่พัง + ใหม่ผ่าน |
+| A6 ✅ | route `/internal/v1/gateway/routes` | ไม่มี token 404 / token ถูกได้ JSON |
+| A7 ✅ | `session_service.py`: token ไหล `_new_sky_session` → `create_fastapi_task` → `_build_aws_task` | `docker run` มี `-e VLAB_PUBLIC_URL_...` / K8s ไม่มี |
+| A8 ✅ | `_run_sky_launch`: แยก `endpoints` / `upstreams` | endpoint `https://l-...` / API ไม่คืน `upstreams` |
+| A9 ✅ | `main.py`: ซ่อน 2 column ในหน้า admin | หน้า admin ไม่เห็น |
+| A10 ✅ | test ทั้งหมด | เก่าไม่พัง + ใหม่ผ่าน |
 
 **B: Ansible web-service** — B1 ตัวแปร + `backend.env.j2` / B2 สุ่ม `vault_lab_gateway_token` / B3 deploy ลง `vlab-web` flag ปิด (แจ้งทีมก่อน)
 

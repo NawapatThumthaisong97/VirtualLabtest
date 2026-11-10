@@ -16,6 +16,7 @@ from .lab_image_route import router as lab_image_router
 from .activity_route import router as activity_router
 from .admin_monitor_route import router as admin_monitor_router
 from .booking_route import router as booking_router, admin_router as booking_admin_router
+from .lab_gateway_route import router as lab_gateway_router
 
 # สร้าง main router
 api_router = APIRouter()
@@ -35,5 +36,7 @@ api_router.include_router(activity_router, tags=["Activity"])
 api_router.include_router(admin_monitor_router, prefix="/v1/admin", tags=["Admin Monitor"])
 api_router.include_router(booking_router, tags=["Booking"])
 api_router.include_router(booking_admin_router, prefix="/v1/admin", tags=["Booking"])
+# Traefik บน vlab-ts-router ดึงตาราง route (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A.5)
+api_router.include_router(lab_gateway_router, tags=["Lab Gateway"])
 
 __all__ = ["api_router"]

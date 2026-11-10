@@ -132,7 +132,11 @@ class LabProgressAdmin(ModelView, model=LabProgress):
 class SessionAdmin(ModelView, model=Session):
     name = "Session"
     icon = "fa-solid fa-terminal"
-    column_list = get_model_columns(Session, exclude=["endpoints"])  # ซ่อน JSON ที่ซับซ้อน
+    # endpoints: ซ่อน JSON ที่ซับซ้อน
+    # lab gateway: gateway_token = กุญแจเข้า lab ของนักศึกษา / upstreams = IP ภายใน — ไม่แสดงทั้งตาราง หน้า detail และฟอร์ม
+    column_list = get_model_columns(Session, exclude=["endpoints", "gateway_token", "upstreams"])
+    column_details_exclude_list = ["gateway_token", "upstreams"]
+    form_excluded_columns = ["gateway_token", "upstreams"]
 
 
 class UsageRecordAdmin(ModelView, model=UsageRecord):

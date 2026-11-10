@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.configs.settings import settings
+from app.models.lab import RunTarget
 from app.models.session import ServiceType, Session as SessionModel, SessionStatus
 from app.services import lab_gateway_service as gw
 
@@ -256,3 +257,256 @@ class TestBuildRoutes:
         add_gw_session(upstreams={"abc": "garbage"})
         good = add_gw_session()
         assert router_names(gw.build_routes(db)) == {f"s-{good.gateway_token}-8080", f"s-{good.gateway_token}-8443"}
+
+
+# ---------------------------------------------------------------- A6: endpoint ที่ Traefik เรียก
+
+GATEWAY_TOKEN = "t" * 40
+ROUTES_PATH = "/api/internal/v1/gateway/routes"
+
+
+@pytest.fixture
+def client(db, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.configs.db import get_db
+    from app.routes.lab_gateway_route import router as lab_gateway_router
+
+    monkeypatch.setattr(settings, "LAB_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(settings, "LAB_GATEWAY_TOKEN", GATEWAY_TOKEN)
+    app = FastAPI()
+    app.include_router(lab_gateway_router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: db
+    return TestClient(app)
+
+
+class TestRoutesEndpoint:
+    """lab gateway: /internal/v1/gateway/routes"""
+
+    def test_registered_in_api_router(self):
+        """route is registered in the main api_router (path /internal/v1/gateway/routes)"""
+        from app.routes import api_router
+        assert "/internal/v1/gateway/routes" in {r.path for r in api_router.routes}
+
+    def test_not_in_openapi(self):
+        """endpoint hidden from OpenAPI docs"""
+        from app.routes.lab_gateway_route import router as r
+        assert all(route.include_in_schema is False for route in r.routes)
+
+    def test_correct_token_returns_table(self, client, add_gw_session):
+        """correct X-Gateway-Token -> 200 + Traefik table (not wrapped in ApiResponse)"""
+        s = add_gw_session(upstreams={"8443": "http://10.10.2.14:8443"})
+        r = client.get(ROUTES_PATH, headers={"X-Gateway-Token": GATEWAY_TOKEN})
+        assert r.status_code == 200
+        body = r.json()
+        assert set(body) == {"http"}
+        assert set(body["http"]["routers"]) == {f"s-{s.gateway_token}-8443"}
+
+    def test_empty_table(self, client):
+        """no AWS lab running -> {"http":{"routers":{},"services":{}}}"""
+        r = client.get(ROUTES_PATH, headers={"X-Gateway-Token": GATEWAY_TOKEN})
+        assert r.status_code == 200
+        assert r.json() == {"http": {"routers": {}, "services": {}}}
+
+    @pytest.mark.parametrize("headers", [
+        {},
+        {"X-Gateway-Token": ""},
+        {"X-Gateway-Token": "wrong"},
+        {"X-Gateway-Token": GATEWAY_TOKEN[:-1]},
+        {"X-Gateway-Token": GATEWAY_TOKEN + "x"},
+    ], ids=["missing", "empty", "wrong", "prefix", "longer"])
+    def test_bad_token_404(self, client, add_gw_session, headers):
+        """missing / wrong token -> 404 and no table leaked"""
+        add_gw_session()
+        r = client.get(ROUTES_PATH, headers=headers)
+        assert r.status_code == 404
+        assert "routers" not in r.text
+
+    def test_flag_off_404(self, client, monkeypatch):
+        """LAB_GATEWAY_ENABLED=false -> 404 even with the right token"""
+        monkeypatch.setattr(settings, "LAB_GATEWAY_ENABLED", False)
+        r = client.get(ROUTES_PATH, headers={"X-Gateway-Token": GATEWAY_TOKEN})
+        assert r.status_code == 404
+
+    def test_server_token_empty_404(self, client, monkeypatch):
+        """server token not set -> 404 (an empty header must never match)"""
+        monkeypatch.setattr(settings, "LAB_GATEWAY_TOKEN", "")
+        r = client.get(ROUTES_PATH, headers={"X-Gateway-Token": ""})
+        assert r.status_code == 404
+
+
+# ---------------------------------------------------------------- A7: token ไหลเข้า task ของ AWS
+
+def docker_env(task: dict) -> dict[str, str]:
+    """env ที่ส่งเข้า container (-e KEY=VALUE ใน docker run ของ AWS task)"""
+    import shlex
+    argv = shlex.split(task["run"])
+    return dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-e")
+
+
+class TestTaskEnvs:
+    """lab gateway: task envs"""
+
+    def test_aws_with_token(self, service, make_image):
+        """AWS task with token -> docker run gets Vite allowed hosts + VLAB_PUBLIC_URL_<port>"""
+        task = service.create_fastapi_task(make_image(), "music-lab-1", env="staging",
+                                           run_target=RunTarget.AWS, gateway_token=TOKEN)
+        envs = docker_env(task)
+        assert envs["__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"] == ".bell-lab.space"
+        assert envs["VLAB_PUBLIC_URL_8443"] == f"https://l-{TOKEN}-8443.bell-lab.space"
+        assert envs["VLAB_PUBLIC_URL_5173"] == f"https://l-{TOKEN}-5173.bell-lab.space"
+        assert envs["VLAB_PUBLIC_URL_8080"] == f"https://l-{TOKEN}-8080.bell-lab.space"
+        # env เดิมของ lab ยังอยู่
+        assert envs["IDE_PASSWORD"] == "musiclab"
+        assert envs["APP_ENV"] == "staging"
+
+    def test_aws_without_token(self, service, make_image):
+        """AWS task without token -> no gateway envs (same as before)"""
+        task = service.create_fastapi_task(make_image(), "music-lab-1", env="staging", run_target=RunTarget.AWS)
+        envs = docker_env(task)
+        assert not any(k.startswith(("VLAB_PUBLIC_URL_", "__VITE")) for k in envs)
+
+    def test_k8s_ignores_token(self, service, make_image):
+        """K3s task never gets gateway envs, even if a token is passed"""
+        task = service.create_fastapi_task(make_image(), "music-lab-1", env="staging", gateway_token=TOKEN)
+        assert task["envs"] == {"IDE_PASSWORD": "musiclab", "APP_ENV": "staging"}
+
+
+# ---------------------------------------------------------------- A7–A8: กด Start ทั้งเส้น (sky ปลอม)
+
+@pytest.fixture
+def gateway_on(monkeypatch):
+    monkeypatch.setattr(settings, "LAB_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(settings, "LAB_GATEWAY_TOKEN", GATEWAY_TOKEN)
+
+
+def only_session(db, world):
+    [s] = db.query(SessionModel).filter(SessionModel.user_id == world.user.id).all()
+    return s
+
+
+class TestStartWithGateway:
+    """lab gateway: Start"""
+
+    def test_aws_gets_public_link(self, svc, db, world, fake_sky, gateway_on):
+        """flag on + AWS -> endpoints = https://l-..., upstreams = private IP"""
+        fake_sky.endpoints_map = {"8080": "10.10.2.14:8080"}
+        result = svc.create_session(world.user.id, world.aws_lab.id)
+
+        s = only_session(db, world)
+        t = s.gateway_token
+        assert re.fullmatch(r"[a-z2-7]{16}", t)
+        assert s.upstreams == {"8080": "http://10.10.2.14:8080"}
+        assert s.endpoints == {"8080": f"https://l-{t}-8080.bell-lab.space"}
+        assert result["endpoints"] == s.endpoints
+
+    def test_aws_task_has_envs(self, svc, db, world, fake_sky, gateway_on):
+        """the launched task carries the same token as the record"""
+        svc.create_session(world.user.id, world.aws_lab.id)
+        s = only_session(db, world)
+        [(_, task)] = fake_sky.launched
+        assert f"VLAB_PUBLIC_URL_8080=https://l-{s.gateway_token}-8080.bell-lab.space" in task.run
+
+    def test_running_session_in_route_table(self, svc, db, world, fake_sky, gateway_on):
+        """after Start the session shows up in the Traefik table"""
+        fake_sky.endpoints_map = {"8080": "10.10.2.14:8080"}
+        svc.create_session(world.user.id, world.aws_lab.id)
+        s = only_session(db, world)
+        table = gw.build_routes(db)
+        assert table["http"]["services"][f"s-{s.gateway_token}-8080"]["loadBalancer"]["servers"] == \
+            [{"url": "http://10.10.2.14:8080"}]
+
+    def test_flag_off_unchanged(self, svc, db, world, fake_sky):
+        """flag off -> no token, endpoints are the private IP like before"""
+        fake_sky.endpoints_map = {"8080": "10.10.2.14:8080"}
+        svc.create_session(world.user.id, world.aws_lab.id)
+        s = only_session(db, world)
+        assert s.gateway_token is None
+        assert s.upstreams is None
+        assert s.endpoints == {"8080": "http://10.10.2.14:8080"}
+        [(_, task)] = fake_sky.launched
+        assert "VLAB_PUBLIC_URL_" not in task.run
+
+    def test_k8s_no_token(self, svc, db, world, fake_sky, gateway_on):
+        """flag on + SkyPilot on K3s (Start from a lab machine) -> no token, endpoints unchanged
+
+        run target มาจากที่ที่กด Start (IP) ไม่ใช่ตัว lab — กดจากข้างนอกได้ AWS เสมอ
+        จึงเรียก _new_sky_session ด้วย KUBERNETES ตรง ๆ (ทาง LAB_MACHINE_LAUNCH=skypilot)
+        """
+        s, task = svc._new_sky_session(world.user.id, world.k8s_lab, world.k8s_image, RunTarget.KUBERNETES,
+                                       pin_node=None, class_slot_id=None)
+        svc._run_sky_launch(s, task, world.k8s_image)
+        assert s.gateway_token is None
+        assert s.upstreams is None
+        assert s.endpoints == {"8080": "http://10.0.0.5:8080"}
+
+    def test_port_outside_range_dropped(self, svc, db, world, fake_sky, gateway_on, caplog):
+        """port 80 in the image -> no public link + warning (runbook D13)"""
+        fake_sky.endpoints_map = {"8080": "10.10.2.14:8080", "80": "10.10.2.14:80"}
+        with caplog.at_level(logging.WARNING, logger="server"):
+            svc.create_session(world.user.id, world.aws_lab.id)
+        s = only_session(db, world)
+        assert set(s.endpoints) == {"8080"}
+        assert "outside" in caplog.text and "'80'" in caplog.text
+        assert router_names(gw.build_routes(db)) == {f"s-{s.gateway_token}-8080"}
+
+    def test_tokens_unique_per_session(self, svc, db, world, fake_sky, gateway_on):
+        """each Start gets a new token (stop, then start again)"""
+        svc.create_session(world.user.id, world.aws_lab.id)
+        first = only_session(db, world)
+        first.status = SessionStatus.STOPPED
+        db.commit()
+        fake_sky.clusters = {}
+        svc.create_session(world.user.id, world.aws_lab.id)
+        tokens = {s.gateway_token for s in
+                  db.query(SessionModel).filter(SessionModel.user_id == world.user.id).all()}
+        assert len(tokens) == 2 and None not in tokens
+
+    def test_prelaunch_token_hidden_until_claimed(self, svc, db, world, fake_sky, gateway_on):
+        """prelaunch with flag on -> token from PENDING, not routed until claimed"""
+        fake_sky.endpoints_map = {"8080": "10.10.2.14:8080"}
+        s, task = svc._new_sky_session(world.user.id, world.aws_lab, world.aws_image, RunTarget.AWS,
+                                       pin_node=None, class_slot_id=None, prelaunched_at=datetime.utcnow())
+        assert s.status == SessionStatus.PENDING and s.gateway_token
+        svc._run_sky_launch(s, task, world.aws_image)
+        assert s.status == SessionStatus.RUNNING
+        assert router_names(gw.build_routes(db)) == set()
+
+        s.claimed_at = datetime.utcnow()
+        db.commit()
+        assert router_names(gw.build_routes(db)) == {f"s-{s.gateway_token}-8080"}
+
+
+class TestNotExposed:
+    """lab gateway: not exposed"""
+
+    def test_session_response_has_no_internal_fields(self, svc, db, world, fake_sky, gateway_on):
+        """SessionResponse (GET /sessions, /sessions/{id}) has no gateway_token / upstreams"""
+        from app.schemas.session_schema import SessionDetailResponse, SessionResponse
+        svc.create_session(world.user.id, world.aws_lab.id)
+        s = only_session(db, world)
+        for schema in (SessionResponse, SessionDetailResponse):
+            dumped = schema.model_validate(s).model_dump()
+            assert "gateway_token" not in dumped and "upstreams" not in dumped
+            assert dumped["endpoints"] == s.endpoints
+
+    def test_create_result_has_no_internal_fields(self, svc, db, world, fake_sky, gateway_on):
+        """Start response has no token field / private IP"""
+        fake_sky.endpoints_map = {"8080": "10.10.2.14:8080"}
+        result = svc.create_session(world.user.id, world.aws_lab.id)
+        assert "gateway_token" not in result and "upstreams" not in result
+        assert "10.10.2.14" not in str(result)
+
+
+# ---------------------------------------------------------------- A9: หน้า admin
+
+class TestAdminHidden:
+    """lab gateway: admin page"""
+
+    def test_session_admin_hides_columns(self):
+        """sqladmin SessionAdmin: list / details / form exclude gateway_token and upstreams"""
+        from app.main import SessionAdmin
+        listed = {c.key for c in SessionAdmin.column_list}
+        assert not listed & {"gateway_token", "upstreams", "endpoints"}
+        assert {"gateway_token", "upstreams"} <= set(SessionAdmin.column_details_exclude_list)
+        assert {"gateway_token", "upstreams"} <= set(SessionAdmin.form_excluded_columns)
