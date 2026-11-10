@@ -1,16 +1,20 @@
 """
 กลุ่ม: lab gateway — ลิงก์ public ของ lab บน AWS (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A)
 
-ส่วนนี้ (A4) เทสฟังก์ชันล้วนใน app/services/lab_gateway_service.py ไม่ต่อ DB
-ตาราง route / endpoint / session_service เพิ่มใน A5–A8
+A4: ฟังก์ชันล้วนใน app/services/lab_gateway_service.py ไม่ต่อ DB
+A5: build_routes ใช้ DB ทดสอบ (fixture db / world)
+endpoint / session_service เพิ่มใน A6–A8
 
 บรรทัดแรกของ docstring ของ class / เทส = ชื่อ group / case ในตารางสรุป (conftest.py)
 """
+import logging
 import re
+from datetime import datetime, timedelta
 
 import pytest
 
 from app.configs.settings import settings
+from app.models.session import ServiceType, Session as SessionModel, SessionStatus
 from app.services import lab_gateway_service as gw
 
 TOKEN = "k7m2q9xw4bz3ha6c"
@@ -132,3 +136,123 @@ class TestUpstreamOk:
         monkeypatch.setattr(settings, "LAB_GATEWAY_UPSTREAM_CIDRS_STR", "10.10.9.0/24")
         assert gw.upstream_ok("http://10.10.9.1:8080") is True
         assert gw.upstream_ok("http://10.10.2.14:8080") is False
+
+
+# ---------------------------------------------------------------- A5: build_routes (DB)
+
+@pytest.fixture
+def add_gw_session(db, world):
+    """session lab AWS ที่ผ่าน gateway (ค่าเริ่ม = ควรอยู่ในตาราง) override ได้ทุก field"""
+    def _add(**overrides):
+        now = datetime.utcnow()
+        fields = dict(
+            user_id=world.user.id,
+            lab_id=world.aws_lab.id,
+            lab_image_id=world.aws_image.id,
+            service_type=ServiceType.LAB,
+            sky_cluster_name=f"aws-{gw.new_token()[:8]}",
+            status=SessionStatus.RUNNING,
+            started_at=now - timedelta(minutes=1),
+            is_remote=True,
+            is_cloud=True,
+            gateway_token=gw.new_token(),
+            upstreams={"8080": "http://10.10.2.14:8080", "8443": "http://10.10.2.14:8443"},
+        )
+        fields.update(overrides)
+        s = SessionModel(**fields)
+        db.add(s)
+        db.commit()
+        return s
+    return _add
+
+
+def router_names(table):
+    return set(table["http"]["routers"])
+
+
+class TestBuildRoutes:
+    """lab gateway: route table"""
+
+    def test_empty(self, db):
+        """no sessions -> empty table in Traefik format"""
+        assert gw.build_routes(db) == {"http": {"routers": {}, "services": {}}}
+
+    def test_running_session_all_ports(self, db, add_gw_session):
+        """RUNNING AWS session with token -> one router + service per port"""
+        s = add_gw_session()
+        t = s.gateway_token
+        assert gw.build_routes(db) == {"http": {
+            "routers": {
+                f"s-{t}-8080": {"rule": f"Host(`l-{t}-8080.bell-lab.space`)",
+                                "service": f"s-{t}-8080", "entryPoints": ["web"]},
+                f"s-{t}-8443": {"rule": f"Host(`l-{t}-8443.bell-lab.space`)",
+                                "service": f"s-{t}-8443", "entryPoints": ["web"]},
+            },
+            "services": {
+                f"s-{t}-8080": {"loadBalancer": {"servers": [{"url": "http://10.10.2.14:8080"}]}},
+                f"s-{t}-8443": {"loadBalancer": {"servers": [{"url": "http://10.10.2.14:8443"}]}},
+            },
+        }}
+
+    def test_multiple_sessions(self, db, add_gw_session):
+        """several sessions -> all in the table, no mixing"""
+        a = add_gw_session(upstreams={"8080": "http://10.10.2.14:8080"})
+        b = add_gw_session(upstreams={"8080": "http://10.10.3.20:8080"})
+        table = gw.build_routes(db)
+        assert router_names(table) == {f"s-{a.gateway_token}-8080", f"s-{b.gateway_token}-8080"}
+        assert table["http"]["services"][f"s-{b.gateway_token}-8080"]["loadBalancer"]["servers"] == \
+            [{"url": "http://10.10.3.20:8080"}]
+
+    @pytest.mark.parametrize("overrides", [
+        {"status": SessionStatus.PENDING},
+        {"status": SessionStatus.STOPPED},
+        {"status": SessionStatus.FAILED},
+        {"deleted_at": datetime.utcnow()},
+        {"is_cloud": False},
+        {"gateway_token": None},
+        {"upstreams": None},
+    ], ids=["pending", "stopped", "failed", "deleted", "k8s", "no-token", "no-upstreams"])
+    def test_not_routable(self, db, add_gw_session, overrides):
+        """PENDING / STOPPED / FAILED / deleted / K8s / no token / no upstreams -> not in table"""
+        add_gw_session(**overrides)
+        assert router_names(gw.build_routes(db)) == set()
+
+    def test_prelaunch_unclaimed_hidden(self, db, add_gw_session):
+        """prelaunched but unclaimed -> not in table"""
+        add_gw_session(prelaunched_at=datetime.utcnow())
+        assert router_names(gw.build_routes(db)) == set()
+
+    def test_prelaunch_claimed_visible(self, db, add_gw_session):
+        """prelaunched and claimed -> in table"""
+        now = datetime.utcnow()
+        s = add_gw_session(prelaunched_at=now - timedelta(minutes=5), claimed_at=now)
+        assert router_names(gw.build_routes(db)) == {f"s-{s.gateway_token}-8080", f"s-{s.gateway_token}-8443"}
+
+    def test_session_stops_drops_out(self, db, add_gw_session):
+        """session stops -> next poll it is gone (no separate delete step)"""
+        s = add_gw_session()
+        assert router_names(gw.build_routes(db))
+        s.status = SessionStatus.STOPPED
+        db.commit()
+        assert router_names(gw.build_routes(db)) == set()
+
+    @pytest.mark.parametrize("upstreams", [
+        {"8080": "http://8.8.8.8:8080"},
+        {"22": "http://10.10.2.14:22"},
+        {"8080": "http://100.102.72.39:8000"},
+        {"abc": "http://10.10.2.14:8080"},
+        {"8080": None},
+    ], ids=["outside-subnet", "port-22", "backend-ip", "non-numeric-key", "null-url"])
+    def test_bad_upstream_skipped_with_warning(self, db, add_gw_session, caplog, upstreams):
+        """bad upstream -> skipped + warning, good ports of the same session kept"""
+        s = add_gw_session(upstreams={**upstreams, "8443": "http://10.10.2.14:8443"})
+        with caplog.at_level(logging.WARNING, logger=gw.logger.name):
+            table = gw.build_routes(db)
+        assert router_names(table) == {f"s-{s.gateway_token}-8443"}
+        assert "not allowed" in caplog.text
+
+    def test_bad_session_does_not_break_others(self, db, add_gw_session):
+        """one bad session does not break the table for everyone else"""
+        add_gw_session(upstreams={"abc": "garbage"})
+        good = add_gw_session()
+        assert router_names(gw.build_routes(db)) == {f"s-{good.gateway_token}-8080", f"s-{good.gateway_token}-8443"}

@@ -17,7 +17,7 @@
 | ☑ | A2 | `settings.py`: เพิ่มตัวแปร `LAB_GATEWAY_*` + validator | backend start ได้ตอน flag ปิด / เปิด flag แต่ไม่มี token ต้อง start ไม่ขึ้น |
 | ☑ | A3 | model: เพิ่ม `gateway_token` และ `upstreams` + สร้าง migration | `alembic upgrade head` แล้ว `downgrade -1` บน DB local ผ่านทั้งสองทาง |
 | ☑ | A4 | `lab_gateway_service.py`: ฟังก์ชันช่วย (token, ลิงก์, เช็ก upstream) | unit test ของฟังก์ชันพวกนี้ผ่าน |
-| ☐ | A5 | `build_routes()` สร้างตาราง route | session RUNNING อยู่ในตาราง ส่วน PENDING / STOPPED / IP นอก ไม่อยู่ |
+| ☑ | A5 | `build_routes()` สร้างตาราง route | session RUNNING อยู่ในตาราง ส่วน PENDING / STOPPED / IP นอก ไม่อยู่ |
 | ☐ | A6 | route `/internal/v1/gateway/routes` + ลงทะเบียน | `curl` local: ไม่มี token ได้ 404, มี token ถูกได้ JSON |
 | ☐ | A7 | `session_service.py`: ส่ง token ไหลจาก `_new_sky_session` → `create_fastapi_task` → `_build_aws_task` (env) | `docker run` มี `-e VLAB_PUBLIC_URL_...` ส่วน K8s ไม่มี |
 | ☐ | A8 | `_run_sky_launch`: แยก `endpoints` (ลิงก์ `l-...`) กับ `upstreams` (`10.10.2.x`) | endpoint เป็น `https://l-...` และ API ของ sessions ไม่คืน `upstreams` |

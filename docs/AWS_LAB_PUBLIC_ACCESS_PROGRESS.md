@@ -10,7 +10,7 @@
 
 | ส่วน | ขั้น | สถานะ |
 |---|---|---|
-| A: โค้ด backend | A1 ✅ A2 ✅ A3 ✅ A4 ✅ / A5–A10 ⏳ | กำลังทำ — ถัดไป **A5** |
+| A: โค้ด backend | A1 ✅ A2 ✅ A3 ✅ A4 ✅ A5 ✅ / A6–A10 ⏳ | กำลังทำ — ถัดไป **A6** |
 | B: Ansible web-service | B1–B3 | ยังไม่เริ่ม |
 | C: เตรียม infra (Phase 0) | C1–C6 | ยังไม่เริ่ม |
 | D: Cloudflare | D1–D4 | ยังไม่เริ่ม |
@@ -222,6 +222,69 @@ migration รันบน DB local `virtual_lab` (container `virtual_lab_db`):
 **เทส:** `tests/session/test_lab_gateway.py` 39 เคส (token รูปแบบ + ไม่ซ้ำ 1000 ตัว + ยาวไม่เกิน DNS label / ขอบช่วงพอร์ต 2999–10000 + ค่าแปลก / ลิงก์ + ตัดพอร์ต 22, 80 / env / upstream ผ่าน 2 แบบ ไม่ผ่าน 12 แบบ / ค่าตาม settings)
 `pytest tests/session`: **269 passed** (230 เดิม + 39 ใหม่)
 
+### 2026-11-11 — A5: ตาราง route ของ Traefik ✅
+
+ไฟล์: `app/services/lab_gateway_service.py` (เพิ่มส่วนล่าง), `tests/session/test_lab_gateway.py` (เพิ่ม 19 เคส)
+
+#### Traefik ใช้ตารางนี้ยังไง
+
+config ของ Traefik มี 2 ส่วน:
+
+| | static config | dynamic config |
+|---|---|---|
+| คืออะไร | ฟังพอร์ตไหน ไปดึงตาราง route จากไหน | hostname ไหนส่งไปเครื่องไหน |
+| อยู่ที่ | `/etc/traefik/traefik.yml` บน router | JSON ที่ backend ตอบ |
+| ทำในขั้น | **E5–E6** (role `lab-gateway`, template `traefik.yml.j2`) | **A5** (`build_routes`) + **A6** (endpoint) |
+
+static config บอก Traefik ว่า "ทุก 5 วิ ไปถาม `http://<vlab-web>:8000/api/internal/v1/gateway/routes` พร้อม header `X-Gateway-Token`" แล้ว Traefik เอา JSON ที่ได้มา**แทนตารางเดิมทั้งก้อน**
+ต้องทำ A5–A6 ก่อน E เพราะถ้าลง Traefik ก่อน backend มี endpoint ตัว verify ของ E6 (เช็ก `provider error` ใน log) จะไม่ผ่าน
+
+#### `routable_sessions(db) -> list[Session]`
+
+**หน้าที่:** หา session ที่ลิงก์ gateway ควรเปิดได้ **ณ ตอนนี้**
+**หลักการ:** query เดียว ต้องผ่านทุกเงื่อนไข:
+
+| เงื่อนไข | ทำไม |
+|---|---|
+| `status == RUNNING` | PENDING เครื่องยังไม่พร้อม / STOPPED, FAILED ปิดแล้ว ห้ามมีลิงก์ที่ใช้ได้ |
+| `is_cloud == True` | เฉพาะ lab บน AWS (`session_service.py:459` ตั้ง `is_cloud = run_target == AWS`) |
+| มี `gateway_token` และ `upstreams` | session ที่เปิดตอน flag ปิดไม่มีค่าเหล่านี้ |
+| `deleted_at` ว่าง | ลบแล้วห้ามเปิด |
+| `prelaunched_at` ว่าง **หรือ** `claimed_at` มีค่า | เครื่องที่ scheduler เปิดรอไว้ก่อนคาบ online แต่ยังไม่มีนักศึกษามารับ = ยังไม่ใช่ของใคร |
+
+เรียงตาม `id` ให้ผลลัพธ์คงที่ทุกรอบ แยกออกมาเป็นฟังก์ชันของตัวเอง (runbook รวมไว้ใน `build_routes`) ให้อ่านง่ายและใช้ซ้ำได้
+
+#### `build_routes(db) -> dict`
+
+**หน้าที่:** แปลง session จาก `routable_sessions` เป็น dynamic config ของ Traefik (HTTP provider)
+**หลักการ:**
+1. วนทุก session → วนทุกพอร์ตใน `upstreams`
+2. เช็ก **key** ด้วย `port_allowed` และ **URL** ด้วย `upstream_ok` ไม่ผ่าน = ข้าม + log warning
+3. ผ่าน = สร้าง 2 อย่างด้วยชื่อเดียวกัน `s-<token>-<port>`:
+   - **router:** `Host(\`l-<token>-<port>.<domain>\`)` → service ชื่อนี้ ผ่าน entryPoint `web`
+   - **service:** `loadBalancer` → URL จริง `http://10.10.2.x:<port>`
+
+```json
+{"http": {
+  "routers":  {"s-k7m2…-8443": {"rule": "Host(`l-k7m2…-8443.bell-lab.space`)", "service": "s-k7m2…-8443", "entryPoints": ["web"]}},
+  "services": {"s-k7m2…-8443": {"loadBalancer": {"servers": [{"url": "http://10.10.2.14:8443"}]}}}
+}}
+```
+
+ไม่มี session = `{"http": {"routers": {}, "services": {}}}` → Traefik ตอบ 404 ทุก Host (ค่าที่เช็กใน F2)
+
+**ทำไมคำนวณใหม่จาก DB ทุกรอบ:** ไม่ต้องมีขั้น "ลบ route" แยก session ปิดเมื่อไหร่ (ผู้ใช้กดปิด / หมดเวลา / reconciler เปลี่ยน status) รอบถัดไปหลุดจากตารางเอง ภายใน 5 วิ จึงไม่ต้องแก้ `session_reconciler.py`
+
+**ทำไมข้ามทีละพอร์ตแทนการ error:** ตารางเป็นของทุกคนรวมกัน ถ้า session เดียวมีข้อมูลเพี้ยนแล้ว raise Traefik จะดึงไม่ได้และลิงก์ของ**ทุกคน**ใช้ไม่ได้ จึงข้ามเฉพาะพอร์ตที่มีปัญหา พอร์ตอื่นของ session เดียวกันและ session อื่นยังใช้ได้
+
+**ต่างจาก runbook:**
+- แยก `routable_sessions()` ออกมา
+- **เช็ก key ของ `upstreams` ด้วย `port_allowed`** — runbook เช็กแค่ URL ถ้า key ไม่ใช่ตัวเลข (เช่น `"abc"`) `int(port)` ตอนตั้งชื่อจะ error แล้วตารางของทุกคนล้มทั้งก้อน
+- `entryPoints` ใช้ค่าคงที่ `TRAEFIK_ENTRYPOINT = "web"` ให้เห็นว่าต้องตรงกับ `traefik.yml` ของ E5
+
+**เทส (19 เคสใหม่ ใช้ DB `virtual_lab_test`):** ตารางว่าง / session ปกติได้ JSON ตรงทุกตัวอักษร / หลาย session ไม่ปนกัน / PENDING, STOPPED, FAILED, ลบแล้ว, K8s, ไม่มี token, ไม่มี upstreams ไม่อยู่ / prelaunch ยังไม่รับไม่อยู่ รับแล้วอยู่ / session ปิดแล้วหลุดในรอบถัดไป / upstream เพี้ยน 5 แบบ (นอก subnet, พอร์ต 22, IP ของ backend, key ไม่ใช่ตัวเลข, URL เป็น null) ถูกข้าม + มี warning + พอร์ตดีของ session เดียวกันยังอยู่ / session เพี้ยนไม่ทำให้ session อื่นหาย
+`test_lab_gateway.py`: 58 passed / `pytest tests/session`: **288 passed**
+
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
@@ -246,7 +309,7 @@ migration รันบน DB local `virtual_lab` (container `virtual_lab_db`):
 | A2 ✅ | `settings.py`: `LAB_GATEWAY_*` + validator | start ได้ตอนปิด / เปิดแต่ไม่มี token start ไม่ขึ้น |
 | A3 ✅ | model `gateway_token`, `upstreams` + migration | upgrade / downgrade ผ่าน |
 | A4 ✅ | `lab_gateway_service.py`: token, ลิงก์, เช็ก upstream | unit test ผ่าน |
-| A5 | `build_routes()` | RUNNING อยู่ในตาราง / PENDING, STOPPED, IP นอก ไม่อยู่ |
+| A5 ✅ | `build_routes()` | RUNNING อยู่ในตาราง / PENDING, STOPPED, IP นอก ไม่อยู่ |
 | A6 | route `/internal/v1/gateway/routes` | ไม่มี token 404 / token ถูกได้ JSON |
 | A7 | `session_service.py`: token ไหล `_new_sky_session` → `create_fastapi_task` → `_build_aws_task` | `docker run` มี `-e VLAB_PUBLIC_URL_...` / K8s ไม่มี |
 | A8 | `_run_sky_launch`: แยก `endpoints` / `upstreams` | endpoint `https://l-...` / API ไม่คืน `upstreams` |

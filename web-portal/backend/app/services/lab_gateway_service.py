@@ -3,15 +3,26 @@
 นักศึกษาเปิด https://l-<token>-<port>.<LAB_GATEWAY_DOMAIN> → Cloudflare → cloudflared → Traefik บน vlab-ts-router
 → Traefik ส่งต่อไป upstream จริง http://10.10.2.x:<port> ตามตาราง route ที่ดึงจาก backend
 
-ไฟล์นี้มีแต่ฟังก์ชันล้วน (ไม่ต่อ DB / SkyPilot) ส่วนตาราง route ที่อ่าน DB อยู่ใน build_routes (runbook 1A.4 / A5)
+ส่วนบน: ฟังก์ชันล้วน (ไม่ต่อ DB / SkyPilot) — token, ลิงก์, env, เช็ก upstream
+ส่วนล่าง: routable_sessions / build_routes อ่าน DB สร้างตาราง route ให้ Traefik
 """
 import base64
 import ipaddress
+import logging
 import secrets
 from typing import Iterable
 from urllib.parse import urlparse
 
+from sqlalchemy import or_
+from sqlalchemy.orm import Session as DbSession
+
 from app.configs.settings import settings
+from app.models.session import Session as SessionModel, SessionStatus
+
+logger = logging.getLogger(__name__)
+
+# entryPoint ใน traefik.yml ของ role lab-gateway (runbook 1E.4)
+TRAEFIK_ENTRYPOINT = "web"
 
 # 10 byte = 80 bit → base32 ได้ 16 ตัวพอดี (ไม่มี "=" ต่อท้าย) ใส่ใน gateway_token String(32) ได้
 _TOKEN_BYTES = 10
@@ -86,3 +97,55 @@ def upstream_ok(url: str) -> bool:
     if not port_allowed(parsed.port):
         return False
     return any(ip in net for net in settings.lab_gateway_upstream_cidrs)
+
+
+def routable_sessions(db: DbSession) -> list[SessionModel]:
+    """session ที่ลิงก์ gateway ควรเปิดได้ตอนนี้
+
+    - RUNNING เท่านั้น: PENDING เครื่องยังไม่พร้อม / STOPPED, FAILED ปิดแล้ว
+    - is_cloud: lab บน AWS (session_service ตั้งเมื่อ run_target == AWS)
+    - มี gateway_token + upstreams: session ที่เปิดตอน flag ปิดไม่มีค่าเหล่านี้
+    - ยังไม่ถูกลบ
+    - prelaunch (คาบ online) ที่ยังไม่มีนักศึกษารับ ไม่ใช่ของใคร ยังไม่เปิดให้
+    """
+    return (
+        db.query(SessionModel)
+        .filter(
+            SessionModel.status == SessionStatus.RUNNING,
+            SessionModel.is_cloud.is_(True),
+            SessionModel.gateway_token.isnot(None),
+            SessionModel.upstreams.isnot(None),
+            SessionModel.deleted_at.is_(None),
+            or_(SessionModel.prelaunched_at.is_(None), SessionModel.claimed_at.isnot(None)),
+        )
+        .order_by(SessionModel.id)
+        .all()
+    )
+
+
+def build_routes(db: DbSession) -> dict:
+    """ตาราง route ของ Traefik (HTTP provider dynamic config) จาก session ใน DB
+
+    Traefik ดึงทุก pollInterval (5 วิ) แล้วใช้แทนตารางเดิมทั้งก้อน — session ปิดเมื่อไหร่ รอบถัดไปหลุดเอง
+    ไม่ต้องมีขั้นลบ route แยก
+
+    1 พอร์ตของ 1 session = router 1 ตัว (Host → service) + service 1 ตัว (→ upstream)
+    upstream ที่ไม่ผ่าน upstream_ok ถูกข้ามพร้อม log warning (session อื่นยังใช้ได้)
+    ไม่มี session = {"http": {"routers": {}, "services": {}}} (Traefik รับได้ ทุก Host ได้ 404)
+    """
+    routers: dict[str, dict] = {}
+    services: dict[str, dict] = {}
+    for s in routable_sessions(db):
+        for port, url in (s.upstreams or {}).items():
+            # เช็ก key ด้วย: key ที่ไม่ใช่ตัวเลขทำให้ int() พัง → ตารางของทุกคนล้มทั้งก้อน
+            if not port_allowed(port) or not upstream_ok(url):
+                logger.warning(f"[gateway] skip session {s.id} port {port!r}: upstream {url!r} not allowed")
+                continue
+            name = f"s-{s.gateway_token}-{int(port)}"
+            routers[name] = {
+                "rule": f"Host(`{public_host(s.gateway_token, port)}`)",
+                "service": name,
+                "entryPoints": [TRAEFIK_ENTRYPOINT],
+            }
+            services[name] = {"loadBalancer": {"servers": [{"url": url}]}}
+    return {"http": {"routers": routers, "services": services}}
