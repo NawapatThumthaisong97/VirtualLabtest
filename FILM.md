@@ -15,7 +15,7 @@
 |---|---|---|---|
 | ☑ | A1 | ใช้ branch `feature/aws-dns` ทำทั้งหมด (ไม่แตก branch ใหม่) | อยู่บน `feature/aws-dns` |
 | ☑ | A2 | `settings.py`: เพิ่มตัวแปร `LAB_GATEWAY_*` + validator | backend start ได้ตอน flag ปิด / เปิด flag แต่ไม่มี token ต้อง start ไม่ขึ้น |
-| ☐ | A3 | model: เพิ่ม `gateway_token` และ `upstreams` + สร้าง migration | `alembic upgrade head` แล้ว `downgrade -1` บน DB local ผ่านทั้งสองทาง |
+| ☑ | A3 | model: เพิ่ม `gateway_token` และ `upstreams` + สร้าง migration | `alembic upgrade head` แล้ว `downgrade -1` บน DB local ผ่านทั้งสองทาง |
 | ☐ | A4 | `lab_gateway_service.py`: ฟังก์ชันช่วย (token, ลิงก์, เช็ก upstream) | unit test ของฟังก์ชันพวกนี้ผ่าน |
 | ☐ | A5 | `build_routes()` สร้างตาราง route | session RUNNING อยู่ในตาราง ส่วน PENDING / STOPPED / IP นอก ไม่อยู่ |
 | ☐ | A6 | route `/internal/v1/gateway/routes` + ลงทะเบียน | `curl` local: ไม่มี token ได้ 404, มี token ถูกได้ JSON |
