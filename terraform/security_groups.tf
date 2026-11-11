@@ -128,13 +128,37 @@ resource "aws_vpc_security_group_egress_rule" "lab_self_out" {
 # Phase 14: let Tailscale users reach lab web ports (code-server etc.) through
 # the router. Phase 6 only allowed SSH from the router to the lab instances.
 #
-# SkyPilot adds the matching ingress on sg-lab-instances itself (from
-# `ports:` in the task), so only the router's egress is missing.
+# Lab gateway: Traefik on the router proxies l-<token>-<port>.<domain> to any
+# lab port in LAB_GATEWAY_PORT_MIN..MAX (3000-9999), so the range replaces the
+# single 8080 rule and the 5173 / 8443 rules once added by hand.
 resource "aws_vpc_security_group_egress_rule" "ts_router_lab_web" {
   security_group_id            = aws_security_group.ts_router.id
-  description                  = "Lab web ports through router"
+  description                  = "Lab web ports through router (Tailscale users + lab gateway)"
   ip_protocol                  = "tcp"
-  from_port                    = 8080
-  to_port                      = 8080
+  from_port                    = 3000
+  to_port                      = 9999
   referenced_security_group_id = aws_security_group.lab_instances.id
+}
+
+# cloudflared runs with --protocol http2 (TCP 7844). UDP 7844 (QUIC) is already
+# covered by ts_router_udp_all and TCP 443 by ts_router_https.
+resource "aws_vpc_security_group_egress_rule" "ts_router_cloudflared" {
+  security_group_id = aws_security_group.ts_router.id
+  description       = "cloudflared tunnel (http2)"
+  ip_protocol       = "tcp"
+  from_port         = 7844
+  to_port           = 7844
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+# SkyPilot opens ingress for the task's `ports:` itself, but per cluster and
+# only while it runs. This rule lets the gateway reach every lab without
+# depending on that.
+resource "aws_vpc_security_group_ingress_rule" "lab_web_from_router" {
+  security_group_id            = aws_security_group.lab_instances.id
+  description                  = "Lab web ports from router (lab gateway)"
+  ip_protocol                  = "tcp"
+  from_port                    = 3000
+  to_port                      = 9999
+  referenced_security_group_id = aws_security_group.ts_router.id
 }

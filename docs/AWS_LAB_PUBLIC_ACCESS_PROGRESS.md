@@ -14,7 +14,7 @@
 | B: Ansible web-service | B1 ✅ B2 ✅ B3 ✅ (deploy) | B3 เหลือเทส Start AWS → รอ router online (รวมกับ C6) |
 | C: เตรียม infra (Phase 0) | C1 ✅ / C2–C6 | C3–C6 รอ Pete + router online |
 | D: Cloudflare | D1 ✅ D2 ✅ D3 ✅ D4 ✅ | **เสร็จ** (2026-11-11) — tunnel `vlab-lab-gateway` รอ connector (E6) |
-| E: Router | E1–E6 | ยังไม่เริ่ม |
+| E: Router | E1 / E3 เขียนแล้ว (รอ Pete apply) / E2, E4–E6 | ถัดไป: Pete apply E1–E3 / เราเขียน role `lab-gateway` (E5) ระหว่างรอ |
 | F: เปิดใช้งาน | F1–F4 | ยังไม่เริ่ม |
 | เฟส 2 (portal public) | 2A–2G | **พักไว้** ทำหลังเฟส 1 เสร็จ |
 
@@ -559,6 +559,55 @@ wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้�
 
 - `skypilot.bell-lab.space` ตอบ HTTP 530 (= error 1033) **เหมือนก่อนแก้** — tunnel `skypilot-new-master` ไม่มี connector อยู่แล้วเดิม ไม่เกี่ยวกับการแก้ `*` ✅
 
+### 2026-11-11 — E1 + E3 (เตรียม): Terraform + Tailscale ACL ให้ Pete รัน ✅ (เขียนเสร็จ ยังไม่ apply)
+
+**ทำไมเราเขียน แต่ Pete รัน:** Terraform state อยู่ในเครื่อง Pete (`terraform/providers.tf` ไม่มี remote backend) และ tailnet เป็นของ Pete (ต้องใช้ API token ของ admin) → เราเตรียมไฟล์บน branch ให้ Pete รันอย่างเดียว
+
+#### E1 — Terraform (แก้ 2 ไฟล์ / เปิดเพิ่มอย่างเดียว ไม่ปิดของเดิม)
+
+| ไฟล์ / resource | เปลี่ยน | ทำไม |
+|---|---|---|
+| `router.tf` `aws_instance.ts_router` | `t3.micro` → **`t3.small`** | RAM 1 GB → 2 GB ให้พอ Tailscale + cloudflared + Traefik |
+| | + `credit_specification { cpu_credits = "unlimited" }` | T3 เป็น unlimited อยู่แล้ว เขียนให้เห็นว่าตั้งใจ — credit หมดกลางคาบ = CPU ถูกบีบ = proxy ช้าทั้งห้อง |
+| `security_groups.tf` `ts_router_lab_web` (egress router → lab) | `8080` → **`3000–9999`** | Traefik ต้องส่งต่อไปได้ทุกพอร์ตที่ backend ยอมแจกลิงก์ (`LAB_GATEWAY_PORT_MIN..MAX`) / ครอบ rule 5173 / 8443 ที่ Pete เคยเพิ่มด้วยมือ |
+| `ts_router_cloudflared` (**ใหม่**, egress tcp 7844 → 0.0.0.0/0) | | cloudflared ต่อ tunnel แบบ `--protocol http2` ใช้ tcp 7844 (udp 7844 ครอบด้วย `ts_router_udp_all`, tcp 443 ด้วย `ts_router_https` อยู่แล้ว) |
+| `lab_web_from_router` (**ใหม่**, ingress lab ← router tcp 3000–9999) | | SkyPilot เปิด ingress ให้เองตาม `ports:` ของ task แต่เป็นราย cluster / ช่วงที่รัน → rule นี้ทำให้ gateway ไม่ต้องพึ่งพฤติกรรมนั้น |
+
+- ไม่ต้องแก้ `variables.tf`: ขนาดเครื่อง / พอร์ตในโปรเจกต์นี้เขียนตรงในไฟล์อยู่แล้ว / ตัวแปรมีแค่ค่าที่ต่างตามคนรัน (`region`, `aws_profile`, `ssh_public_key_path`)
+- เช็กแล้ว (ใน WSL บนสำเนาไฟล์ ไม่แตะ state / `.terraform` ของใคร): `terraform fmt -check` ✅ / `terraform init -backend=false && terraform validate` ✅ (Terraform v1.17.1)
+- **plan ที่ Pete ต้องเห็น:** `aws_instance.ts_router` **update in-place** (`instance_type`, `credit_specification`) / `ts_router_lab_web` replace (เปลี่ยนพอร์ต = สร้างใหม่ ปกติ) / `ts_router_cloudflared`, `lab_web_from_router` create — **ถ้า router ขึ้น `must be replaced` ให้หยุด** (router ใหม่ = Tailscale หาย)
+- **ผลข้างเคียง:** เปลี่ยน instance type = router stop/start ไม่กี่นาที → lab AWS ของทุกคนเข้าไม่ได้ช่วงนั้น (EC2 ไม่ตาย) / public IP ของ router อาจเปลี่ยน (ไม่มีผล: Tailscale + cloudflared ต่อออกเอง)
+
+#### E3 — Tailscale ACL + tag (แก้ `.example` 2 ไฟล์)
+
+| เพิ่มอะไร | ทำหน้าที่ |
+|---|---|
+| `vlab-tags.tsv.example`: `100.84.123.59 tag:vlab-router` | `tailscale-acl.sh apply` ติด tag ให้ router ผ่าน API |
+| `tagOwners`: `tag:vlab-router` | ประกาศ tag (ไม่ประกาศ = validate ไม่ผ่าน) |
+| กฎ 5: `tag:vlab-router` → `100.124.148.97:8000` tcp | ให้ Traefik ดึงตาราง route จาก backend ของ Panupong — ช่องทางเดียวที่ router เริ่มคุยใน tailnet ได้ |
+| `autoApprovers.routes` `10.10.2.0/24`, `10.10.3.0/24` → `tag:vlab-router` | route ของ router ยัง approved หลังติด tag (ไม่งั้น SkyPilot ของ **ทุก master** เข้า EC2 ไม่ได้) |
+| test ของ `tag:vlab-router` | accept `100.124.148.97:8000` / deny `:22`, `:5432` ของ backend + ssh / k3s / SkyPilot ของ server, ssh / lab ของ worker, push registry — Tailscale รัน test ทุกครั้งที่ validate ไม่ผ่าน = ไม่ยอม save |
+
+**ทำไมติด tag:** ตอนนี้ router เป็นเครื่องของ Pete = `autogroup:member` → ได้ `*:*` แต่ router เป็นเครื่องเดียวที่รับ traffic จาก internet (cloudflared) ถ้าถูกเจาะผ่าน Traefik / cloudflared จะกระโดดไปทุกเครื่องใน tailnet ได้ / ติด tag แล้ว router ทำได้แค่ที่เขียนไว้
+
+**ไม่พังของใคร:**
+- ACL มีแต่ `accept` → เพิ่มกฎไม่ปิดของเดิม / เครื่องไม่ติด tag (`masterlab2`, `webserverlab2`, เครื่อง Pete, backend ของ Pete) ยัง `*:*` ตามกฎ member
+- master ทั้งของ Pete และ Panupong ไป EC2 ผ่าน subnet route: ต้นทางคือ master (member / `tag:vlab-server`) router แค่ส่งต่อ → ไม่ต้องมีกฎ src router
+- SSH เข้า router ยังได้ (ต้นทาง member)
+- **ข้อจำกัด:** Traefik ดึงตารางจาก backend ได้ตัวเดียว (URL ใน `traefik.yml`) = backend ที่เปิด `LAB_GATEWAY_ENABLED` ได้ทีละตัว / backend อื่นปล่อย flag ปิด ทำงานเหมือนเดิม / ย้าย backend = แก้ IP ในกฎ 5 + test + URL ใน role
+
+**สิ่งที่ Pete ต้องทำตอน apply:** ไฟล์จริง (`tailscale/vlab-acl.hujson`, `vlab-tags.tsv`) อยู่ในเครื่อง Pete (gitignore) และ script **ทับ policy ทั้งก้อน** → Pete ต้อง **ต่อส่วนที่เพิ่มเข้าไฟล์ของตัวเอง** (ดู `git diff` ของ `.example`) ห้าม `cp .example` ทับ / ถ้าไฟล์ Pete มี `autoApprovers` อยู่แล้วให้รวม key `routes` เข้าด้วยกัน
+- เช็กแล้ว: HuJSON ของ `.example` parse ได้ (keys `tagOwners`, `acls`, `autoApprovers`, `ssh`, `tests`) — validate + test จริงทำโดย `tailscale-acl.sh plan` ของ Pete (ต้องใช้ API)
+
+#### ขั้นตอนของ Pete (ช่วงไม่มีคาบ ~1 ชม. ตามลำดับ)
+
+1. **AMI snapshot** router (C5) + จดค่าข้อ 0.2 / 0.3 ของรันบุ๊ค (C3 / C4)
+2. `git pull` branch `feature/aws-dns` → `cd terraform && terraform plan -out gateway.tfplan` → อ่าน plan ตามด้านบน → `terraform apply gateway.tfplan`
+3. ลบ rule 5173 / 8443 ที่เพิ่มด้วยมือ (คำสั่งในรันบุ๊ค 1B.4) → `terraform plan` อีกรอบต้อง `No changes`
+4. ต่อส่วนที่เพิ่มใน `.example` เข้า `tailscale/vlab-acl.hujson` + `vlab-tags.tsv` ของตัวเอง → `./script/tailscale-acl.sh plan` (validate + test + diff) → `apply`
+5. เช็ก: admin console router มี `tag:vlab-router` + route ยัง approved / บน `masterlab2` `tailscale status` ยังเห็น route / บน router `nc -zv -w3 100.124.148.97 8000` ได้ และ `nc -zv -w3 100.77.79.61 22` ไม่ได้
+6. เทส R1–R3 (รันบุ๊ค 1F.3)
+
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
@@ -634,9 +683,9 @@ wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้�
 
 | ขั้น | ทำอะไร | ผ่านเมื่อ |
 |---|---|---|
-| E1 | Terraform: `router.tf` (`t3.small` + cpu credits unlimited) + `security_groups.tf` (router → lab 3000–9999, egress 7844, lab รับ 3000–9999 จาก router) แล้ว `plan` | router ขึ้น **update in-place** (ขึ้น replace = หยุด) |
+| E1 📝 | Terraform: `router.tf` (`t3.small` + cpu credits unlimited) + `security_groups.tf` (router → lab 3000–9999, egress 7844, lab รับ 3000–9999 จาก router) แล้ว `plan` | router ขึ้น **update in-place** (ขึ้น replace = หยุด) |
 | E2 | `terraform apply` + ลบ rule 5173 / 8443 ที่เพิ่มด้วยมือ | R1–R3 ผ่าน + plan รอบสอง `No changes` |
-| E3 | Tailscale: tag `tag:vlab-router` + ACL router → backend `:8000` + autoApprovers แล้ว `plan` / `apply` | router มี tag, route ยัง approved, R1–R3 ผ่าน |
+| E3 📝 | Tailscale: tag `tag:vlab-router` + ACL router → backend `:8000` + autoApprovers แล้ว `plan` / `apply` | router มี tag, route ยัง approved, R1–R3 ผ่าน |
 | E4 | SSH key ให้ router + group `aws_router` ใน inventory | `ansible aws_router -m ping` ผ่าน |
 | E5 | role `lab-gateway` (cloudflared + Traefik ปักเวอร์ชัน + sha256) | `--check --diff` ผ่าน |
 | E6 | รัน role จริง | tunnel **Healthy**, RAM เหลือ ≥ 800MB, R1–R4 ผ่าน |

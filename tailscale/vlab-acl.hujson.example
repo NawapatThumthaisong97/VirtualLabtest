@@ -11,6 +11,7 @@
 //   tag:vlab-server   = mn  (100.99.154.106)  K3s server
 //   tag:vlab-worker   = wn1 (100.68.15.113)   K3s agent
 //   tag:vlab-registry = rn  (100.119.124.73)  camp registry 5001 pull (read-only) / 5002 push (ต้อง login)
+//   tag:vlab-router   = vlab-ts-router (100.84.123.59) AWS subnet router + lab gateway (cloudflared + Traefik)
 // backend รันบน WSL ของเครื่องคนในทีม (ไม่ติด tag) ใช้สิทธิ์ของ autogroup:member
 // เครื่องที่ติด tag จะไม่ใช่ของ user อีกต่อไป → ได้สิทธิ์เฉพาะที่เขียนไว้ข้างล่าง
 //
@@ -27,6 +28,7 @@
 		"tag:vlab-server":   ["autogroup:admin"],
 		"tag:vlab-worker":   ["autogroup:admin"],
 		"tag:vlab-registry": ["autogroup:admin"],
+		"tag:vlab-router":   ["autogroup:admin"],
 	},
 
 	"acls": [
@@ -57,7 +59,25 @@
 
 		// registry ไม่ต้องเริ่มคุยกับเครื่องไหนใน tailnet (ecr-sync ออกอินเทอร์เน็ตตรง) จึงไม่มีกฎ src เป็น registry
 		// พอร์ต lab (8080 / 5173 / 8443 / NodePort ฯลฯ) ระหว่าง worker ไม่มีข้อไหนเปิด = ปิด
+
+		// 5. router (lab gateway) → backend :8000 อย่างเดียว: Traefik ดึงตาราง route จาก
+		//    /api/internal/v1/gateway/routes ทุก 5 วินาที
+		//    router รับ traffic จากอินเทอร์เน็ต (cloudflared) ติด tag แล้วจึงไม่ใช่ member → ถูกยึดก็กระโดดต่อไม่ได้
+		//    traffic ของ subnet route (ทีม / master → 10.10.x) ต้นทางคือเครื่องพวกนั้น router ไม่ได้เริ่ม ไม่ต้องมีกฎ
+		//    dst = Tailscale IP ของ backend ตัวที่เปิด LAB_GATEWAY_ENABLED (ตัวเดียว = ตัวที่ Traefik ชี้)
+		//    ย้าย backend → แก้ IP ที่นี่ + tests + URL ใน role lab-gateway
+		{"action": "accept", "src": ["tag:vlab-router"], "proto": "tcp",
+		 "dst": ["100.124.148.97:8000"]},
 	],
+
+	// route ของ router ต้องยัง approved หลังติด tag (เครื่องไม่ใช่ของ user แล้ว)
+	// ถ้าหลุด: SkyPilot SSH เข้า EC2 ไม่ได้ + ทุกคนเปิด 10.10.x ไม่ได้
+	"autoApprovers": {
+		"routes": {
+			"10.10.2.0/24": ["tag:vlab-router"],
+			"10.10.3.0/24": ["tag:vlab-router"],
+		},
+	},
 
 	// Tailscale SSH: เก็บตามค่าเริ่มต้นของ tailnet เดิม (คนในทีมเข้าเครื่องของตัวเองแบบ check mode)
 	// ไม่เกี่ยวกับการกันเครื่องแลป เพราะเครื่องที่ติด tag ไม่นับเป็น autogroup:self
@@ -93,6 +113,15 @@
 			"proto": "tcp",
 			"accept": ["tag:vlab-registry:5001", "tag:vlab-registry:5002",
 			           "tag:vlab-worker:10250", "tag:vlab-worker:22", "tag:vlab-worker:8080"],
+		},
+		{
+			// router เข้าได้แค่ backend :8000 (ตาราง route) พอร์ตอื่นของ backend และเครื่องใน cluster ไม่ได้
+			"src": "tag:vlab-router",
+			"proto": "tcp",
+			"accept": ["100.124.148.97:8000"],
+			"deny": ["100.124.148.97:22", "100.124.148.97:5432",
+			         "tag:vlab-server:22", "tag:vlab-server:6443", "tag:vlab-server:30880",
+			         "tag:vlab-worker:22", "tag:vlab-worker:8080", "tag:vlab-registry:5002"],
 		},
 		{
 			// registry เริ่มคุยกับใครไม่ได้ (ถูกยึดเครื่องก็กระโดดต่อไม่ได้)
