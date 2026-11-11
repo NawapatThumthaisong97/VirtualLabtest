@@ -4,6 +4,12 @@
 resource "aws_key_pair" "pete" {
   key_name   = "vlab-ecr-pull-pete"
   public_key = file(pathexpand(var.ssh_public_key_path))
+
+  # state อยู่ใน S3 แล้ว ใครรันก็ได้ แต่ ~/.ssh/id_ed25519.pub ของแต่ละเครื่องต่างกัน
+  # ไม่ ignore = คนที่รันจากเครื่องอื่นจะลบแล้วสร้าง key pair ใหม่ทุกครั้ง (ของเดิมคือ key บน Windows ของ Pete)
+  lifecycle {
+    ignore_changes = [public_key]
+  }
 }
 
 locals {
