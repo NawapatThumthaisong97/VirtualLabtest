@@ -577,7 +577,7 @@ wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้�
 - [x] **D3** (2026-11-11): Cache Rule `lab gateway no cache` = **Bypass cache** / Configuration Rule `lab gateway no rewrite` = ปิด Rocket Loader, Email Obfuscation, Automatic HTTPS Rewrites / เงื่อนไขทั้งคู่ `http.request.full_uri wildcard "https://l-*.bell-lab.space/*"` (ใช้แทน `starts_with(http.host, "l-") and ends_with(...)` ในรันบุ๊ค ผลเท่ากัน กรอกผ่าน builder ได้) / dashboard เตือน "may not apply" เพราะไม่มี record ชื่อ `l-` ตรงตัว → Ignore and deploy (ทราฟฟิกวิ่งผ่าน `*` ที่ Proxied อยู่แล้ว) / ยังไม่ได้เช็ก Bot Fight Mode + WebSockets
 - [x] **D4** (2026-11-11): `skypilot.bell-lab.space` ตอบ HTTP 530 (= error 1033 เหมือนก่อนแก้ — tunnel `skypilot-new-master` ไม่มี connector อยู่แล้วเดิม) ไม่ได้รับผลจากการแก้ `*` ✅
 - [ ] **C2** ไม่จำเป็นแล้วสำหรับการเทส (backend อยู่บน VM ของ Panupong) — ยังต้องถาม Pete เรื่องพอร์ต 3000–9999 และ public IP ของ router
-- [ ] ลบ `FILM.md` ออกจาก repo (ติดมาใน `a0be92c`) หรือย้ายไป `.git/info/exclude`
+- [x] ~~ลบ `FILM.md` ออกจาก repo~~ — ย้าย checklist (สถานะ + เกณฑ์ผ่าน A–F) มาไว้ที่ "แผนขั้นย่อยของเฟส 1" ท้าย doc นี้แล้ว (2026-11-11)
 - [ ] ก่อนใช้สอนจริง: ย้าย `vlab-web` ไปเครื่องที่เปิดตลอด (ThinkPad ปิด = portal ล่ม)
 - [ ] `CICD_ARGOCD_SOLUTION.md` ข้อ 0 วางแผนย้าย web-portal เข้า K3s — สวนกับการตัดสินใจ 2026-11-10 และ runbook (backend อยู่ที่ `vlab-web`) ถ้าแผน CI/CD เดินหน้า ต้องแก้เรื่อง IP จริงหลัง kube-proxy และ ACL/URL ของ Traefik
 
@@ -602,12 +602,50 @@ wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้�
 | A9 ✅ | `main.py`: ซ่อน 2 column ในหน้า admin | หน้า admin ไม่เห็น |
 | A10 ✅ | test ทั้งหมด | เก่าไม่พัง + ใหม่ผ่าน |
 
-**B: Ansible web-service** — B1 ✅ ตัวแปร + `backend.env.j2` + assert / B2 ✅ สุ่ม `vault_lab_gateway_token` / B3 deploy ลง **VM ของ Panupong** flag ปิด (ตัดสินใจ 2026-11-11)
+**B: Ansible web-service** (dev)
 
-**C: Phase 0** — C1 จดค่า DNS `*` / C2 คุยกับ Pete / C3 จดค่า 5 ตัว / C4 เก็บสถานะ router / C5 AMI snapshot / C6 เทส baseline
+| ขั้น | ทำอะไร | ผ่านเมื่อ |
+|---|---|---|
+| B1 ✅ | ตัวแปรใน `web-service/defaults` + `backend.env.j2` + `all.yml.example` + assert ใน `tasks/main.yml` | render ด้วย Ansible จริงได้ค่าถูก 5 เคส |
+| B2 ✅ | สุ่ม `vault_lab_gateway_token` ใส่ `group_vars/all.yml` | ยาว 64 ตัวอักษร |
+| B3 ✅ (deploy) | deploy ลง VM ของ Panupong `webserverlab2` `100.124.148.97` **flag ปิด** | `curl` ได้ 404 ✅ / กด Start AWS ได้ `10.10.2.x` → เทสพร้อม C6 (รอ router) |
 
-**D: Cloudflare** (Panupong) — D1 tunnel `vlab-lab-gateway` / D2 hostname + DNS `*` (521 → 1033) / D3 Cache + Configuration Rule / D4 เช็ก `skypilot` ยังใช้ได้
+**C: เตรียม infra (Phase 0)**
 
-**E: Router** (กับ Pete ช่วงไม่มีคาบ ตามลำดับ) — E1 terraform plan (ต้อง in-place) / E2 apply + ลบ rule มือ / E3 Tailscale tag + ACL / E4 SSH + inventory / E5 role `lab-gateway` / E6 รัน role (tunnel Healthy)
+| ขั้น | ทำอะไร | ใคร |
+|---|---|---|
+| C1 ✅ | จดค่า DNS `*.bell-lab.space` เดิม (A `198.54.117.242` Proxied) | Panupong |
+| C2 | ~~ยืนยัน backend อยู่ที่ `vlab-web`~~ (ไม่จำเป็นแล้ว ใช้ VM ของ Panupong) — ยังต้องถามเรื่องพอร์ต 3000–9999 + public IP ของ router | Panupong + Pete |
+| C3 | จดค่า 5 ตัวในข้อ 0.2 ของรันบุ๊ค (IP, instance ID, SG ID) | Pete |
+| C4 | เก็บสถานะ router (ข้อ 0.3) | Pete |
+| C5 | AMI snapshot ของ router | Pete |
+| C6 | เทส baseline: กด Start AWS แล้วจดเวลา + ยืนยัน endpoint `10.10.2.x` | dev (router ต้อง online) |
 
-**F: เปิดใช้งาน** — F1 เช็ก Vite ใน music-lab / F2 เปิด flag / F3 เปิดลิงก์บนมือถือ 4G / F4 เทส G1–G12
+**D: Cloudflare** (Panupong)
+
+| ขั้น | ทำอะไร | ผ่านเมื่อ |
+|---|---|---|
+| D1 ✅ | tunnel `vlab-lab-gateway` + token ลง `all.yml` | tunnel ขึ้นใน dashboard |
+| D2 ✅ | Published application `*` → `HTTP 127.0.0.1:8081` + DNS `*` ชี้ tunnel | `curl l-test-8080...` 521 → **1033** |
+| D3 ✅ | Cache Rule + Configuration Rule ของ `l-*` | rule ขึ้นใน dashboard |
+| D4 ✅ | เช็ก `skypilot.bell-lab.space` | เหมือนเดิม |
+
+**E: Router** (กับ Pete ช่วงไม่มีคาบ **ตามลำดับ**)
+
+| ขั้น | ทำอะไร | ผ่านเมื่อ |
+|---|---|---|
+| E1 | Terraform: `router.tf` (`t3.small` + cpu credits unlimited) + `security_groups.tf` (router → lab 3000–9999, egress 7844, lab รับ 3000–9999 จาก router) แล้ว `plan` | router ขึ้น **update in-place** (ขึ้น replace = หยุด) |
+| E2 | `terraform apply` + ลบ rule 5173 / 8443 ที่เพิ่มด้วยมือ | R1–R3 ผ่าน + plan รอบสอง `No changes` |
+| E3 | Tailscale: tag `tag:vlab-router` + ACL router → backend `:8000` + autoApprovers แล้ว `plan` / `apply` | router มี tag, route ยัง approved, R1–R3 ผ่าน |
+| E4 | SSH key ให้ router + group `aws_router` ใน inventory | `ansible aws_router -m ping` ผ่าน |
+| E5 | role `lab-gateway` (cloudflared + Traefik ปักเวอร์ชัน + sha256) | `--check --diff` ผ่าน |
+| E6 | รัน role จริง | tunnel **Healthy**, RAM เหลือ ≥ 800MB, R1–R4 ผ่าน |
+
+**F: เปิดใช้งาน**
+
+| ขั้น | ทำอะไร | ผ่านเมื่อ |
+|---|---|---|
+| F1 | เช็ก Vite ใน image music-lab (ข้อ 1F.0) | รองรับ env — ไม่รองรับต้องแก้ `vite.config.js` แล้ว build ใหม่ |
+| F2 | เปิด flag `-e webservice_lab_gateway_enabled=true` | `curl` ตาราง route ได้ `{"routers":{}}` |
+| F3 | กด Start AWS แล้วเปิดลิงก์ `l-...` บนมือถือ 4G | เปิด lab ได้ |
+| F4 | เทส G1–G12 จดผลลงข้อ 9 ของรันบุ๊ค | G1–G11 ผ่าน → ตั้ง flag `true` ถาวร |
