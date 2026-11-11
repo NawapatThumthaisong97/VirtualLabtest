@@ -441,6 +441,41 @@ playbook ชั่วคราวบน localhost: inventory ปลอม (group
 
 แล้วเอา `.env` ที่ render ได้ป้อน `Settings(_env_file=…)` ของ backend: ทั้ง 3 เคสที่ผ่านโหลดได้ ค่าตรง validator A2 ผ่าน — ลบไฟล์ที่ render (มีค่าลับจริง) ทิ้งแล้ว
 
+`web-portal/backend/.env.example`: เพิ่มหัวข้อ 13.1 Lab Gateway ครบ 6 ตัวแปร (ปิดเป็นค่าเริ่มต้น) — `.env` ในเครื่อง Panupong ไม่ต้องแก้ (ค่าเริ่มต้นในโค้ด = ปิด, pytest รีเซ็ต settings เองอยู่แล้ว) หมายเหตุ: `.env` ในเครื่องชี้ SkyPilot / registry ของ Pete (`100.125.244.48`, `100.127.74.48`) ใช้รัน backend บน PC แล้วกด Start ไม่ได้ — ไม่เป็นไรเพราะทางทดสอบคือ B3 บน VM ซึ่งใช้ `.env` จาก Ansible
+
+### 2026-11-11 — ตัดสินใจใช้ master ของตัวเอง + เช็ก `masterlab2` (อ่านอย่างเดียว)
+
+**ตัดสินใจ:** ใช้ `masterlab2` (`100.77.79.61`, k3s + SkyPilot ที่ลงด้วย Ansible + `group_vars/all.yml` ของ Panupong) แทน master ของ Pete — `skypilot_backend_token` ใน `all.yml` เป็นของ `masterlab2` (ไม่ตรงกับ token ใน `.env` ที่ Pete ส่งมา ซึ่งเป็นของ `master` `100.125.244.48`) และ `inventory.yml` ชี้ group `master` ไปที่ `masterlab2` อยู่แล้ว → role `web-service` จะชี้ backend ไป `http://100.77.79.61:30880` เอง
+master จำเป็นเฉพาะตอน **กด Start** (SkyPilot API server สั่งเปิด / ปิด EC2) — ตอนเปิดลิงก์ `l-…` ไม่ผ่าน master
+
+เข้าทาง WSL `ssh -i ~/.ssh/id_ed25519 panupong@100.77.79.61` (sudo มีรหัส — VM ทดสอบ) รันแค่คำสั่งอ่าน ค่าลับดูแค่ความยาว / hash
+
+| # | เช็ก | ผล |
+|---|---|---|
+| 1 | k3s + SkyPilot API server | ✅ node `masterlab2` Ready (k3s v1.35.5) / pod `skypilot-api-api-server` 2/2 Running / NodePort `skypilot-api-tailnet` `30880` / `/api/health` = `healthy` SkyPilot **0.12.3.post1** |
+| 2 | `skypilot_backend_token` ใน `all.yml` | ✅ ใช้กับ API server นี้ได้ (token ปลอมได้ 401 ตัวจริงไม่โดนปฏิเสธ) |
+| 3 | config ของ SkyPilot (configmap `skypilot-api-config`) | ✅ `aws.vpc_names: vlab-ecr-pull` / `use_internal_ips: true` / `use_ssm: false` / `security_group_name: vlab-lab-instances` (= SG ใน `terraform/security_groups.tf:69`) / `remote_identity: vlab-lab-ecr-pull` (= IAM role ใน `terraform/lab_iam.tf`) |
+| 3 | AWS credentials | ✅ secret `aws-credentials` มี key ครบ / access key **ตัวเดียวกับ** `skypilot_aws_access_key_id` ใน `all.yml` (sha256 ตรงกัน) / `sky status` บอก `Enabled Infra: kubernetes/in-cluster, aws` = AWS credentials ใช้ได้ |
+| 4 | Tailscale บน master | ✅ `RouteAll: true` (accept-routes) / route `10.10.2.0/24`, `10.10.3.0/24` อยู่ใน table 52 ผ่าน `tailscale0` |
+| 4 | ใครประกาศ route `10.10.x` | ✅ **`ip-10-10-1-234` `100.84.123.59` เป็นเครื่องเดียวที่ประกาศ** `10.10.2.0/24` + `10.10.3.0/24` → ยืนยันว่าเป็น `vlab-ts-router` แต่ **offline** |
+| 5 | เคย launch แล้วได้ IP อะไร | ⚪ ไม่มี cluster ค้างใน `sky status` ยืนยันจากประวัติไม่ได้ → ยังต้องดูตอน C6 |
+
+**สรุปฝั่ง master: พร้อม** ตัวที่ยังขาดสำหรับ "กด Start lab AWS" คือ **router ต้อง online** (SkyPilot ต้อง SSH เข้า EC2 ผ่าน subnet route ของ router) + backend บน VM (B3)
+
+### B3 (เตรียม) — VM `webserverlab2` + inventory (2026-11-11)
+
+VM ของ Panupong: `webserverlab2` Tailscale `100.124.148.97` / Ubuntu 24.04 / 3 vCPU / RAM 2.9 GB / swap 2.9 GB / disk ว่าง 27 GB / ใส่ SSH key แล้ว (`ssh-copy-id`) / sudo ต้องใส่รหัส → รัน playbook ด้วย `-K`
+
+| ไฟล์ | แก้อะไร | ทำไม |
+|---|---|---|
+| `ansible/inventory.yml` (gitignore) | เพิ่ม group `webservice` → `webservice-1` `100.124.148.97` | `site.yml` play สุดท้ายใช้ `hosts: webservice` / Tailscale IP นี้ = `<BACKEND_TS_IP>` ใน ACL (E3) และ URL ของ Traefik (E5) |
+| `ansible/inventory.yml` | comment `worker-1`, `worker-2` ออก (`hosts: {}`) **ชั่วคราว** | ทั้งสองตัว offline / task "Verify backend sees the real IP" ใน role `web-service` delegate ไป `groups['workers'][0]` ถ้า worker ไม่ตอบ deploy fail / group ว่าง → task ถูกข้าม (`when` เช็กความยาว) |
+| `ansible/inventory.yml.example` | `webportal` → `webservice` | ชื่อ group ใน example ไม่ตรงกับ `site.yml` คนที่ก๊อปไปใช้จะได้ play ที่ไม่มี host |
+
+เช็กแล้ว: `ansible-inventory --graph` เห็น `webservice-1` / `--limit webservice --list-hosts` ได้ 1 host / `ansible webservice -m ping` SSH ผ่าน (ติดแค่ sudo password = ต้อง `-K`)
+
+ข้อควรระวังตอนรัน: role `web-service` ต่อ **master** ด้วย (slurp kubeconfig + ใช้ SkyPilot `:30880`) → `masterlab2` ต้องเปิดอยู่ (ตอนเช็ก SSH ไม่ตอบ)
+
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
@@ -448,10 +483,8 @@ playbook ชั่วคราวบน localhost: inventory ปลอม (group
 - [ ] **C1** (Panupong): ดู record `*.bell-lab.space` ใน Cloudflare แล้วจดค่าเดิม
 - [ ] **C2** (Pete): ยืนยัน backend ยังอยู่ที่ `vlab-web` `100.102.72.39` บน ThinkPad + ตอบคำถามที่ค้างในข้อ 0.1 ของ runbook
 - [ ] **C6**: ตอนเทส baseline ดูว่า endpoint ของ lab AWS เป็น `http://10.10.2.x:…` (ยืนยันสมมติฐานของ `upstream_ok` ดูหมายเหตุใต้ A8)
-- [ ] **router ใน tailnet** (Pete): Pete บอกว่า setup router ได้ด้วย SSH ผ่าน Tailscale IP (ไม่ต้องใช้ SSM ใน E4)
-      `tailscale status` (2026-11-11) ไม่มีเครื่องชื่อ `vlab-ts-router` ตัวที่น่าจะใช่คือ `ip-10-10-1-234` `100.84.123.59` (account Pete, ยังไม่ติด tag)
-      → ยืนยันกับ Pete ว่าเป็น router จริง (= `<ROUTER_TS_IP>`) และขอให้ใส่ public key ของ Panupong ใน `~ubuntu/.ssh/authorized_keys` (หรือเปิด Tailscale SSH)
-      ตอนเช็ก router / `vlab-web` / master / worker offline ทั้งหมด (Pete น่าจะปิดเครื่องไว้) — ต้องเปิดก่อน C4–C6 และ E
+- [x] ~~**router ใน tailnet** คือเครื่องไหน~~ — ยืนยันแล้ว (2026-11-11): `ip-10-10-1-234` `100.84.123.59` เป็นเครื่องเดียวที่ประกาศ route `10.10.2.0/24` / `10.10.3.0/24` (ดูจาก `tailscale status --json` บน `masterlab2`) = `<ROUTER_TS_IP>` / Pete บอกว่า SSH ผ่าน Tailscale IP ได้ (ไม่ต้องใช้ SSM ใน E4)
+- [ ] **router offline** (Pete): ต้องเปิดก่อน C6 (กด Start lab AWS — SkyPilot SSH เข้า EC2 ผ่าน router) และ E
 - [ ] ลบ `FILM.md` ออกจาก repo (ติดมาใน `a0be92c`) หรือย้ายไป `.git/info/exclude`
 - [ ] ก่อนใช้สอนจริง: ย้าย `vlab-web` ไปเครื่องที่เปิดตลอด (ThinkPad ปิด = portal ล่ม)
 - [ ] `CICD_ARGOCD_SOLUTION.md` ข้อ 0 วางแผนย้าย web-portal เข้า K3s — สวนกับการตัดสินใจ 2026-11-10 และ runbook (backend อยู่ที่ `vlab-web`) ถ้าแผน CI/CD เดินหน้า ต้องแก้เรื่อง IP จริงหลัง kube-proxy และ ACL/URL ของ Traefik
