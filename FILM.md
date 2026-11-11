@@ -37,7 +37,7 @@
 |---|---|---|---|
 | ☑ | B1 | เพิ่มตัวแปรใน `web-service/defaults` + `backend.env.j2` + `all.yml.example` (+ assert ใน `tasks/main.yml`) | render ด้วย Ansible จริงได้ค่าถูก 5 เคส |
 | ☑ | B2 | สุ่ม `vault_lab_gateway_token` แล้วใส่ใน `group_vars/all.yml` | มีค่ายาว 64 ตัวอักษร |
-| ☐ | B3 | deploy ลง **VM ของตัวเอง** โดย **flag ปิด** | `curl` ได้ 404 และกด Start AWS ยังได้ `10.10.2.x` |
+| ☑ | B3 | deploy ลง **VM ของตัวเอง** (`webserverlab2` `100.124.148.97`) โดย **flag ปิด** | `curl` ได้ 404 ✅ / กด Start AWS ได้ `10.10.2.x` → เทสพร้อม C6 (รอ router) |
 
 ---
 
@@ -47,7 +47,7 @@
 
 | ✔ | ขั้น | ทำอะไร | ใคร |
 |---|---|---|---|
-| ☐ | C1 | ดู record `*.bell-lab.space` ใน Cloudflare แล้วจดค่าเดิม | คุณ |
+| ☑ | C1 | ดู record `*.bell-lab.space` ใน Cloudflare แล้วจดค่าเดิม (A `198.54.117.242` Proxied) | คุณ |
 | ☐ | C2 | ยืนยันกับ Pete ว่า backend อยู่ที่ `vlab-web` และตอบคำถามที่ค้างในข้อ 0.1 | คุณ + Pete |
 | ☐ | C3 | จดค่าทั้ง 5 ตัวในข้อ 0.2 (IP, instance ID, SG ID) | Pete |
 | ☐ | C4 | เก็บสถานะ router ผ่าน SSM (ข้อ 0.3) | Pete |
@@ -62,10 +62,10 @@
 
 | ✔ | ขั้น | ทำอะไร | ผ่านเมื่อ |
 |---|---|---|---|
-| ☐ | D1 | สร้าง tunnel `vlab-lab-gateway` แล้วเก็บ token ลง `all.yml` | tunnel ขึ้นใน dashboard |
-| ☐ | D2 | ตั้ง public hostname `*` → `127.0.0.1:8081` + แก้ DNS `*` ให้ชี้ tunnel | `curl l-test-8080...` เปลี่ยนจาก 521 เป็น **1033** |
-| ☐ | D3 | Cache Rule + Configuration Rule สำหรับ `l-*` | มี rule ขึ้นใน dashboard |
-| ☐ | D4 | เช็ก `skypilot.bell-lab.space` ยังใช้งานได้ | เปิดได้เหมือนเดิม |
+| ☑ | D1 | สร้าง tunnel `vlab-lab-gateway` แล้วเก็บ token ลง `all.yml` | tunnel ขึ้นใน dashboard |
+| ☑ | D2 | ตั้ง public hostname `*` → `127.0.0.1:8081` + แก้ DNS `*` ให้ชี้ tunnel | `curl l-test-8080...` เปลี่ยนจาก 521 เป็น **1033** |
+| ☑ | D3 | Cache Rule + Configuration Rule สำหรับ `l-*` | มี rule ขึ้นใน dashboard |
+| ☑ | D4 | เช็ก `skypilot.bell-lab.space` ยังใช้งานได้ | เปิดได้เหมือนเดิม |
 
 ---
 

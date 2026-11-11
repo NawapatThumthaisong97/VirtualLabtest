@@ -10,10 +10,10 @@
 
 | ส่วน | ขั้น | สถานะ |
 |---|---|---|
-| A: โค้ด backend | A1–A10 ✅ | **เสร็จ** (2026-11-11) — ถัดไป **B** (Ansible) หรือ C1 / D (Cloudflare) |
-| B: Ansible web-service | B1 ✅ B2 ✅ / B3 ⏳ | ถัดไป **B3** — รอ VM ของ Panupong + `masterlab2` online |
-| C: เตรียม infra (Phase 0) | C1–C6 | ยังไม่เริ่ม |
-| D: Cloudflare | D1–D4 | ยังไม่เริ่ม |
+| A: โค้ด backend | A1–A10 ✅ | **เสร็จ** (2026-11-11) |
+| B: Ansible web-service | B1 ✅ B2 ✅ B3 ✅ (deploy) | B3 เหลือเทส Start AWS → รอ router online (รวมกับ C6) |
+| C: เตรียม infra (Phase 0) | C1 ✅ / C2–C6 | C3–C6 รอ Pete + router online |
+| D: Cloudflare | D1 ✅ D2 ✅ D3 ✅ D4 ✅ | **เสร็จ** (2026-11-11) — tunnel `vlab-lab-gateway` รอ connector (E6) |
 | E: Router | E1–E6 | ยังไม่เริ่ม |
 | F: เปิดใช้งาน | F1–F4 | ยังไม่เริ่ม |
 | เฟส 2 (portal public) | 2A–2G | **พักไว้** ทำหลังเฟส 1 เสร็จ |
@@ -453,7 +453,7 @@ master จำเป็นเฉพาะตอน **กด Start** (SkyPilot API
 | # | เช็ก | ผล |
 |---|---|---|
 | 1 | k3s + SkyPilot API server | ✅ node `masterlab2` Ready (k3s v1.35.5) / pod `skypilot-api-api-server` 2/2 Running / NodePort `skypilot-api-tailnet` `30880` / `/api/health` = `healthy` SkyPilot **0.12.3.post1** |
-| 2 | `skypilot_backend_token` ใน `all.yml` | ✅ ใช้กับ API server นี้ได้ (token ปลอมได้ 401 ตัวจริงไม่โดนปฏิเสธ) |
+| 2 | `skypilot_backend_token` ใน `all.yml` | ❌ **แก้ผลเช็ก (B3)**: ตอนแรกสรุปว่าใช้ได้ แต่ผิด — token นี้ออกวันที่ 2026-10-20 (`iat` ใน token) ก่อน API server ของ `masterlab2` ถูกสร้าง (pod อายุ 41h) = เป็น token ของ server ตัวอื่น / ยิงจาก container backend ได้ **401** → ต้องสร้าง service account ใหม่บน `masterlab2` |
 | 3 | config ของ SkyPilot (configmap `skypilot-api-config`) | ✅ `aws.vpc_names: vlab-ecr-pull` / `use_internal_ips: true` / `use_ssm: false` / `security_group_name: vlab-lab-instances` (= SG ใน `terraform/security_groups.tf:69`) / `remote_identity: vlab-lab-ecr-pull` (= IAM role ใน `terraform/lab_iam.tf`) |
 | 3 | AWS credentials | ✅ secret `aws-credentials` มี key ครบ / access key **ตัวเดียวกับ** `skypilot_aws_access_key_id` ใน `all.yml` (sha256 ตรงกัน) / `sky status` บอก `Enabled Infra: kubernetes/in-cluster, aws` = AWS credentials ใช้ได้ |
 | 4 | Tailscale บน master | ✅ `RouteAll: true` (accept-routes) / route `10.10.2.0/24`, `10.10.3.0/24` อยู่ใน table 52 ผ่าน `tailscale0` |
@@ -462,7 +462,7 @@ master จำเป็นเฉพาะตอน **กด Start** (SkyPilot API
 
 **สรุปฝั่ง master: พร้อม** ตัวที่ยังขาดสำหรับ "กด Start lab AWS" คือ **router ต้อง online** (SkyPilot ต้อง SSH เข้า EC2 ผ่าน subnet route ของ router) + backend บน VM (B3)
 
-### B3 (เตรียม) — VM `webserverlab2` + inventory (2026-11-11)
+### 2026-11-11 — B3: deploy ลง VM `webserverlab2` ✅ (เหลือเทส Start AWS)
 
 VM ของ Panupong: `webserverlab2` Tailscale `100.124.148.97` / Ubuntu 24.04 / 3 vCPU / RAM 2.9 GB / swap 2.9 GB / disk ว่าง 27 GB / ใส่ SSH key แล้ว (`ssh-copy-id`) / sudo ต้องใส่รหัส → รัน playbook ด้วย `-K`
 
@@ -474,17 +474,109 @@ VM ของ Panupong: `webserverlab2` Tailscale `100.124.148.97` / Ubuntu 24.04
 
 เช็กแล้ว: `ansible-inventory --graph` เห็น `webservice-1` / `--limit webservice --list-hosts` ได้ 1 host / `ansible webservice -m ping` SSH ผ่าน (ติดแค่ sudo password = ต้อง `-K`)
 
-ข้อควรระวังตอนรัน: role `web-service` ต่อ **master** ด้วย (slurp kubeconfig + ใช้ SkyPilot `:30880`) → `masterlab2` ต้องเปิดอยู่ (ตอนเช็ก SSH ไม่ตอบ)
+**แก้เพิ่มระหว่างรัน B3:** task "Sync web-portal source to target" exclude แค่ `venv` → `web-portal/backend/.venv` ใน WSL (~300 package รวม SkyPilot) ถูก rsync ขึ้น VM (ช้ามาก) และ `.dockerignore` ของ backend ก็ไม่ได้กัน `.venv` → หลุดเข้า image ด้วย / เพิ่ม `--exclude=.venv` ใน `roles/web-service/tasks/main.yml` และ `.venv` ใน `web-portal/backend/.dockerignore` / rsync `--delete` ไม่ลบไฟล์ที่ถูก exclude → ต้อง `rm -rf /opt/web-service/backend/.venv` บน VM เองครั้งเดียว
+
+**ผลรัน B3 รอบแรก:** ผ่าน 36 task (Docker, sync, kubeconfig, .env, build, backend healthy, frontend, schema, seed, RBAC, query DB) / fail ที่ "Verify backend reaches the central SkyPilot API server" — network ถึง (`/api/health` จาก container ได้ `healthy`) แต่ `skypilot_backend_token` โดน **401** (ดูข้อ 2 ในตารางเช็ก master) → สร้าง service account `vlab-backend` บน dashboard ของ `masterlab2` แล้วใส่ token ใหม่ใน `all.yml` แล้วรันซ้ำ (ไม่ต้อง seed อีก)
+
+**แก้แล้ว (2026-11-11):** สร้าง service account `vlab-backend` (Admin) ในแท็บ **Service Accounts** ของ dashboard `masterlab2` (ไม่ใช่แท็บ Users — user ธรรมดาไม่มี token) / ใส่ใน `all.yml` แล้ว / ยิง `/api/health` พร้อม token ได้ `user = vlab-backend (sa-1620…)` / token หมดอายุ **2027-11-11** (1 ปี) — ครบแล้วต้องสร้างใหม่
+
+**ผลรัน B3 รอบสุดท้าย (2026-11-11):** `ok=38 changed=7 failed=0` / เช็กหลัง deploy:
+
+| เช็ก | ผล |
+|---|---|
+| `GET /api/internal/v1/gateway/routes` ไม่มี token / token มั่ว | **404** ทั้งคู่ (flag ปิด = ซ่อน endpoint) ✅ |
+| `/health` | `healthy` / `database: connected` ✅ |
+| frontend `http://100.124.148.97/` | 200 ✅ |
+| `backend/.env` บน VM | `LAB_GATEWAY_ENABLED=false` / `LAB_GATEWAY_DOMAIN=bell-lab.space` / token ยาว ≥32 ✅ |
+| migration | `alembic current` = `20261111_01 (head)` (มี `gateway_token`, `upstreams`) ✅ |
+| backend ↔ SkyPilot `masterlab2` | task "Verify backend reaches the central SkyPilot API server" ผ่าน ✅ |
+| กด Start lab AWS ได้ `10.10.2.x` | ⏳ ยังเทสไม่ได้ — router (`100.84.123.59`) offline รอ Pete (= C6) |
+
+**เจอระหว่างทาง — DNS ใน pod ของ `masterlab2` พัง:** `cloudflare-tunnel` CrashLoopBackOff + Cloudflare ขึ้น Down / สาเหตุ role `k3s-server` เขียน DNS ของเครื่อง **ณ ตอนรัน** (`192.168.1.1` เน็ตบ้าน) ลง `/etc/rancher/k3s/resolv.conf` ตายตัว พอ PC ย้ายเน็ต (VirtualBox NAT ได้ DNS ตาม PC → `172.20.10.1`) CoreDNS ยังส่งไป `192.168.1.1` → timeout / กระทบ SkyPilot ด้วย (ต้อง resolve `ec2.*.amazonaws.com`) / แก้ด่วน: `ansible-playbook ... --limit master --tags k3s-server -K` → pod resolve ได้ cloudflared Running / task สุดท้ายของ role (`Store registry push credentials for scan Jobs`) fail เพราะ `all.yml` ไม่มี `registry_users` — ใช้กับระบบสแกน image ที่ปิดอยู่ ไม่เกี่ยว Phase 1 / **ยังค้าง:** เปลี่ยนเน็ตอีกจะพังอีก — ทางถาวรคือให้ role override DNS เป็น `1.1.1.1` / `8.8.8.8` ได้
+
+**เจอระหว่างทาง — `masterlab2` ค้างทั้ง VM (2 รอบ):** อาการ "SkyPilot down" ไม่ใช่ pod พัง / kernel log `clocksource: Long readout interval ... 157319597175` (11:00:02) = VM ถูกหยุดไป ~157 วินาที → k3s `i/o timeout` ที่ `:6443` → `NodeNotReady` / ข้างใน VM ไม่มี OOM, swap ไม่ถูกใช้, CPU idle 93% → น่าจะมาจาก **PC** (RAM ไม่พอเมื่อเปิด 2 VM + WSL + Docker Desktop หรือเครื่อง sleep) / รอบสองระหว่าง restart k3s ping ไม่ได้เลย (Tailscale `tx 8580 rx 0`) ต้อง reset VM / หลังบูต SkyPilot ใช้ 1–2 นาทีกว่าจะ `2/2 Running` (probe `connection refused` ช่วงแรกเป็นปกติ) / ป้องกัน: Power → plugged in → sleep = Never, ดู RAM ใน Task Manager, ถ้าไหวให้ master 4 GB (SkyPilot request 2Gi limit 4Gi ใช้จริง ~1.6Gi แต่ VM มี ~2.7 GB)
+
+ข้อควรระวังตอนรัน: role `web-service` ต่อ **master** ด้วย (slurp kubeconfig + ใช้ SkyPilot `:30880`) → `masterlab2` ต้องเปิดอยู่
+
+### 2026-11-11 — C1 + D1–D4: Cloudflare (ประตูหน้าของลิงก์ lab) ✅
+
+**ส่วนนี้ทำอะไร:** เตรียมทางเข้าฝั่ง internet ให้ลิงก์ `https://l-<token>-<port>.bell-lab.space` — นักศึกษานอก tailnet พิมพ์ลิงก์นี้แล้วต้องวิ่งไปถึง router ใน AWS ได้ โดย **ไม่เปิดพอร์ตใดๆ ของ router สู่ internet** (router เป็นฝ่ายต่อออกไปหา Cloudflare เอง)
+
+```
+นักศึกษา (4G / บ้าน)
+   │ https://l-abc...-5173.bell-lab.space
+   ▼
+Cloudflare edge ── DNS `*` (Proxied) → Cache Rule / Configuration Rule ทำงานตรงนี้
+   │ tunnel `vlab-lab-gateway` (router ต่อออกมาเอง tcp 7844)
+   ▼
+[router EC2]  cloudflared ──► 127.0.0.1:8081 Traefik ──► lab EC2 10.10.2.x:5173
+   └──────────── ส่วน E (ยังไม่ได้ทำ รอ Pete) ────────────┘
+```
+
+ทั้งหมดทำบน dashboard Cloudflare (Panupong เจ้าของ zone) ไม่แตะเครื่องไหน และ **ยังไม่มีผลกับผู้ใช้** จนกว่า E6 จะลง cloudflared บน router + F2 เปิด flag
+
+#### C1 — จดค่า DNS `*` เดิมก่อนแก้
+
+- **ทำไม:** ขั้น D2 ต้องลบ / แก้ record นี้ ถ้ามีอะไรพังต้องถอยกลับได้
+- **ผล:** `*` = A `198.54.117.242` Proxied — เช็ก RDAP แล้ว IP อยู่ในช่วง `198.54.112.0/20` ของ **Namecheap, Inc.** = ค่าเริ่มต้นตอนจดโดเมน (หน้า parking) ไม่ได้ชี้เครื่องเรา (ตอน 2026-11-09 `l-test-8080` ได้ 521 เพราะ server Namecheap ไม่รู้จัก hostname นี้)
+- hostname ที่ใช้งานจริงมี record ของตัวเองทุกตัว (`skypilot`, `pete-skypilot`, `focus-skypilot`, `skypilot-masterlabtop`, `skypilot-bigboss`, `skypilot-film`, `www`) → record ที่ระบุชื่อตรงชนะ `*` เสมอ แก้ `*` จึงไม่กระทบใคร
+- **ถอยกลับ:** ลบ `*` ตัวใหม่ → สร้าง A `*` → `198.54.117.242` Proxied
+
+#### D1 — สร้าง tunnel `vlab-lab-gateway`
+
+- **tunnel คืออะไร:** ท่อที่ **cloudflared ฝั่งเรา dial ออกไปหา Cloudflare** แล้ว Cloudflare ส่ง request ของผู้ใช้กลับมาตามท่อนั้น → router ไม่ต้องมี inbound port / ไม่ต้องรู้ public IP / เปลี่ยน IP ก็ไม่พัง
+- **ทำไมสร้างใหม่ ไม่ใช้ tunnel เดิม:** tunnel `skypilot-*` เป็นของ SkyPilot dashboard แต่ละคน แยกกันทำให้ลบ / ปิด / หมุน token ของ lab gateway ได้โดยไม่กระทบ SkyPilot
+- **token** (`vault_lab_gateway_tunnel_token` ใน `all.yml`) = กุญแจที่ cloudflared ใช้พิสูจน์ว่าเป็น connector ของ tunnel นี้ ใครได้ token ไปก็รับ traffic ของ tunnel ได้ → เก็บใน `all.yml` (gitignore) / role `lab-gateway` (E5) จะเขียนลงไฟล์ env สิทธิ์ 0600 บน router
+- **ไม่รันคำสั่ง `docker run ...` ที่ dashboard ให้มา** เพราะ cloudflared ต้องอยู่บน router (ไม่ใช่ PC) และให้ Ansible ลงแบบ systemd + ปักเวอร์ชัน
+- tunnel id `de38c1ed-9bf2-4705-b31a-0f4419b8565f`
+
+#### D2 — Published application `*.bell-lab.space` → `HTTP 127.0.0.1:8081`
+
+- **ทำหน้าที่:** บอก Cloudflare ว่า request ที่ host ตรง `*.bell-lab.space` ให้ส่งเข้า tunnel นี้ แล้ว cloudflared ปลายทางส่งต่อไปที่ `127.0.0.1:8081`
+- **ทำไม `*` (wildcard):** ลิงก์ lab สุ่มชื่อใหม่ทุก session (`l-<token>-<port>`) สร้าง record ทีละตัวไม่ทัน → ใช้ `*` ตัวเดียวรับทุกชื่อ แล้วให้ Traefik แยกเองว่าชื่อไหนไป EC2 ตัวไหน (จากตาราง `build_routes()` ของ backend)
+- **ทำไม `127.0.0.1:8081`:** cloudflared กับ Traefik อยู่บน router เครื่องเดียวกัน คุยผ่าน localhost / Traefik จะผูกพอร์ต `8081` ไว้ที่ `127.0.0.1` เท่านั้น (E5) → คนนอกยิงตรงเข้า Traefik ไม่ได้ ต้องผ่าน Cloudflare อย่างเดียว
+- **ทำไม `HTTP` ไม่ใช่ HTTPS:** ช่วง cloudflared → Traefik อยู่ในเครื่องเดียว / HTTPS ฝั่งนักศึกษา Cloudflare ถือ cert `*.bell-lab.space` ให้ (Universal SSL ครอบแล้ว)
+- **ต้องลบ A `*` ก่อน:** record A เปลี่ยน type เป็น tunnel ไม่ได้ และชื่อเดียวกันมีได้แบบเดียว
+- **ผ่านเมื่อ:** `curl https://l-test-8080.bell-lab.space/` เปลี่ยนจาก **521** (ไปหา server Namecheap) เป็น **`error code: 1033`** (ถึง tunnel ใหม่แล้ว แต่ยังไม่มี cloudflared ต่ออยู่ — ปกติจนถึง E6) ✅
+
+#### D3 — Rule 2 ตัวสำหรับ `l-*`
+
+wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้วย ซึ่งเหมาะกับเว็บทั่วไป แต่ **ทำ lab พัง** เพราะ lab เป็น dev server (Vite / code-server) ที่ไฟล์เปลี่ยนตลอดและใช้ JavaScript / WebSocket หนัก → ทำ rule ยกเว้นเฉพาะลิงก์ lab
+
+เงื่อนไขของทั้งสอง rule: `http.request.full_uri wildcard "https://l-*.bell-lab.space/*"` = จับเฉพาะ host ที่ขึ้นต้น `l-` (ลิงก์ lab) / `skypilot.*` และตัวอื่นไม่โดน (รันบุ๊คเขียนเป็น `starts_with(http.host, "l-") and ends_with(...)` ผลเท่ากัน แต่แบบ wildcard กรอกผ่านช่อง builder ได้เลย)
+
+| Rule | ตั้งอะไร | ถ้าไม่ตั้งจะเกิดอะไร |
+|---|---|---|
+| **Cache Rule** `lab gateway no cache` | **Bypass cache** | Cloudflare เก็บไฟล์ `.js` / `.css` ไว้ที่ edge → นักศึกษาแก้โค้ดแล้ว Vite ส่งไฟล์ใหม่ แต่ได้ไฟล์เก่าจาก cache / HMR ไม่อัปเดต / ร้ายสุด: lab ของคนหนึ่งถูก cache แล้วส่งให้อีกคนที่ได้ URL เดียวกัน |
+| **Configuration Rule** `lab gateway no rewrite` | ปิด **Rocket Loader** | Rocket Loader เขียน `<script>` ใหม่ให้โหลดแบบ async → ลำดับ script ของ Vite / code-server เพี้ยน หน้าขาวหรือ error |
+| | ปิด **Email Obfuscation** | Cloudflare แทนข้อความที่หน้าตาเหมือนอีเมลใน HTML ด้วย script ของตัวเอง → เนื้อหา lab / โค้ดตัวอย่างเพี้ยน |
+| | ปิด **Automatic HTTPS Rewrites** | เปลี่ยนลิงก์ `http://` ใน HTML เป็น `https://` → ลิงก์ภายใน lab ที่ตั้งใจเป็น http (หรือไปหา host อื่น) เสีย |
+
+- dashboard เตือน **"This rule may not apply to your traffic"** เพราะเช็กแค่ว่ามี record ชื่อ `l-.bell-lab.space` ตรงตัวไหม (ไม่มี) → เลือก **Ignore and deploy** ถูกแล้ว เพราะ traffic `l-*` วิ่งผ่าน `*` ที่ Proxied อยู่ / **ไม่** เลือก "Create a new proxied DNS record" (จะได้ record เกินที่ไม่ใช้)
+- ยังไม่ได้ดู: **Bot Fight Mode** (ถ้าเปิด อาจ challenge request ของ Vite / WebSocket — Free plan ยกเว้นราย hostname ไม่ได้ ต้องเทส G2 / G4 ตอน F4) และ **WebSockets = On** (ค่าเริ่มต้น)
+
+#### D4 — เช็กว่าของเดิมไม่พัง
+
+- `skypilot.bell-lab.space` ตอบ HTTP 530 (= error 1033) **เหมือนก่อนแก้** — tunnel `skypilot-new-master` ไม่มี connector อยู่แล้วเดิม ไม่เกี่ยวกับการแก้ `*` ✅
 
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
 
-- [ ] **C1** (Panupong): ดู record `*.bell-lab.space` ใน Cloudflare แล้วจดค่าเดิม
+- [x] **C1** (2026-11-11): record `*.bell-lab.space` เดิม = **A `198.54.117.242` Proxied** TTL Auto (IP เดียวกับ root `bell-lab.space` = หน้า parking ของ Namecheap ไม่มีอะไรใช้จริง) / ไม่มี AAAA ของ `*` / hostname ที่ใช้งานมี record ของตัวเองหมด: `skypilot` (Tunnel `skypilot-new-master`), `pete-skypilot`, `focus-skypilot`, `skypilot-masterlabtop` (Tunnel), `skypilot-bigboss`, `skypilot-film` (CNAME `*.cfargotunnel.com`), `www` (CNAME parking) → แก้ `*` ไม่กระทบตัวไหน / **ถอยกลับ:** ลบ `*` ที่ชี้ tunnel แล้วสร้าง A `*` → `198.54.117.242` Proxied
 - [ ] **C2** (Pete): ยืนยัน backend ยังอยู่ที่ `vlab-web` `100.102.72.39` บน ThinkPad + ตอบคำถามที่ค้างในข้อ 0.1 ของ runbook
 - [ ] **C6**: ตอนเทส baseline ดูว่า endpoint ของ lab AWS เป็น `http://10.10.2.x:…` (ยืนยันสมมติฐานของ `upstream_ok` ดูหมายเหตุใต้ A8)
 - [x] ~~**router ใน tailnet** คือเครื่องไหน~~ — ยืนยันแล้ว (2026-11-11): `ip-10-10-1-234` `100.84.123.59` เป็นเครื่องเดียวที่ประกาศ route `10.10.2.0/24` / `10.10.3.0/24` (ดูจาก `tailscale status --json` บน `masterlab2`) = `<ROUTER_TS_IP>` / Pete บอกว่า SSH ผ่าน Tailscale IP ได้ (ไม่ต้องใช้ SSM ใน E4)
 - [ ] **router offline** (Pete): ต้องเปิดก่อน C6 (กด Start lab AWS — SkyPilot SSH เข้า EC2 ผ่าน router) และ E
+- [ ] **DNS ของ k3s บน `masterlab2`** ฝังค่า DNS ของเน็ตตอนรัน → เปลี่ยนเน็ต PC แล้ว pod resolve ไม่ได้ (SkyPilot launch AWS fail + cloudflared ล่ม) / ทางด่วน: รัน `--limit master --tags k3s-server -K` ใหม่ / ทางถาวร: เพิ่มตัวแปร override เป็น `1.1.1.1` / `8.8.8.8` ใน role `k3s-server` / `k3s-agent`
+- [ ] `inventory.yml`: เอา comment `worker-1` / `worker-2` ออกเมื่อ worker กลับมา online (ไม่งั้น task whoami ไม่ได้เช็ก)
+- [ ] `all.yml` ไม่มี `registry_users` → task "Store registry push credentials for scan Jobs" ของ `k3s-server` fail (ระบบสแกน image — ไม่เกี่ยว Phase 1) ใส่เมื่อจะใช้ scan
+- [ ] SkyPilot service account `vlab-backend` บน `masterlab2`: token หมดอายุ **2027-11-11** / token ถูกส่งในแชตแล้ว → ถ้าใช้ master นี้ต่อจริงให้สร้างใหม่แล้วลบตัวเก่า / ลบ **user** `vlab-backend` (แท็บ Users รหัส `1234`) ที่สร้างผิดแท็บ
+- [x] **D1** (2026-11-11): สร้าง tunnel `vlab-lab-gateway` id `de38c1ed-9bf2-4705-b31a-0f4419b8565f` (CNAME target = `de38c1ed-9bf2-4705-b31a-0f4419b8565f.cfargotunnel.com`) / token ใส่ใน `all.yml` เป็น `vault_lab_gateway_tunnel_token` แล้ว (gitignore) — token ถูกส่งในแชต ถ้าจะใช้จริงระยะยาวให้ refresh token ใน dashboard
+- [x] **D2** (2026-11-11): ลบ A `*` เดิม แล้วเพิ่ม Published application ใน tunnel: `*.bell-lab.space` → `HTTP 127.0.0.1:8081` (= Traefik บน router ที่ E5 จะผูกไว้ localhost อย่างเดียว) / `curl https://l-test-8080.bell-lab.space/` ได้ **`error code: 1033`** (เดิม 521) = ถึง tunnel ใหม่แล้ว ยังไม่มี connector ✅
+- [x] **D3** (2026-11-11): Cache Rule `lab gateway no cache` = **Bypass cache** / Configuration Rule `lab gateway no rewrite` = ปิด Rocket Loader, Email Obfuscation, Automatic HTTPS Rewrites / เงื่อนไขทั้งคู่ `http.request.full_uri wildcard "https://l-*.bell-lab.space/*"` (ใช้แทน `starts_with(http.host, "l-") and ends_with(...)` ในรันบุ๊ค ผลเท่ากัน กรอกผ่าน builder ได้) / dashboard เตือน "may not apply" เพราะไม่มี record ชื่อ `l-` ตรงตัว → Ignore and deploy (ทราฟฟิกวิ่งผ่าน `*` ที่ Proxied อยู่แล้ว) / ยังไม่ได้เช็ก Bot Fight Mode + WebSockets
+- [x] **D4** (2026-11-11): `skypilot.bell-lab.space` ตอบ HTTP 530 (= error 1033 เหมือนก่อนแก้ — tunnel `skypilot-new-master` ไม่มี connector อยู่แล้วเดิม) ไม่ได้รับผลจากการแก้ `*` ✅
+- [ ] **C2** ไม่จำเป็นแล้วสำหรับการเทส (backend อยู่บน VM ของ Panupong) — ยังต้องถาม Pete เรื่องพอร์ต 3000–9999 และ public IP ของ router
 - [ ] ลบ `FILM.md` ออกจาก repo (ติดมาใน `a0be92c`) หรือย้ายไป `.git/info/exclude`
 - [ ] ก่อนใช้สอนจริง: ย้าย `vlab-web` ไปเครื่องที่เปิดตลอด (ThinkPad ปิด = portal ล่ม)
 - [ ] `CICD_ARGOCD_SOLUTION.md` ข้อ 0 วางแผนย้าย web-portal เข้า K3s — สวนกับการตัดสินใจ 2026-11-10 และ runbook (backend อยู่ที่ `vlab-web`) ถ้าแผน CI/CD เดินหน้า ต้องแก้เรื่อง IP จริงหลัง kube-proxy และ ACL/URL ของ Traefik
