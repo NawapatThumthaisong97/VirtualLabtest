@@ -11,7 +11,7 @@
 | ส่วน | ขั้น | สถานะ |
 |---|---|---|
 | A: โค้ด backend | A1–A10 ✅ | **เสร็จ** (2026-11-11) — ถัดไป **B** (Ansible) หรือ C1 / D (Cloudflare) |
-| B: Ansible web-service | B1–B3 | ยังไม่เริ่ม |
+| B: Ansible web-service | B1 ✅ B2 ✅ / B3 ⏳ | ถัดไป **B3** — รอ VM ของ Panupong + `masterlab2` online |
 | C: เตรียม infra (Phase 0) | C1–C6 | ยังไม่เริ่ม |
 | D: Cloudflare | D1–D4 | ยังไม่เริ่ม |
 | E: Router | E1–E6 | ยังไม่เริ่ม |
@@ -61,6 +61,7 @@
 | 2026-11-10 | portal อยู่ใน K8s หรือนอก cluster | **อยู่นอก cluster แบบเดิม** (docker compose บน VM) แต่ควรย้ายไปเครื่องที่เปิดตลอดก่อนใช้สอนจริง | (1) ใน K8s IP จริงของคนกดหายหลัง Service/kube-proxy → ระบบแยกห้องแลป/ข้างนอกพัง (ปัญหาเดียวกับ D4) (2) worker = เครื่องในห้องแลป นักศึกษาปิดได้ (3) cluster พัง ตัวควบคุมก็พังด้วย (4) compose ง่ายกว่าสำหรับทีมเล็ก |
 | 2026-11-11 | branch | ทำทุกอย่างบน `feature/aws-dns` ไม่แยก PR 1–4 ตาม runbook ข้อ 7 | ชื่อ branch ตรงกับงาน docs กับโค้ดอยู่ PR เดียวกัน ยังปลอดภัยเพราะทุกอย่างอยู่หลัง flag |
 | 2026-11-11 | 2 docs ออกแบบเดิม | **เก็บไว้** ไม่ลบ ใช้ runbook เป็นตัวหลัก | runbook ยังอ้างถึง: ตารางเทส G1–G12 (`AWS_LAB_GATEWAY_ROUTER.md` 7.2), ตารางเทสเฟส 2 (`AWS_LAB_PUBLIC_ACCESS.md` 8), เหตุผลของการตัดสินใจ |
+| 2026-11-11 | deploy backend ที่ไหน (B3) | Panupong **สร้าง VM ของตัวเอง** แล้วลง role `web-service` ลงเครื่องนั้น แทน `vlab-web` ของ Pete | `vlab-web` offline (Pete ปิดเครื่อง) และไม่มี `inventory.home.yml` ในเครื่อง Panupong / ไม่กระทบ portal ตัวจริงของทีม ผลที่ตามมา: `<BACKEND_TS_IP>` ใน ACL (E3) และ URL ของ Traefik (E5) = Tailscale IP ของ VM ใหม่ (ดึงจาก group `webservice` ใน inventory อัตโนมัติ) / DB ของ VM ใหม่ว่าง ต้อง seed user / course / lab / image เอง |
 
 ---
 
@@ -359,7 +360,9 @@ prelaunch (`prelaunch_service`) เรียก `_new_sky_session` ตัวเ�
 
 **ไม่ต้องแก้:** `_claim_prelaunched` (คืน `session.endpoints` ที่ตั้งไว้แล้ว), `_sky_result` (คืน `endpoints` ซึ่งตอนนี้เป็นลิงก์ public แล้ว), `session_reconciler.py`, **frontend** (แสดงปุ่มจาก `endpoints` อยู่แล้ว)
 
-> ต้องยืนยันตอน F3: runbook ถือว่า `sky.endpoints` ของ lab AWS คืน **private IP** `10.10.2.x` (lab อยู่ใน private subnet) ถ้าคืน IP อื่น `upstream_ok` จะตัดทิ้ง ลิงก์จะได้ 404 และมี warning `not allowed` ใน log ของ backend
+> ต้องยืนยันตอน **C6** (เร็วสุด) หรือ F3: runbook ถือว่า `sky.endpoints` ของ lab AWS คืน **private IP** `10.10.2.x` ถ้าคืน IP อื่น `upstream_ok` จะตัดทิ้ง ลิงก์ทุกลิงก์ได้ 404 และมี warning `not allowed` ใน log ของ backend
+> หลักฐานว่าน่าจะถูก (2026-11-11): `ansible/roles/skypilot-node/tasks/main.yml:188` ตั้ง `use_internal_ips: true` / `docs/archive/EXPERIMENT_ECR_PULL_RESULT.md` lab อยู่ใน private subnet `10.10.2.0/24` ไม่มี public IPv4 / runbook 0.5 เปิด lab ทุกวันนี้ด้วย `http://10.10.2.x` — DB local ไม่มี session AWS เก่าให้ดู
+> ถ้าผิด: เพิ่ม CIDR ใน `LAB_GATEWAY_UPSTREAM_CIDRS_STR` หรือให้ backend หา private IP เอง
 
 ### 2026-11-11 — A9: ซ่อนใน หน้า admin ✅
 
@@ -394,12 +397,57 @@ form_excluded_columns = ["gateway_token", "upstreams"]
 
 **ยังไม่ได้ทำ:** `curl` endpoint จริงบน server ที่รันอยู่ (เกณฑ์ของ A6 ในแผน) — ครอบด้วย TestClient แล้ว จะเห็นของจริงตอน B3 (deploy flag ปิด ต้องได้ 404) และ F2 (flag เปิด ต้องได้ตารางว่าง)
 
+### 2026-11-11 — B1: ตัวแปร Ansible ของ role `web-service` ✅
+
+**ทำไมต้องมี:** โค้ด A อ่าน `LAB_GATEWAY_*` จาก `.env` แต่ `.env` บน server ไม่มีใครเขียนเอง role `web-service` render จาก `templates/backend.env.j2` ทุกครั้งที่ deploy — ถ้าไม่ต่อสายตรงนี้ backend จะใช้ค่าเริ่มต้นในโค้ด (ปิด) ตลอด และเปิด flag ผ่าน Ansible ไม่ได้
+
+```
+group_vars/all.yml (vault_lab_gateway_token) ─┐
+roles/web-service/defaults/main.yml          ├─> Ansible ─> .env บน VM ─> Settings (A2)
+roles/web-service/templates/backend.env.j2   ┘
+```
+
+| ไฟล์ | เพิ่ม |
+|---|---|
+| `roles/web-service/defaults/main.yml` | `webservice_lab_gateway_enabled: false` / `webservice_lab_gateway_domain: bell-lab.space` / `webservice_lab_gateway_token: "{{ vault_lab_gateway_token \| default('') }}"` (วางก่อนหัวข้อ SIEM) |
+| `roles/web-service/templates/backend.env.j2` | `LAB_GATEWAY_ENABLED={{ … \| bool \| string \| lower }}` / `LAB_GATEWAY_DOMAIN` / `LAB_GATEWAY_TOKEN` (ต่อท้ายไฟล์) |
+| `roles/web-service/tasks/main.yml` | **เพิ่มเอง (ไม่มีใน runbook)** task `Validate lab gateway settings` ต่อจาก assert ของ SkyPilot token |
+| `group_vars/all.yml.example` | ตัวอย่าง `vault_lab_gateway_token` + วิธีสุ่ม (ไฟล์ใน git ให้คนอื่นรู้ว่าต้องตั้ง) |
+
+**ทำไม `| bool | string | lower`:** ค่าที่ส่งด้วย `-e webservice_lab_gateway_enabled=true` เป็น **string** `"true"` ไม่ใช่ bool — `| bool` แปลง `"true"`, `"yes"`, `"1"`, `True` ให้เป็นค่าเดียวกันก่อน แล้ว `| string | lower` ได้ `true` / `false` ที่ pydantic อ่านได้ (role ใช้ `| string | lower` อย่างเดียวกับตัวแปรอื่น — กับ `-e ...=yes` จะได้ `yes` ซึ่ง pydantic ก็รับ แต่ใส่ `| bool` ให้แน่นอนกว่า)
+
+**ทำไมเพิ่ม assert ใน role:** ถ้าเปิด flag แต่ token ว่าง / สั้น validator ของ A2 ทำให้ backend **ไม่ start** แต่ deploy จะไปพังที่ task "Wait for backend to become healthy" หลัง build เสร็จ (หลายนาที) โดย error ไม่บอกสาเหตุ assert นี้หยุดตั้งแต่ task แรก พร้อมบอกวิธีแก้ — แนวเดียวกับ assert ของ `skypilot_backend_token` ที่มีอยู่แล้ว
+เช็กเพิ่มว่า token มีแค่ `A-Z a-z 0-9 _ -` เพราะ `#` / ช่องว่าง / quote ใน `.env` ทำให้อ่านค่าผิด (`#` ถูกมองเป็น comment) — `secrets.token_urlsafe` ให้แค่ตัวอักษรชุดนี้อยู่แล้ว
+
+**line ending:** ไฟล์ใน working copy เป็น CRLF (`core.autocrlf=true`, ใน git เป็น LF) เขียนด้วย Python ให้คง CRLF ตามไฟล์เดิม — `git ls-files --eol` ยัง `i/lf w/crlf` ทุกไฟล์
+
+### 2026-11-11 — B2: รหัสลับ `vault_lab_gateway_token` ✅
+
+สุ่มด้วย `secrets.token_urlsafe(48)` (64 ตัว) ใส่ท้าย `ansible/group_vars/all.yml` — ไฟล์นี้ **gitignore** (`.gitignore:195`) ไม่เข้า repo / ค่าไม่ได้แสดงในหน้าจอหรือ log
+**ค่าเดียวใช้ 2 ที่:** `LAB_GATEWAY_TOKEN` ของ backend (role `web-service`) และ `X-Gateway-Token` ใน `traefik.yml` (role `lab-gateway` E5) — เก็บที่เดียว จึงตรงกันเสมอ
+ถ้าหลุด: สุ่มใหม่ แล้วรันทั้ง 2 role ใหม่ (ช่วงที่ยังไม่ตรงกัน Traefik จะได้ 404 → ใช้ตารางเดิมต่อ ลิงก์ใหม่ยังไม่ขึ้น)
+
+#### ตรวจด้วย Ansible จริง (2.16 ใน WSL) — ไม่แตะเครื่องไหน
+
+playbook ชั่วคราวบน localhost: inventory ปลอม (group `webservice` / `master` / `registry`) + `group_vars/all.yml` จริง + `defaults/main.yml` ของ role → รัน task validate ของ role (ส่วนบนของ `tasks/main.yml`) → render `backend.env.j2` **ทั้งไฟล์**
+
+| เคส | ผล |
+|---|---|
+| ค่าเริ่มต้น | ✅ `LAB_GATEWAY_ENABLED=false` / `DOMAIN=bell-lab.space` / token 64 ตัว |
+| เปิดด้วย bool (`-e '{"…": true}'`) | ✅ `true` |
+| เปิดด้วย string (`-e webservice_lab_gateway_enabled=true`) | ✅ `true` |
+| เปิด + token ว่าง | ✅ หยุดที่ assert พร้อมข้อความบอกวิธีแก้ |
+| เปิด + token มี `#` | ✅ หยุดที่ assert |
+
+แล้วเอา `.env` ที่ render ได้ป้อน `Settings(_env_file=…)` ของ backend: ทั้ง 3 เคสที่ผ่านโหลดได้ ค่าตรง validator A2 ผ่าน — ลบไฟล์ที่ render (มีค่าลับจริง) ทิ้งแล้ว
+
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
 
 - [ ] **C1** (Panupong): ดู record `*.bell-lab.space` ใน Cloudflare แล้วจดค่าเดิม
 - [ ] **C2** (Pete): ยืนยัน backend ยังอยู่ที่ `vlab-web` `100.102.72.39` บน ThinkPad + ตอบคำถามที่ค้างในข้อ 0.1 ของ runbook
+- [ ] **C6**: ตอนเทส baseline ดูว่า endpoint ของ lab AWS เป็น `http://10.10.2.x:…` (ยืนยันสมมติฐานของ `upstream_ok` ดูหมายเหตุใต้ A8)
 - [ ] **router ใน tailnet** (Pete): Pete บอกว่า setup router ได้ด้วย SSH ผ่าน Tailscale IP (ไม่ต้องใช้ SSM ใน E4)
       `tailscale status` (2026-11-11) ไม่มีเครื่องชื่อ `vlab-ts-router` ตัวที่น่าจะใช่คือ `ip-10-10-1-234` `100.84.123.59` (account Pete, ยังไม่ติด tag)
       → ยืนยันกับ Pete ว่าเป็น router จริง (= `<ROUTER_TS_IP>`) และขอให้ใส่ public key ของ Panupong ใน `~ubuntu/.ssh/authorized_keys` (หรือเปิด Tailscale SSH)
@@ -429,7 +477,7 @@ form_excluded_columns = ["gateway_token", "upstreams"]
 | A9 ✅ | `main.py`: ซ่อน 2 column ในหน้า admin | หน้า admin ไม่เห็น |
 | A10 ✅ | test ทั้งหมด | เก่าไม่พัง + ใหม่ผ่าน |
 
-**B: Ansible web-service** — B1 ตัวแปร + `backend.env.j2` / B2 สุ่ม `vault_lab_gateway_token` / B3 deploy ลง `vlab-web` flag ปิด (แจ้งทีมก่อน)
+**B: Ansible web-service** — B1 ✅ ตัวแปร + `backend.env.j2` + assert / B2 ✅ สุ่ม `vault_lab_gateway_token` / B3 deploy ลง **VM ของ Panupong** flag ปิด (ตัดสินใจ 2026-11-11)
 
 **C: Phase 0** — C1 จดค่า DNS `*` / C2 คุยกับ Pete / C3 จดค่า 5 ตัว / C4 เก็บสถานะ router / C5 AMI snapshot / C6 เทส baseline
 

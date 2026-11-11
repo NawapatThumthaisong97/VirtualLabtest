@@ -35,9 +35,9 @@
 
 | ✔ | ขั้น | ทำอะไร | ผ่านเมื่อ |
 |---|---|---|---|
-| ☐ | B1 | เพิ่มตัวแปรใน `web-service/defaults` + `backend.env.j2` + `all.yml.example` | `--check --diff` เห็นแค่ `.env` เปลี่ยน |
-| ☐ | B2 | สุ่ม `vault_lab_gateway_token` แล้วใส่ใน `group_vars/all.yml` | มีค่ายาว ≥ 32 ตัวอักษร |
-| ☐ | B3 | merge PR 1 + 2 แล้ว deploy ลง `vlab-web` โดย **flag ปิด** (แจ้งทีมก่อน) | `curl` ได้ 404 และกด Start AWS ยังได้ `10.10.2.x` |
+| ☑ | B1 | เพิ่มตัวแปรใน `web-service/defaults` + `backend.env.j2` + `all.yml.example` (+ assert ใน `tasks/main.yml`) | render ด้วย Ansible จริงได้ค่าถูก 5 เคส |
+| ☑ | B2 | สุ่ม `vault_lab_gateway_token` แล้วใส่ใน `group_vars/all.yml` | มีค่ายาว 64 ตัวอักษร |
+| ☐ | B3 | deploy ลง **VM ของตัวเอง** โดย **flag ปิด** | `curl` ได้ 404 และกด Start AWS ยังได้ `10.10.2.x` |
 
 ---
 
