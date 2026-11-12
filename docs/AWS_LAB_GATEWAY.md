@@ -3,8 +3,7 @@
 > เอกสารฉบับสมบูรณ์ของงาน lab gateway อธิบายว่า **ทำอะไร ทำไม และทำงานยังไง** ทุกชั้น ตั้งแต่ backend, AWS, Terraform, Tailscale, Cloudflare จนถึง Ansible
 > พร้อมขั้นตอนติดตั้งตามที่ทำจริง ผลเทส ปัญหาที่เจอ และงานที่ยังค้าง
 >
-> แทนที่ `AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md` (แผนก่อนลงมือ), `AWS_LAB_PUBLIC_ACCESS_PROGRESS.md` (บันทึกระหว่างทำ) และ `AWS_LAB_GATEWAY_ROUTER.md` (ออกแบบเฟส 1 บน router) ซึ่งยังดูได้ใน git history
-> ภาพรวมเฟส 1–3 และการเทียบทางเลือก A / B อยู่ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md)
+> รวมเอกสารเดิม 4 ตัวไว้ที่นี่ที่เดียว (ยังดูได้ใน git history): `AWS_LAB_PUBLIC_ACCESS.md` (ภาพรวมเฟส 1–3 ก่อนลงมือ), `AWS_LAB_GATEWAY_ROUTER.md` (ออกแบบเฟส 1 บน router), `AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md` (แผนลงมือ), `AWS_LAB_PUBLIC_ACCESS_PROGRESS.md` (บันทึกระหว่างทำ)
 >
 > branch `feature/aws-dns` / ทำ 2026-11-10 → 2026-11-12
 
@@ -26,7 +25,8 @@
 14. [คู่มือใช้งานและแก้ปัญหา](#14-คู่มือใช้งานและแก้ปัญหา)
 15. [คำศัพท์](#15-คำศัพท์)
 16. [แผนเฟส 2: public portal (ยังไม่ทำ)](#16-แผนเฟส-2-public-portal-ยังไม่ทำ)
-17. [อ้างอิงภายนอก](#17-อ้างอิงภายนอก)
+17. [เฟส 3 และความเสี่ยงที่รู้อยู่](#17-เฟส-3-และความเสี่ยงที่รู้อยู่)
+18. [อ้างอิงภายนอก](#18-อ้างอิงภายนอก)
 
 > กล่อง **💡 รู้ไว้** ที่แทรกตามหัวข้อ = ความรู้ที่ได้จากปัญหาที่เจอจริงระหว่างทำ (รายละเอียดเต็มอยู่ในข้อ 12)
 
@@ -122,9 +122,24 @@ flowchart LR
 |---|---|
 | ให้ lab มี public IP / ALB | ต้องเปิดพอร์ตขาเข้า, ต้องจัดการ cert เอง, IPv4 public คิดเงิน |
 | cloudflared ในทุก lab EC2 | ต้องสร้าง DNS record ต่อ lab (มีเพดาน), token ของ tunnel ไปอยู่ในเครื่องนักศึกษา, รื้อของเดิมเยอะ |
-| EC2 gateway ตัวใหม่ | เพิ่มเครื่องและค่าใช้จ่าย ทั้งที่ router ทำได้ |
-| ลง gateway ที่ backend / master | ยังต้องผ่าน router อยู่ดี (Tailscale เข้า `10.10.x` ได้ทาง subnet route ของ router เท่านั้น) และ traffic อ้อมผ่านบ้าน |
+| EC2 gateway ตัวใหม่ (`t4g.small` + docker compose + `tag:vlab-gateway`) | แยก blast radius ได้ดีที่สุด แต่เพิ่มค่าเครื่อง + public IPv4 (~$15–20/เดือน) ทั้งที่ router ทำได้ถ้าจำกัดสิทธิ์ (ติด tag, ไม่ลง Docker, จำกัดทรัพยากรด้วย systemd) / ถ้าเทสโหลด (G10) ไม่ผ่าน ค่อยย้ายไปทางนี้ ฝั่ง backend ไม่ต้องแก้ |
+| ลง gateway ที่ backend / master | ยังต้องผ่าน router อยู่ดี (Tailscale เข้า `10.10.x` ได้ทาง subnet route ของ router เท่านั้น) และ traffic อ้อมผ่านเน็ตของ on-prem (อาจตกไป DERP relay) |
 | **router ตัวเดิม + Traefik + cloudflared** ✅ | ไม่เพิ่มเครื่อง ไม่เปิดพอร์ตขาเข้า ใช้ wildcard DNS ตัวเดียว |
+
+**ความกังวลด้านความปลอดภัยตอนเลือก router:** router เป็นเครื่องที่รับ traffic จากอินเทอร์เน็ต (ผ่าน tunnel) ถ้าถูกเจาะ ต้องเข้า tailnet ได้น้อยที่สุด → ติด `tag:vlab-router` ให้ไปได้แค่ backend `:8000` (ข้อ 7) และ proxy ต้องกินเครื่องไม่หมด ไม่งั้น SkyPilot SSH เข้า EC2 ไม่ได้ทั้งระบบ → `MemoryMax` / `CPUQuota` (ข้อ 9.2)
+
+### 2.5 ทำไมลิงก์หน้าตาแบบนี้
+
+| แบบ | ตัวอย่าง | ผล |
+|---|---|---|
+| path | `lab.bell-lab.space/<course>/<lab>/<token>/3000/` | ❌ app ที่อ้าง asset แบบ absolute (`/assets/x.js`, `/@vite/client`) พังหมด ต้องตั้ง base path ทุก lab และทุก lab อยู่ origin เดียวกัน = localStorage / cookie ปนกันข้ามนักศึกษา |
+| **subdomain ชั้นเดียว** ✅ | `l-<token>-3000.bell-lab.space` | app อยู่ที่ `/` เหมือนรันในเครื่อง แต่ละ session แต่ละพอร์ตเป็นคนละ origin / Universal SSL ฟรีครอบ `*.bell-lab.space` |
+| subdomain 2 ชั้น | `<token>-3000.lab.bell-lab.space` | ⚠️ Universal SSL ไม่ครอบชั้นที่ 2 ต้องซื้อ Advanced Certificate Manager |
+| DNS record ต่อเครื่อง → private IP | `s1.lab…` → `10.10.2.14` | ❌ คนนอก tailnet ยังไปไม่ถึง private IP อยู่ดี |
+
+- ไม่ใส่ course / lab id ใน URL: proxy ใช้แค่ token หาเครื่อง ใส่ไปก็เปิดเผยข้อมูลภายในเปล่า ๆ
+- token 1 ตัวต่อ session ทุกพอร์ตของ session ใช้ token เดียวกัน / label ยาว ~25 ตัว (DNS จำกัด 63)
+- record ที่ตั้งชื่อชัดเจน (`skypilot.bell-lab.space`) ชนะ wildcard เสมอ ของเดิมจึงไม่กระทบ
 
 ---
 
@@ -828,6 +843,17 @@ ansible-playbook -i inventory.yml site.yml --limit aws_router --tags lab-gateway
 | รหัส code-server | `musiclab` เหมือนกันทุก lab และอยู่ใน repo (`music-lab/skypilot/run.sh`) → กุญแจจริงเหลือแค่ token ในลิงก์ | backend สุ่มรหัสต่อ session ส่ง `IDE_PASSWORD` |
 | เทสที่เหลือ | G3, G5, G11 (G10 ข้ามได้) | |
 
+### app ใน lab ต้องรู้อะไรเมื่อเปิดผ่าน gateway (บอกอาจารย์ที่ทำ lab image)
+
+| app | ผล | ต้องทำ |
+|---|---|---|
+| code-server (8443) | ✅ Host ตรงกับ Origin เพราะ Traefik ส่ง Host จริง / ได้ HTTPS = secure context (webview / clipboard ใช้ได้ ซึ่งบน http เดิมใช้ไม่ได้) | ไม่ต้อง |
+| Vite dev (5173) | ❌ Vite ≥ 5.4.12 / 6.0.9 บล็อก Host ที่ไม่ใช่ localhost / IP | `server.allowedHosts: [".bell-lab.space"]` / HMR ต่อ `wss://` ที่ host เดียวกับหน้าเว็บเอง ถ้า lab ตั้ง `server.hmr.clientPort` เองจะพัง |
+| Flask / FastAPI / Express | ✅ ไม่ตรวจ Host | — |
+| Django | `ALLOWED_HOSTS` ต้องมี `.bell-lab.space` | ใส่ใน lab image |
+| frontend เรียก backend ใน lab คนละพอร์ต | `fetch("http://localhost:8080")` พัง (browser เรียก localhost ของนักศึกษาเอง) — พังมาตั้งแต่ก่อนมี gateway | ใช้ proxy ของ dev server แบบที่ `music-lab/client/vite.config.js` ทำกับ `/api` หรืออ่าน `VLAB_PUBLIC_URL_<port>` |
+| พอร์ตนอก 3000–9999 | ไม่มีปุ่มบนหน้าเว็บเมื่อรันบน AWS | ใช้พอร์ตในช่วงนี้ |
+
 ### ดูแล / เก็บกวาด
 
 - **ลบ AMI สำรอง** `vlab-ts-router-before-gateway` (`ami-0cea83b0b6deedcd8`) หลังเทสผ่าน: Deregister AMI **และ** Delete snapshot `snap-0d337b828a87a1e27` (snapshot ≈ $0.05/GB/เดือน)
@@ -840,7 +866,7 @@ ansible-playbook -i inventory.yml site.yml --limit aws_router --tags lab-gateway
 
 ### เฟส 2 (เลื่อนไว้)
 
-public portal (`vlab.bell-lab.space`) ให้นักศึกษาเข้า portal จากข้างนอกด้วย แผนลงมืออยู่ใน [ข้อ 16](#16-แผนเฟส-2-public-portal-ยังไม่ทำ) / ภาพรวมเฟส 1–3 อยู่ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md)
+public portal (`vlab.bell-lab.space`) ให้นักศึกษาเข้า portal จากข้างนอกด้วย แผนลงมืออยู่ใน [ข้อ 16](#16-แผนเฟส-2-public-portal-ยังไม่ทำ) / เฟส 3 อยู่ใน [ข้อ 17](#17-เฟส-3-และความเสี่ยงที่รู้อยู่)
 
 ---
 
@@ -926,6 +952,21 @@ curl -s -o /dev/null -w "%{http_code}\n" https://l-test-8080.bell-lab.space/   #
 ### 16.0 เป้าหมายและลำดับ
 
 เฟส 1 ทำให้ **lab** เปิดจากข้างนอกได้ แต่นักศึกษายังต้องเข้า **portal** (`http://100.124.148.97`) ผ่าน tailnet เพื่อกด Start เฟส 2 เพิ่มทางเข้า `https://vlab.bell-lab.space` ผ่าน Cloudflare Tunnel โดย **เก็บทางเดิมของห้องแลปไว้**
+
+**ทำไมต้องมี 2 ทางเข้า (ทำไมไม่ย้าย portal ไปหลัง Cloudflare เฉย ๆ):** backend ตัดสินว่า "กดจากเครื่องในห้องแลปไหม" โดยเทียบ IP ของ connection กับ Tailscale IP ของ worker (`node_for_ip`) → ในห้อง = warm pod บน K3s / ข้างนอก = EC2 ถ้า portal อยู่หลัง Cloudflare อย่างเดียว backend เห็น IP ของ cloudflared ทุก request → **นักศึกษาในห้องแลปทุกคนถูกส่งไป AWS** (warm pod ไม่ถูกใช้ + เสียเงินทุกคาบ) / อ่าน `CF-Connecting-IP` ก็ไม่ช่วย เพราะเป็น public IP ของมหาลัยหลัง NAT ไม่ใช่ Tailscale IP
+
+```
+เครื่องในห้องแลป ── http://<tailscale ip>/ ──────────────► nginx (frontend) ─┐  X-Real-IP = Tailscale IP ของ worker
+                    (ทางเดิม ไม่ผ่าน Cloudflare)                             ├─► backend :8000
+นักศึกษาที่บ้าน ── https://vlab.bell-lab.space/ ── CF ──► cloudflared ──► nginx ┘  X-Vlab-Entry = public → ข้างนอกเสมอ
+```
+
+**auth / cookie / SSO ในเฟส 2**
+- Bearer token ใน localStorage ใช้ได้ทั้งสอง origin (login แยกกันต่อ origin รับได้)
+- cookie `Secure` ตั้งตาม `X-Forwarded-Proto` ต่อ request (ทาง public = HTTPS / ทางเดิม = HTTP) แทนค่าคงที่ `AUTH_COOKIE_SECURE`
+- SSO: Google รับ redirect URI ที่เป็น HTTPS + domain เท่านั้น ไม่รับ IP → **SSO จะใช้ได้จริงครั้งแรกบน public domain**
+
+**ข้อควรรู้:** นักศึกษาที่นั่งในห้องแลปแต่เปิดผ่าน `vlab.bell-lab.space` = นับเป็นข้างนอก → ได้ EC2 (เสียเงิน) กันด้วยให้ browser ของเครื่องแลปเปิด Tailscale URL เป็นหน้าแรก และหน้าเว็บบน public origin แสดงป้าย "เปิดจากข้างนอก"
 
 | ขั้น | ทำอะไร | merge แล้วมีผลไหม |
 |---|---|---|
@@ -1186,10 +1227,14 @@ GOOGLE_REDIRECT_URI=https://{{ webservice_public_domain }}/auth/callback
 
 ### 16.7 (2G) เทสเฟส 2
 
-ใช้ตาราง "เฟส 2" ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md) ข้อ 8 และเพิ่ม
-
 | # | เคส | ต้องเห็น |
 |---|---|---|
+| P1 | ansible deploy | task whoami (ผ่าน nginx) ผ่าน = เห็น IP จริงของ worker |
+| P2 | เครื่องแลปเปิด Tailscale URL กด Start | warm pod เหมือนเดิม |
+| P3 | มือถือ 4G เปิด `vlab.bell-lab.space` login + กด Start (ไม่มี prelaunch) | ได้ PENDING ทันที poll จน RUNNING (~2 นาที) ไม่มี error 524 |
+| P4 | ส่ง `X-Real-IP: <IP worker>` เองจากข้างนอก / ยิง `:8000` ตรงจาก tailnet | ยังนับเป็นข้างนอก |
+| P5 | คาบ online + มือถือ 4G | claim เครื่องที่เปิดรอไว้ได้ใน < 5 วิ เปิด lab ผ่าน gateway ได้ |
+| P6 | SSO บน public domain | login ได้ |
 | P7 | เครื่องแลปเปิดทาง Tailscale แล้ว login | cookie ไม่มี `Secure` แต่ login ค้างได้ |
 | P8 | มือถือเปิดทาง public แล้ว login | cookie มี `Secure` |
 | P9 | ส่ง `X-Vlab-Entry: tailnet` + `X-Real-IP: <worker>` จากมือถือทาง public | ยังได้ AWS (nginx ทับ header) |
@@ -1207,13 +1252,29 @@ GOOGLE_REDIRECT_URI=https://{{ webservice_public_domain }}/auth/callback
 
 ถอยกลับเรียงจากเบาไปหนัก: `webservice_public_enabled=false` (ปิดทาง public) → `webservice_lab_gateway_enabled=false` (lab ใหม่กลับเป็น IP ภายใน) → ปิด traefik / cloudflared-lab บน router → rollback ACL → revert Terraform → สร้าง router จาก AMI สำรอง
 
-### 16.9 เฟส 3 (ยังไม่ออกแบบละเอียด)
+---
 
-forward-auth (ต้อง login ก่อนเปิดลิงก์ lab ไม่ใช่แค่รู้ token) + แยก domain ของ lab ดู [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md) ข้อ 6 / cookie ชื่อ `__Host-` ทำได้เฉพาะ HTTPS (ต้อง `Secure` + ไม่มี `Domain`) ทางเดิมที่เป็น HTTP ใช้ไม่ได้ จึงเลื่อนมาทำพร้อมเฟส 3
+## 17. เฟส 3 และความเสี่ยงที่รู้อยู่
+
+### 17.1 เฟส 3 (ยังไม่ทำ เขียนไว้ให้เห็นทาง)
+
+- **forward-auth:** ตอนนี้ใครรู้ลิงก์ก็เข้า lab ได้ → ให้ Traefik `forwardAuth` ถาม backend ทุก request ว่าผู้เปิดเป็นเจ้าของ session ไหม / browser ไม่ส่ง Bearer ไปที่ `l-*.bell-lab.space` ต้องมี handshake: portal เปิด `https://l-…/__vlab/auth?ticket=<ใช้ครั้งเดียว 60 วิ>` → gateway แลก ticket เป็น cookie ของ host นั้น แล้ว redirect ไป `/`
+- **แยก domain ของ lab** (ซื้อ domain ใหม่สำหรับ lab โดยเฉพาะ ปีละไม่กี่ร้อยบาท): โค้ดใน lab คือโค้ดที่นักศึกษาเขียนเอง ถ้าอยู่ใต้ `bell-lab.space` เดียวกับ portal มันตั้ง cookie `Domain=bell-lab.space` ได้ ซึ่งจะถูกส่งไปที่ `vlab.bell-lab.space` ด้วย (**cookie tossing / login CSRF**) / ระหว่างยังไม่แยก cookie ของ portal ควรขึ้นต้นด้วย `__Host-` (ถูก cookie จาก subdomain อื่นทับไม่ได้) แต่ทำได้เฉพาะ HTTPS (ต้อง `Secure` + ไม่มี `Domain`) ทางเดิมที่เป็น HTTP ใช้ไม่ได้ จึงเลื่อนมาทำพร้อมเฟส 3
+
+### 17.2 ความเสี่ยง
+
+| ความเสี่ยง | ระดับ | รับมือตอนนี้ / ต่อไป |
+|---|---|---|
+| ลิงก์ lab หลุด → คนอื่นเข้า IDE / app ได้จนกว่า session จะจบ | กลาง | token 80 bit + ลิงก์ตายพร้อม session / รหัส code-server ยังเหมือนกันทุก lab (ข้อ 13) / เฟส 3 forward-auth |
+| router ถูกเจาะผ่าน cloudflared / Traefik | กลาง | ไม่มีพอร์ตขาเข้า, ACL ไปได้แค่ backend `:8000`, SG ไปได้แค่พอร์ต lab, IAM มีแค่ SSM, service รันเป็น user จำกัดสิทธิ์ |
+| EC2 ของนักศึกษาคุยข้ามกันได้ทุกพอร์ต (`lab_self_in` = all) | กลาง (**มีอยู่ก่อนแล้ว ไม่ใช่ของใหม่**) | แยก issue: ตัด `lab_self_in` หรือจำกัดเป็น SSH ของ SkyPilot |
+| ใช้ domain ของเราทำ phishing / ฝากไฟล์ (lab เปิด public ได้) | ต่ำ–กลาง | ลิงก์อายุเท่า lifespan, access log ของ Traefik, เฟส 3 |
+| router หรือ backend ล่ม | กลาง | router ล่ม = เปิด lab AWS ไม่ได้ (และทีมเข้า AWS ไม่ได้) / backend ล่ม = Traefik ใช้ตารางล่าสุดต่อ (เทสแล้ว G12) |
+| Cloudflare Free จำกัด | ต่ำ | upload ≤ 100MB ต่อ request, request ≤ 100 วิ (เฟส 2 แก้ด้วย async), ไม่ใช้ส่งวิดีโอยาว ๆ |
 
 ---
 
-## 17. อ้างอิงภายนอก
+## 18. อ้างอิงภายนอก
 
 | หัวข้อ | ลิงก์ | ใช้ตรงไหน |
 |---|---|---|
@@ -1223,5 +1284,9 @@ forward-auth (ต้อง login ก่อนเปิดลิงก์ lab ไ
 | Cloudflare Tunnel ingress / wildcard | https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/configure-tunnels/local-management/configuration-file/ | `*.bell-lab.space` → `127.0.0.1:8081` (ข้อ 8) |
 | Tailscale tags | https://tailscale.com/kb/1068/tags | ติด `tag:vlab-router` (ข้อ 7) |
 | Vite `server.allowedHosts` | https://vite.dev/config/server-options.html#server-allowedhosts | "Blocked request" ของพอร์ต 5173 (ข้อ 13) |
-
-อ้างอิงอื่นของเฟส 1–3 ดู "อ้างอิงภายนอก" ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md)
+| Vite advisory ที่เพิ่มการบล็อก Host | GHSA-vg6x-rcgg-rjx6 (CVE-2025-24010) | ทำไม Vite ≥ 5.4.12 บล็อก (กัน DNS rebinding) |
+| Cloudflare wildcard DNS แบบ proxied | https://developers.cloudflare.com/dns/manage-dns-records/reference/wildcard-dns-records/ | ใช้ได้ทุก plan (ข้อ 8) |
+| Universal SSL ครอบ root + subdomain ชั้นแรก | https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/ | ทำไมลิงก์เป็น subdomain ชั้นเดียว (ข้อ 2.5) |
+| code-server origin check | https://github.com/coder/code-server/releases/tag/v4.15.0 | ทำไมต้อง `passHostHeader` (ข้อ 9.2) |
+| Cloudflare ตัดที่ 100 วิ (error 524) | https://community.cloudflare.com/t/100-second-proxy-read-timeout-524-gateway-error-increase/684447 | ทำไมเฟส 2 ต้อง Start แบบ async (ข้อ 16.2) |
+| SkyPilot `open_ports` บน AWS | `sky/provision/aws/instance.py` ใน `.venv` (SkyPilot 0.12) | rule `0.0.0.0/0` ที่ SkyPilot เปิดเอง (ข้อ 5.3) |
