@@ -22,6 +22,13 @@ all:
       hosts:
         webservice-1:
           ansible_host: "100.0.0.4"
+    # AWS subnet router (vlab-ts-router) ที่ลง lab gateway — Tailscale IP ของ router / user ของ Ubuntu AMI
+    # เข้าผ่าน Tailscale SSH (กฎ ssh admin → tag:vlab-router ใน tailscale/vlab-acl.hujson.example)
+    aws_router:
+      hosts:
+        aws-router-1:
+          ansible_host: "100.0.0.5"
+          ansible_user: "ubuntu"
   vars:
     ansible_user: "your-ssh-user"
     ansible_become: yes

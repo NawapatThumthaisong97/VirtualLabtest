@@ -88,6 +88,14 @@
 			"dst":    ["autogroup:self"],
 			"users":  ["autogroup:nonroot", "root"],
 		},
+		// router ติด tag แล้วไม่ใช่ self ของใคร → admin เข้า SSH ได้ทางข้อนี้ (Ansible ลง lab-gateway)
+		// accept ไม่ใช่ check: Ansible ต่อ ssh หลายรอบ ไม่ต้อง login เว็บซ้ำ
+		{
+			"action": "accept",
+			"src":    ["autogroup:admin"],
+			"dst":    ["tag:vlab-router"],
+			"users":  ["ubuntu", "root"],
+		},
 	],
 
 	// Tailscale รัน tests ทุกครั้งที่ validate / save ถ้าไม่ผ่านจะไม่ยอม save

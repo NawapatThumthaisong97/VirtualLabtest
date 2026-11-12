@@ -1,0 +1,175 @@
+# เครื่องนี้คือ subnet router ของทั้งทีม: role นี้เพิ่มแค่ 2 service ไม่แตะ Tailscale / iptables / sysctl
+# ตอนท้ายเช็กว่า router ยัง route ได้เหมือนก่อนลง
+
+- name: Check lab gateway secrets
+  ansible.builtin.assert:
+    that:
+      - lab_gateway_token | length >= 32
+      - lab_gateway_tunnel_token | length > 0
+    fail_msg: "ใส่ vault_lab_gateway_token (>= 32 ตัว ค่าเดียวกับ backend) และ vault_lab_gateway_tunnel_token ใน group_vars/all.yml"
+    quiet: true
+  no_log: true
+
+# ---------- เก็บสถานะก่อนลง (เทียบตอนท้าย) ----------
+- name: Snapshot FORWARD chain before install
+  ansible.builtin.command: iptables -S FORWARD
+  register: forward_before
+  changed_when: false
+
+# ---------- users ----------
+- name: System users for traefik and cloudflared
+  ansible.builtin.user:
+    name: "{{ item }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  loop: [traefik, cloudflared]
+
+# ---------- traefik (binary ไม่ลง Docker: ประหยัด RAM และไม่ยุ่ง iptables ของ router) ----------
+- name: Download traefik release
+  ansible.builtin.get_url:
+    url: "https://github.com/traefik/traefik/releases/download/v{{ lab_gateway_traefik_version }}/traefik_v{{ lab_gateway_traefik_version }}_linux_amd64.tar.gz"
+    dest: "/tmp/traefik_v{{ lab_gateway_traefik_version }}.tar.gz"
+    checksum: "sha256:https://github.com/traefik/traefik/releases/download/v{{ lab_gateway_traefik_version }}/traefik_v{{ lab_gateway_traefik_version }}_checksums.txt"
+    mode: "0644"
+
+- name: Install traefik binary
+  ansible.builtin.unarchive:
+    src: "/tmp/traefik_v{{ lab_gateway_traefik_version }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    include: [traefik]
+    owner: root
+    group: root
+    mode: "0755"
+  notify: restart traefik
+
+- name: traefik config dir
+  ansible.builtin.file:
+    path: /etc/traefik
+    state: directory
+    owner: root
+    group: traefik
+    mode: "0750"
+
+- name: traefik config (มี gateway token)
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: /etc/traefik/traefik.yml
+    owner: root
+    group: traefik
+    mode: "0640"
+  no_log: true
+  notify: restart traefik
+
+# ---------- cloudflared ----------
+- name: Download cloudflared .deb
+  ansible.builtin.get_url:
+    url: "https://github.com/cloudflare/cloudflared/releases/download/{{ lab_gateway_cloudflared_version }}/cloudflared-linux-amd64.deb"
+    dest: "/tmp/cloudflared-{{ lab_gateway_cloudflared_version }}.deb"
+    checksum: "sha256:{{ lab_gateway_cloudflared_sha256 }}"
+    mode: "0644"
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    deb: "/tmp/cloudflared-{{ lab_gateway_cloudflared_version }}.deb"
+  notify: restart cloudflared-lab
+
+- name: cloudflared env dir
+  ansible.builtin.file:
+    path: /etc/cloudflared
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# อ่านโดย systemd (root) ก่อนสลับเป็น user cloudflared จึงเป็น 0600 root ได้
+- name: cloudflared tunnel token
+  ansible.builtin.copy:
+    dest: /etc/cloudflared/lab-gateway.env
+    content: "TUNNEL_TOKEN={{ lab_gateway_tunnel_token }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart cloudflared-lab
+
+# ---------- systemd ----------
+- name: systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.service.j2"
+    dest: "/etc/systemd/system/{{ item }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [traefik, cloudflared-lab]
+  # ไม่ใช้ "restart {{ item }}": ชื่อ handler จากตัวแปร loop ไม่ถูก resolve ทุกรุ่นของ Ansible
+  notify: [reload systemd, restart traefik, restart cloudflared-lab]
+
+- name: Flush handlers before verify
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [traefik, cloudflared-lab]
+
+# ---------- verify ----------
+- name: traefik answers 404 for unknown host
+  ansible.builtin.uri:
+    url: "http://{{ lab_gateway_listen }}/"
+    headers:
+      Host: "l-nope-8080.{{ lab_gateway_domain }}"
+    status_code: 404
+  register: probe
+  until: probe.status == 404
+  retries: 10
+  delay: 3
+
+# backend ปิด / token ไม่ตรง / ACL router → backend :8000 ไม่เปิด = Traefik ไม่ได้ตาราง route (404 ทุกลิงก์)
+- name: Wait for traefik to poll the backend
+  ansible.builtin.pause:
+    seconds: 12
+
+- name: traefik can read routes from backend (no provider error in log)
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    journalctl -u traefik --since "-1min" --no-pager
+    | grep -iE 'provider.*(error|unable|fail)|cannot fetch|status code' || true
+  args:
+    executable: /bin/bash
+  register: provider_errors
+  changed_when: false
+  failed_when: provider_errors.stdout | length > 0
+
+# ถาม cloudflared ตรง ๆ (/ready = 200 เมื่อมี connection ไป Cloudflare อย่างน้อย 1 เส้น)
+# ไม่ grep log: รันซ้ำโดยไม่ restart บรรทัด log เก่าเกินช่วงเวลา → นับได้ 0 ทั้งที่ tunnel ต่ออยู่
+- name: cloudflared connected to Cloudflare
+  ansible.builtin.uri:
+    url: "http://{{ lab_gateway_cloudflared_metrics }}/ready"
+    return_content: true
+  register: tunnel_ready
+  # cloudflared ตอบ content-type text/plain → uri ไม่แปลง .json ให้ ต้อง from_json เอง
+  until: >-
+    tunnel_ready.status == 200
+    and ((tunnel_ready.content | default('{}') | from_json).readyConnections | default(0) | int) > 0
+  retries: 10
+  delay: 3
+
+- name: Router must still route (tailscale up)
+  ansible.builtin.command: tailscale status --peers=false
+  changed_when: false
+
+- name: Router must still forward packets
+  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  register: ip_forward
+  changed_when: false
+  failed_when: ip_forward.stdout != '1'
+
+- name: FORWARD chain unchanged
+  ansible.builtin.command: iptables -S FORWARD
+  register: forward_after
+  changed_when: false
+  failed_when: forward_after.stdout != forward_before.stdout

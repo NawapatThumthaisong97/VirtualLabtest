@@ -1,0 +1,29 @@
+# lab gateway บน vlab-ts-router (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md ข้อ 1E)
+# นักศึกษา → Cloudflare → tunnel → cloudflared (เครื่องนี้) → Traefik 127.0.0.1:8081 → lab EC2 10.10.2.x
+
+lab_gateway_domain: bell-lab.space
+# ต้องตรงกับ Published application ของ tunnel ใน Cloudflare (*.bell-lab.space → HTTP 127.0.0.1:8081)
+# ผูก localhost อย่างเดียว: เข้าได้ทาง cloudflared เท่านั้น ไม่เปิดให้ tailnet / VPC
+lab_gateway_listen: 127.0.0.1:8081
+
+# backend ตัวเดียวที่เปิด LAB_GATEWAY_ENABLED=true (ดึงจาก group webservice ใน inventory)
+lab_gateway_backend_ip: "{{ hostvars[groups['webservice'][0]]['ansible_host'] }}"
+lab_gateway_backend_port: "{{ hostvars[groups['webservice'][0]]['webservice_api_port'] | default(8000) }}"
+lab_gateway_backend_url: "http://{{ lab_gateway_backend_ip }}:{{ lab_gateway_backend_port }}/api/internal/v1/gateway/routes"
+
+# รหัสลับอยู่ใน group_vars/all.yml (gitignore)
+lab_gateway_token: "{{ vault_lab_gateway_token }}"
+lab_gateway_tunnel_token: "{{ vault_lab_gateway_tunnel_token }}"
+
+# router เป็น t3 = x86_64 → ไฟล์ amd64 / ปักเลขที่ออกมาแล้ว >= 2 สัปดาห์ (เลือกเมื่อ 2026-11-12)
+lab_gateway_traefik_version: "3.7.16"
+lab_gateway_cloudflared_version: "2026.10.5"
+# sha256 ของ cloudflared-linux-amd64.deb (หน้า release) / traefik เช็กกับไฟล์ checksums ของ release เอง
+lab_gateway_cloudflared_sha256: "149d1ec4ac8e58bdbf08a41cc42347da9184d9fb4ef0df6528d75c90a85ac0ed"
+
+# endpoint สุขภาพของ cloudflared (localhost อย่างเดียว) role ใช้ /ready เช็กว่า tunnel ต่อติด
+lab_gateway_cloudflared_metrics: 127.0.0.1:20241
+
+# t3.small RAM 2 GB: เหลือที่ให้ Tailscale (ทางเข้า AWS ของทั้งทีม) เสมอ
+lab_gateway_traefik_memory_max: 384M
+lab_gateway_cloudflared_memory_max: 256M

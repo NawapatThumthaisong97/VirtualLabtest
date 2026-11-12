@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+global:
+  checkNewVersion: false              # ไม่ต่อออกเน็ตเอง อัปเดตผ่านตัวแปร version ของ role
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: "{{ lab_gateway_listen }}"
+    forwardedHeaders:
+      trustedIPs: ["127.0.0.1/32"]      # เชื่อ X-Forwarded-* จาก cloudflared บนเครื่องเดียวกันเท่านั้น
+    transport:
+      respondingTimeouts:
+        readTimeout: 600s               # v3 ค่าเริ่ม 60s — upload / websocket นาน ๆ ถูกตัด
+        idleTimeout: 600s
+
+# ตาราง route (Host → lab EC2) มาจาก backend ไม่ได้เขียนไว้ที่นี่ / session หยุด = route หายใน 5 วิ
+providers:
+  http:
+    endpoint: "{{ lab_gateway_backend_url }}"
+    pollInterval: 5s
+    pollTimeout: 5s
+    headers:
+      X-Gateway-Token: "{{ lab_gateway_token }}"
+
+api:
+  dashboard: false
+ping: {}
+log:
+  level: INFO
+accessLog:
+  fields:
+    headers:
+      defaultMode: drop                 # ไม่เก็บ cookie / header ของนักศึกษา
