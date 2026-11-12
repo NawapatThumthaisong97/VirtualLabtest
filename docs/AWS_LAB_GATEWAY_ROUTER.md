@@ -1,6 +1,6 @@
 # lab gateway บน vlab-ts-router (เฟส 1 แบบไม่เพิ่มเครื่อง)
 
-> สถานะ: **Pete อนุมัติแล้ว** (2026-11-09) ยังไม่มีโค้ด — ขั้นตอนลงมือทีละไฟล์อยู่ใน [AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md](AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md)
+> สถานะ: **Pete อนุมัติแล้ว** (2026-11-09) **เฟส 1 ทำแล้ว (2026-11-12)** — ของที่ทำจริง ขั้นตอน ผลเทส และปัญหาที่เจอ อยู่ใน [AWS_LAB_GATEWAY.md](AWS_LAB_GATEWAY.md) (doc นี้คือการออกแบบก่อนลงมือ)
 > ต่อจาก [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md) — doc นั้นคือภาพรวม (เฟส 1–3) doc นี้คือวิธีทำเฟส 1
 > โดยใช้ router ตัวเดิม (ทางเลือก A ในข้อ 3.2) แทน EC2 ใหม่ ส่วนที่ต่างจาก doc หลักเขียนไว้ที่ข้อ 2
 

@@ -543,7 +543,7 @@ class SessionService:
                                                                  formatted_endpoints.keys())
             dropped = sorted(set(formatted_endpoints) - set(new_session.endpoints))
             if dropped:
-                # พอร์ตนอก LAB_GATEWAY_PORT_MIN–MAX เปิดผ่าน gateway ไม่ได้ ปุ่มของพอร์ตนั้นจะไม่แสดง (runbook D13)
+                # พอร์ตนอก LAB_GATEWAY_PORT_MIN–MAX เปิดผ่าน gateway ไม่ได้ ปุ่มของพอร์ตนั้นจะไม่แสดง (docs/AWS_LAB_GATEWAY.md ข้อ 4.6)
                 logger.warning(f"[gateway] {cluster_name}: ports {dropped} outside "
                                f"{settings.LAB_GATEWAY_PORT_MIN}-{settings.LAB_GATEWAY_PORT_MAX}, no public link")
         else:

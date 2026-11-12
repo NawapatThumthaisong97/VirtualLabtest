@@ -36,7 +36,7 @@ api_router.include_router(activity_router, tags=["Activity"])
 api_router.include_router(admin_monitor_router, prefix="/v1/admin", tags=["Admin Monitor"])
 api_router.include_router(booking_router, tags=["Booking"])
 api_router.include_router(booking_admin_router, prefix="/v1/admin", tags=["Booking"])
-# Traefik บน vlab-ts-router ดึงตาราง route (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A.5)
+# Traefik บน vlab-ts-router ดึงตาราง route (docs/AWS_LAB_GATEWAY.md ข้อ 4.5)
 api_router.include_router(lab_gateway_router, tags=["Lab Gateway"])
 
 __all__ = ["api_router"]

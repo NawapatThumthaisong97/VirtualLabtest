@@ -1,6 +1,6 @@
 # นักศึกษานอก tailnet เข้า portal และ lab บน AWS ได้ (lab gateway + public portal)
 
-> สถานะ: **อนุมัติแล้ว ใช้ทางเลือก A (router เดิม)** (2026-11-09) ยังไม่มีโค้ด — ขั้นตอนลงมืออยู่ใน [AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md](AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md)
+> สถานะ: **อนุมัติแล้ว ใช้ทางเลือก A (router เดิม)** (2026-11-09) **เฟส 1 ทำแล้ว (2026-11-12)** — ของที่ทำจริงและแผนลงมือเฟส 2 อยู่ใน [AWS_LAB_GATEWAY.md](AWS_LAB_GATEWAY.md)
 > ที่มา: คาบ online ([AWS_PRELAUNCH.md](AWS_PRELAUNCH.md)) เปิด EC2 รอไว้ได้แล้ว แต่นักศึกษาที่อยู่บ้าน (ไม่อยู่ใน tailnet)
 > ยังเข้า portal ไม่ได้ และถึงกด Start ได้ ก็เปิด lab บน EC2 ไม่ได้
 

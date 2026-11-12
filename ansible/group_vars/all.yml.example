@@ -100,7 +100,7 @@ siem_collector_token: <SIEM_COLLECTOR_TOKEN_OR_DEFAULT>
 siem_s3_bucket: <SIEM_S3_BUCKET_NAME>
 siem_s3_region: ap-southeast-1
 
-# --- lab gateway (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md) — รหัสลับร่วมระหว่าง backend กับ Traefik บน vlab-ts-router
+# --- lab gateway (docs/AWS_LAB_GATEWAY.md) — รหัสลับร่วมระหว่าง backend กับ Traefik บน vlab-ts-router
 # ค่าเดียวกันใช้ทั้ง role web-service (LAB_GATEWAY_TOKEN) และ role lab-gateway (X-Gateway-Token)
 # ยาว >= 32 ตัว ใช้แค่ A-Z a-z 0-9 _ - สร้างด้วย python3 -c 'import secrets;print(secrets.token_urlsafe(48))'
 vault_lab_gateway_token: <LAB_GATEWAY_TOKEN>

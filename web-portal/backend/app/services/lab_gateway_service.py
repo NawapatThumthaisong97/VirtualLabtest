@@ -1,4 +1,4 @@
-"""lab gateway: ลิงก์ public ของ lab บน AWS (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A.4)
+"""lab gateway: ลิงก์ public ของ lab บน AWS (docs/AWS_LAB_GATEWAY.md ข้อ 4.4)
 
 นักศึกษาเปิด https://l-<token>-<port>.<LAB_GATEWAY_DOMAIN> → Cloudflare → cloudflared → Traefik บน vlab-ts-router
 → Traefik ส่งต่อไป upstream จริง http://10.10.2.x:<port> ตามตาราง route ที่ดึงจาก backend
@@ -21,7 +21,7 @@ from app.models.session import Session as SessionModel, SessionStatus
 
 logger = logging.getLogger(__name__)
 
-# entryPoint ใน traefik.yml ของ role lab-gateway (runbook 1E.4)
+# entryPoint ใน traefik.yml ของ role lab-gateway (docs/AWS_LAB_GATEWAY.md ข้อ 9.2)
 TRAEFIK_ENTRYPOINT = "web"
 
 # 10 byte = 80 bit → base32 ได้ 16 ตัวพอดี (ไม่มี "=" ต่อท้าย) ใส่ใน gateway_token String(32) ได้
@@ -55,7 +55,7 @@ def port_allowed(port) -> bool:
 def public_host(token: str, port) -> str:
     """hostname ของ lab หนึ่งพอร์ต: l-<token>-<port>.<domain>
 
-    ขึ้นต้น "l-" ให้ Cache Rule / Configuration Rule ของ Cloudflare จับได้ (runbook 1D ข้อ 7–8)
+    ขึ้นต้น "l-" ให้ Cache Rule / Configuration Rule ของ Cloudflare จับได้ (docs/AWS_LAB_GATEWAY.md ข้อ 8)
     และไม่ชนกับ record ที่มีชื่อชัดเจน เช่น skypilot / vlab
     """
     return f"l-{token}-{int(port)}.{settings.LAB_GATEWAY_DOMAIN}"
@@ -73,7 +73,7 @@ def gateway_envs(token: str, ports: Iterable) -> dict[str, str]:
     """env ที่ส่งเข้า container ของ lab บน AWS (docker run -e) เมื่อ session นั้นผ่าน gateway
 
     - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: Vite (music-lab) ปฏิเสธ Host ที่ไม่รู้จัก ต้องอนุญาต .<domain>
-      (Vite บางรุ่นอาจไม่อ่าน env นี้ — เช็กใน runbook 1F.0 ก่อนเปิด flag)
+      (Vite 5.4 ไม่อ่าน env นี้ — music-lab ต้องตั้ง allowedHosts ใน vite.config.js เอง ดู docs/AWS_LAB_GATEWAY.md ข้อ 13)
     - VLAB_PUBLIC_URL_<port>: URL public ของพอร์ตนั้น ให้ lab ที่ต้องรู้ URL ตัวเองเอาไปใช้
     """
     envs = {"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": f".{settings.LAB_GATEWAY_DOMAIN}"}

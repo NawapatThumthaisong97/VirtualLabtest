@@ -3,7 +3,7 @@
 > สถานะ: **แผน ยังไม่ได้ลงมือ** (2026-11-09) — ต้องให้ Pete อนุมัติ decision ในข้อ 4 และตอบคำถามข้อ 11 ก่อนเริ่ม Phase 1
 > คู่กับ [CICD_ARGOCD_PIPELINE.md](CICD_ARGOCD_PIPELINE.md) (workflow / manifest ทีละไฟล์ + วิธีใช้งานประจำวัน)
 > แผนนี้อิง **โค้ดจริง** ใน repo ไม่ได้อิง `ARCHITECTURE.md` ซึ่งยังพูดถึง Helm chart `k8s-helm/`, Next.js และ Docker Hub ที่ไม่มีอยู่จริง
-> เกี่ยวข้องกับ [AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md](AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md) เฟส 2A / 2C / 2D (frontend เรียก `/api` แบบ relative + nginx proxy) ซึ่งเป็น**ข้อกำหนดก่อน** Phase 3 ของแผนนี้
+> เกี่ยวข้องกับ [AWS_LAB_GATEWAY.md](AWS_LAB_GATEWAY.md) ข้อ 16 เฟส 2A / 2C / 2D (frontend เรียก `/api` แบบ relative + nginx proxy) ซึ่งเป็น**ข้อกำหนดก่อน** Phase 3 ของแผนนี้
 
 ---
 
@@ -150,7 +150,7 @@ taint จะกัน warm pod / prewarm DaemonSet ของ backend (ซึ่�
 
 ### D4 — backend / frontend ใช้ `hostNetwork` + `Recreate`
 
-เป้าหมายคือคงพฤติกรรมเดิมของ compose ไว้ทุกอย่าง และให้ตรงกับ runbook เฟส 2D (nginx ต้องใช้ host network ด้วย ตามข้อ D4 ใน runbook)
+เป้าหมายคือคงพฤติกรรมเดิมของ compose ไว้ทุกอย่าง และให้ตรงกับ เฟส 2D (nginx ต้องใช้ host network ด้วย ตามข้อ D4 ใน AWS_LAB_GATEWAY.md ข้อ 16.0)
 
 ```
 เครื่องแลป (100.x.worker) ──Tailscale──► nginx  hostNetwork  listen <platform-ip>:80
@@ -158,7 +158,7 @@ taint จะกัน warm pod / prewarm DaemonSet ของ backend (ซึ่�
                                           │  X-Real-IP = $remote_addr (เขียนทับเสมอ)
                                           ▼
                                        uvicorn  hostNetwork  127.0.0.1:8000
-                                          เชื่อ X-Real-IP เฉพาะเมื่อ peer = 127.0.0.1 (runbook 2A)
+                                          เชื่อ X-Real-IP เฉพาะเมื่อ peer = 127.0.0.1 (AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2A)
 ```
 
 - ห้ามใช้ Service / Ingress / Traefik อยู่หน้า backend เพราะ kube-proxy และ svclb จะ SNAT ทำให้ C1 พัง
@@ -166,7 +166,7 @@ taint จะกัน warm pod / prewarm DaemonSet ของ backend (ซึ่�
 - `BIND_IP` ได้จาก downward API `status.hostIP` ซึ่งเท่ากับ Tailscale IP เพราะ k3s ติดตั้งด้วย `--node-ip {{ ansible_host }}` จึงไม่ต้องฮาร์ดโค้ด IP
 - `Recreate` จำเป็น 2 เหตุผล คือ 2 pod ผูกพอร์ตเดียวกันบน host เดียวกันไม่ได้ และมี C2 ผลคือ **downtime ~20–40 วิ ต่อการ deploy** ซึ่งแก้ด้วย sync window (D10)
 
-ถ้าต้องขึ้น staging ก่อนที่ runbook เฟส 2A/2C จะเสร็จ (โหมดเดิม: frontend เรียก `http://<ip>:8000/api` ตรง) ทำได้ แต่ต้อง build frontend แยกต่อ env ด้วย build-arg ซึ่งผิดหลัก build ครั้งเดียว จึงแนะนำให้รอ 2A/2C ก่อน
+ถ้าต้องขึ้น staging ก่อนที่ เฟส 2A/2C จะเสร็จ (โหมดเดิม: frontend เรียก `http://<ip>:8000/api` ตรง) ทำได้ แต่ต้อง build frontend แยกต่อ env ด้วย build-arg ซึ่งผิดหลัก build ครั้งเดียว จึงแนะนำให้รอ 2A/2C ก่อน
 
 ### D5 — เก็บ image ของ platform ที่ GHCR
 
@@ -364,11 +364,11 @@ backend ใช้ `dnsPolicy: ClusterFirstWithHostNet` เพื่อให้ 
 | **0 เตรียม** | อนุมัติ decision, ตอบคำถามข้อ 11, เตรียมเครื่อง platform, สร้าง GitHub App `vlab-deploy-bot`, เปิด ruleset ของ `main` (required checks + PR + bot bypass), CODEOWNERS | ไม่ | ruleset เป็น `active` และ PR ทดสอบถูกบังคับให้รอ check |
 | **1 CI** | `frontend-ci.yml`, `images.yml` (build + push อย่างเดียว ยังไม่ bump), `deploy-lint.yml`, pin `KUBECTL_VERSION`, `.trivyignore` | ไม่ | ทุก commit บน main มี image `sha-*` บน GHCR พร้อมลายเซ็น และ check ทุกตัวเขียว |
 | **2 Argo CD + platform apps** | Ansible role `argocd`, root app, `sealed-secrets`, `cluster-config` (ย้ายความเป็นเจ้าของจาก Ansible), `siem` (manual sync รอบแรก) | น้อย (NetworkPolicy ถูก apply ซ้ำด้วยเนื้อหาเดิม) | ทุก app เป็น `Synced/Healthy`, task ที่ย้ายถูกลบออกจาก Ansible แล้ว, รัน `site.yml` ซ้ำแล้วไม่เกิด diff ใน Argo CD |
-| **3 staging** | runbook 2A / 2C (ข้อกำหนดก่อน), แก้โค้ด (in-cluster config, ข้าม platform node, nginx template), manifest `db-staging` + `web-portal-staging`, เปิดให้ bot bump | ไม่ (คนละ ns คนละพอร์ต) | merge แล้ว staging เปลี่ยนเองภายใน 15 นาที, hook smoke เขียว, whoami จาก worker ได้ `labMachine` |
+| **3 staging** | AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2A / 2C (ข้อกำหนดก่อน), แก้โค้ด (in-cluster config, ข้าม platform node, nginx template), manifest `db-staging` + `web-portal-staging`, เปิดให้ bot bump | ไม่ (คนละ ns คนละพอร์ต) | merge แล้ว staging เปลี่ยนเองภายใน 15 นาที, hook smoke เขียว, whoami จาก worker ได้ `labMachine` |
 | **4 prod cutover** | ประกาศช่วงปิดปรับปรุง (นอกคาบ) → `pg_dump` จาก compose → restore เข้า `db-prod` → ย้าย storage (หรือเปลี่ยนเป็น S3) → `docker compose stop` → sync `web-portal-prod` → ทดสอบ → เปลี่ยน URL / ACL | **ใช่** (downtime ~30 นาที) | ทดสอบตาม `docs/SETUP_TEST.md` ข้อ 3 ผ่าน (กด Start จากเครื่องแลป → K8s, จากข้างนอก → AWS), SIEM Grafana อ่าน DB ใหม่ได้ |
 | **5 hardening** | Argo CD SSO + notifications, Renovate (pin action / chart / image), scan-runner ไป GHCR, ย้าย SkyPilot Helm เข้า Argo, ลบ role `web-service` และ compose | น้อย | ไม่มี deploy ไหนต้องพึ่ง SSH อีก |
 
-ประมาณเวลา (ทีม 1–2 คน part-time): Phase 0–1 ~1 สัปดาห์, Phase 2 ~1 สัปดาห์, Phase 3 ~1–2 สัปดาห์ (ขึ้นกับ runbook เฟส 2), Phase 4 ~1 วัน + เฝ้าดู 2 สัปดาห์
+ประมาณเวลา (ทีม 1–2 คน part-time): Phase 0–1 ~1 สัปดาห์, Phase 2 ~1 สัปดาห์, Phase 3 ~1–2 สัปดาห์ (ขึ้นกับ เฟส 2), Phase 4 ~1 วัน + เฝ้าดู 2 สัปดาห์
 
 ---
 
@@ -406,7 +406,7 @@ backend ใช้ `dnsPolicy: ClusterFirstWithHostNet` เพื่อให้ 
 | 2 | ตอนนี้ portal prod รันอยู่ที่ไหนจริง (`tailscale/vlab-tags.tsv.example` บอกว่าบางช่วงรันบน WSL ของคนในทีม) | ขั้นตอน cutover และ IP / URL ที่นักศึกษาใช้ |
 | 3 | ใครเป็น maintainer ที่ approve release prod (CODEOWNERS) | ruleset / CODEOWNERS |
 | 4 | ช่วงเวลาที่ห้าม deploy prod (คาบเรียนปกติ เช่น จ–ศ 08:00–18:00) | sync window |
-| 5 | runbook เฟส 2A / 2C จะเสร็จก่อน Phase 3 ไหม | ถ้าไม่ ต้องใช้โหมดชั่วคราว (build frontend ต่อ env) |
+| 5 | เฟส 2A / 2C จะเสร็จก่อน Phase 3 ไหม | ถ้าไม่ ต้องใช้โหมดชั่วคราว (build frontend ต่อ env) |
 | 6 | ไฟล์เว็บจะยังเก็บบน disk หรือย้ายไป S3 (`STORAGE_BACKEND=s3`, `terraform/storage`) ตอน cutover | PVC `backend-storage` หรือไม่ต้องมี |
 | 7 | `k8s/auth` (oauth2-proxy) ยังอยู่ในแผนไหม | ถ้าใช่ ต้องออกแบบ ingress ใหม่ให้ไม่ชนกับ C1 |
 | 8 | แจ้งเตือน deploy ส่งไปที่ไหน (Discord / LINE / Slack) | config ของ notifications |

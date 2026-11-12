@@ -1,5 +1,5 @@
 """
-กลุ่ม: lab gateway — ลิงก์ public ของ lab บน AWS (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A)
+กลุ่ม: lab gateway — ลิงก์ public ของ lab บน AWS (docs/AWS_LAB_GATEWAY.md ข้อ 4)
 
 A4: ฟังก์ชันล้วนใน app/services/lab_gateway_service.py ไม่ต่อ DB
 A5: build_routes ใช้ DB ทดสอบ (fixture db / world)
@@ -447,7 +447,7 @@ class TestStartWithGateway:
         assert s.endpoints == {"8080": "http://10.0.0.5:8080"}
 
     def test_port_outside_range_dropped(self, svc, db, world, fake_sky, gateway_on, caplog):
-        """port 80 in the image -> no public link + warning (runbook D13)"""
+        """port 80 in the image -> no public link + warning (docs/AWS_LAB_GATEWAY.md ข้อ 4.6)"""
         fake_sky.endpoints_map = {"8080": "10.10.2.14:8080", "80": "10.10.2.14:80"}
         with caplog.at_level(logging.WARNING, logger="server"):
             svc.create_session(world.user.id, world.aws_lab.id)

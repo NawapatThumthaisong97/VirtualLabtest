@@ -248,7 +248,7 @@ class Settings(BaseSettings):
     # launch พร้อมกันได้กี่เครื่อง (SkyPilot API server รับงานยาวพร้อมกันได้จำกัด)
     PRELAUNCH_MAX_PARALLEL: int = 5
 
-    # lab gateway (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md เฟส 1): lab AWS ได้ลิงก์ https://l-<token>-<port>.<domain>
+    # lab gateway (docs/AWS_LAB_GATEWAY.md): lab AWS ได้ลิงก์ https://l-<token>-<port>.<domain>
     # Traefik บน vlab-ts-router ดึงตาราง route จาก /api/internal/v1/gateway/routes
     # ปิด = endpoint ของ lab AWS เป็น private IP (http://10.10.2.x) แบบเดิม
     LAB_GATEWAY_ENABLED: bool = False

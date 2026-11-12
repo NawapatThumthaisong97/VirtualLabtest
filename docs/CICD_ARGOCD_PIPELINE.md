@@ -174,7 +174,7 @@ jobs:
       - run: npm test                 # vitest run
       - run: npm run build            # tsc -b && vite build
         env:
-          VITE_API_URL: /api          # relative ตาม runbook 2C
+          VITE_API_URL: /api          # relative ตาม AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2C
 ```
 
 > ก่อนตั้งให้เป็น required check ให้รันบน `main` ดูก่อนว่าเขียวทั้ง lint และ test ถ้ายังแดง ให้แก้ก่อนหรือตั้งเป็น non-required ไปก่อน
@@ -429,7 +429,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # backend : pin kubectl ให้ตรง k3s_version (ไม่ส่ง = Dockerfile ดึง stable ล่าสุด build ไม่ซ้ำเดิม)
-          # frontend: API แบบ relative (runbook 2C) → image เดียวใช้ได้ทุก env
+          # frontend: API แบบ relative (AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2C) → image เดียวใช้ได้ทุก env
           # ARG ที่ Dockerfile ไม่ได้ประกาศจะถูกเตือนแล้วข้ามไป ไม่ทำให้ build พัง
           build-args: |
             KUBECTL_VERSION=v1.35.5
@@ -1115,7 +1115,7 @@ spec:
       containers:
         - name: backend
           image: vlab-backend
-          # ผูก loopback เท่านั้น — เข้าจากข้างนอกได้ทาง nginx อย่างเดียว (เชื่อ X-Real-IP จาก 127.0.0.1 — runbook 2A)
+          # ผูก loopback เท่านั้น — เข้าจากข้างนอกได้ทาง nginx อย่างเดียว (เชื่อ X-Real-IP จาก 127.0.0.1 — AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2A)
           command: ["/bin/sh", "-c", 'exec uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT"']
           envFrom:
             - configMapRef: { name: backend-config }
@@ -1167,7 +1167,7 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: vlab-frontend }
     spec:
-      hostNetwork: true                   # $remote_addr = Tailscale IP จริงของเครื่องแลป (runbook D4)
+      hostNetwork: true                   # $remote_addr = Tailscale IP จริงของเครื่องแลป (AWS_LAB_GATEWAY.md ข้อ 16.0 D4)
       dnsPolicy: ClusterFirstWithHostNet
       automountServiceAccountToken: false
       nodeSelector: { vlab.io/role: platform }
@@ -1194,7 +1194,7 @@ spec:
             limits: { memory: 128Mi }
 ```
 
-ไฟล์ใหม่ `web-portal/frontend/nginx.conf.template` (ถ้า runbook 2D เขียน nginx.conf ใหม่แล้ว ให้ใช้ของนั้นเป็นตัวตั้ง แล้วเปลี่ยนแค่ `listen` / `proxy_pass` ให้เป็นตัวแปร)
+ไฟล์ใหม่ `web-portal/frontend/nginx.conf.template` (ถ้า AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2D เขียน nginx.conf ใหม่แล้ว ให้ใช้ของนั้นเป็นตัวตั้ง แล้วเปลี่ยนแค่ `listen` / `proxy_pass` ให้เป็นตัวแปร)
 image `nginx:alpine` รัน `envsubst` กับ `/etc/nginx/templates/*.template` ตอนเริ่ม และแทนเฉพาะตัวแปรที่มีใน env เท่านั้น ตัวแปรของ nginx อย่าง `$uri` และ `$remote_addr` จึงไม่โดนแทน
 
 ```nginx
@@ -1210,7 +1210,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;      # เขียนทับเสมอ — client ปลอมค่านี้ไม่ได้
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 180s;                      # Start (AWS) รอได้ ~2 นาที จนกว่า runbook 2B จะเสร็จ
+        proxy_read_timeout 180s;                      # Start (AWS) รอได้ ~2 นาที จนกว่า AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2B จะเสร็จ
         client_max_body_size 100m;                    # ← ตั้งให้ ≥ ขนาดไฟล์ที่ backend รับ (default ของ nginx = 1m)
     }
 
@@ -1540,7 +1540,7 @@ API_PORT=8000
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 CORS_ORIGINS_STR=http://<PLATFORM_IP>
-# runbook 2A — เชื่อ X-Real-IP เฉพาะ nginx บนเครื่องเดียวกัน (ชื่อตัวแปรตามที่ 2A ตั้งจริง)
+# AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2A — เชื่อ X-Real-IP เฉพาะ nginx บนเครื่องเดียวกัน (ชื่อตัวแปรตามที่ 2A ตั้งจริง)
 TRUSTED_PROXY_CIDRS_STR=127.0.0.1/32
 STORAGE_ROOT=storage
 STORAGE_BACKEND=local
@@ -1877,9 +1877,9 @@ if __name__ == "__main__":
 | 1 | `web-portal/backend/app/services/kubernetes_service.py:30-41` | ถ้าไม่มี kubeconfig และมี env `KUBERNETES_SERVICE_HOST` ให้เรียก `config.load_incluster_config()` (ตอนนี้ fallback ไป `load_kube_config()` ซึ่งจะพังใน pod) | ใช้ ServiceAccount แทน kubeconfig admin | 3 |
 | 2 | `web-portal/backend/app/services/warm_pod_service.py:153`, `prewarm_service.py:82` | เพิ่ม `{"key": "vlab.io/role", "operator": "NotIn", "values": ["platform"]}` ใน affinity ของ DaemonSet | กันไม่ให้ warm pod ลง platform node (ทำงานคู่กับ taint) | 3 |
 | 3 | `warm_pod_service.py:266-280` (`node_for_ip`), `prewarm_service.py:165` | ข้าม node ที่มี label `vlab.io/role=platform` และเพิ่ม test ใน `tests/prewarm` | Solution C3 — ไม่ให้นับ platform node เป็นเครื่องแลป | 3 |
-| 4 | `web-portal/frontend/Dockerfile`, `nginx.conf` → `nginx.conf.template` | `listen ${BIND_IP}:${HTTP_PORT}`, proxy `/api/` → `${API_UPSTREAM}` + ค่า ENV เริ่มต้น | hostNetwork + พอร์ตต่อ env (ข้อ 7.2) | 3 (ทำพร้อม runbook 2D) |
-| 5 | `web-portal/frontend/src/services/api.ts:14` | `VITE_API_URL=/api` (relative) — runbook 2C | ใช้ image เดียวได้ทุก env | ต้องเสร็จก่อน 3 |
-| 6 | backend อ่าน IP จริงหลัง proxy — runbook 2A | เชื่อ `X-Real-IP` เฉพาะเมื่อ peer อยู่ใน `TRUSTED_PROXY_CIDRS` = `127.0.0.1/32` | backend ผูก loopback และ nginx ส่ง IP จริงมาให้ | ต้องเสร็จก่อน 3 |
+| 4 | `web-portal/frontend/Dockerfile`, `nginx.conf` → `nginx.conf.template` | `listen ${BIND_IP}:${HTTP_PORT}`, proxy `/api/` → `${API_UPSTREAM}` + ค่า ENV เริ่มต้น | hostNetwork + พอร์ตต่อ env (ข้อ 7.2) | 3 (ทำพร้อม AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2D) |
+| 5 | `web-portal/frontend/src/services/api.ts:14` | `VITE_API_URL=/api` (relative) — AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2C | ใช้ image เดียวได้ทุก env | ต้องเสร็จก่อน 3 |
+| 6 | backend อ่าน IP จริงหลัง proxy — AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2A | เชื่อ `X-Real-IP` เฉพาะเมื่อ peer อยู่ใน `TRUSTED_PROXY_CIDRS` = `127.0.0.1/32` | backend ผูก loopback และ nginx ส่ง IP จริงมาให้ | ต้องเสร็จก่อน 3 |
 | 7 | `images.yml` build-arg `KUBECTL_VERSION` | pin ให้ตรงกับ `k3s_version` | build ซ้ำแล้วได้ผลเหมือนเดิม | 1 |
 | 8 | `k8s/siem/layer3-processing/01-vector-aggregator-configmap.yaml:261`, `k8s/siem/layer5-detection/02-sigma-rules-cronjob.yaml:103`, datasource ใน `00-grafana-deployment.yaml` | `http://100.86.87.27:8000/api/v1/logs` → `http://<PLATFORM_IP>/api/v1/logs` (ผ่าน nginx) และ DB → `postgres.vlab-prod.svc.cluster.local:5432` | IP เก่าฮาร์ดโค้ดไว้ และ backend ไม่เปิด :8000 ออกนอกเครื่องแล้ว | 2 / 4 |
 | 9 | `k8s/siem/kustomization.yaml` + `layer*/kustomization.yaml` (ใหม่), `docs/SETUP_TEST.md` ขั้น 5.5 | ตั้ง wave ทีละ layer และเปลี่ยนคำสั่งเป็น `kubectl apply -k` | ลำดับ layer | 2 |
@@ -1986,7 +1986,7 @@ kubectl -n vlab-prod logs job/smoke
 | `ImagePullBackOff` | `images.yml` ล้ม (ไม่มี tag) หรือ package บน GHCR ยังเป็น private | ดู run ของ Actions / ตั้ง package เป็น public |
 | SealedSecret "no key could decrypt secret" | seal ด้วย cert ผิดตัว หรือเปลี่ยนชื่อ / namespace (scope strict) | `kubeseal --fetch-cert` ใหม่ แล้ว seal ใหม่ |
 | `db-migrate` ล้ม | migration / ข้อมูลไม่เข้ากัน | อ่าน log แล้วแก้ด้วย PR ใหม่ (fix forward) ถ้าข้อมูลเสียให้ restore (ข้อ 10.4) |
-| `whoami-from-lab` ล้มด้วย "มี NAT / proxy คั่น" | frontend ไม่ได้ใช้ hostNetwork, nginx ไม่ได้ส่ง `X-Real-IP`, หรือ backend ไม่เชื่อ `127.0.0.1` | เช็กข้อ 7.2 และ runbook 2A |
+| `whoami-from-lab` ล้มด้วย "มี NAT / proxy คั่น" | frontend ไม่ได้ใช้ hostNetwork, nginx ไม่ได้ส่ง `X-Real-IP`, หรือ backend ไม่เชื่อ `127.0.0.1` | เช็กข้อ 7.2 และ AWS_LAB_GATEWAY.md ข้อ 16 เฟส 2A |
 | `whoami-from-lab` ค้างจนหมดเวลา | เครื่องแลปที่ระบุใน `nodeSelector` ปิดอยู่ | เปลี่ยนเครื่องหรือตัด component ออก |
 | Argo CD `OutOfSync` ตลอดที่ field เดิม | controller อื่นแก้ field นั้นหลัง apply | เพิ่ม `ignoreDifferences` เฉพาะ field นั้นใน Application |
 | ComparisonError "namespace skypilot not found" | Ansible `skypilot_reset=true` ลบ ns ไป | รัน role `skypilot-node` จนเสร็จแล้วกด Refresh |

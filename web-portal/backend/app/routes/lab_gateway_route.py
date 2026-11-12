@@ -1,4 +1,4 @@
-"""lab gateway: ตาราง route ให้ Traefik บน vlab-ts-router (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A.5)
+"""lab gateway: ตาราง route ให้ Traefik บน vlab-ts-router (docs/AWS_LAB_GATEWAY.md ข้อ 4.5)
 
 Traefik (HTTP provider) ดึง GET /api/internal/v1/gateway/routes ทุก 5 วิ ผ่าน Tailscale พร้อม header X-Gateway-Token
 backend ไม่เคยเรียก router — router เป็นฝ่ายมาถาม (pull)

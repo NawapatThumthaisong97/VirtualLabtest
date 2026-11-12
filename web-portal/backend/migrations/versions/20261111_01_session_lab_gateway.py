@@ -1,4 +1,4 @@
-"""lab gateway: sessions.gateway_token + sessions.upstreams (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md 1A.3)
+"""lab gateway: sessions.gateway_token + sessions.upstreams (docs/AWS_LAB_GATEWAY.md ข้อ 4.3)
 
 Revision ID: 20261111_01
 Revises: 20261031_01

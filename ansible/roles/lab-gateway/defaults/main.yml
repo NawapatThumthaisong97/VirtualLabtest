@@ -1,4 +1,4 @@
-# lab gateway บน vlab-ts-router (docs/AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md ข้อ 1E)
+# lab gateway บน vlab-ts-router (docs/AWS_LAB_GATEWAY.md ข้อ 9.2)
 # นักศึกษา → Cloudflare → tunnel → cloudflared (เครื่องนี้) → Traefik 127.0.0.1:8081 → lab EC2 10.10.2.x
 
 lab_gateway_domain: bell-lab.space
