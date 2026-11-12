@@ -3,8 +3,8 @@
 > เอกสารฉบับสมบูรณ์ของงาน lab gateway อธิบายว่า **ทำอะไร ทำไม และทำงานยังไง** ทุกชั้น ตั้งแต่ backend, AWS, Terraform, Tailscale, Cloudflare จนถึง Ansible
 > พร้อมขั้นตอนติดตั้งตามที่ทำจริง ผลเทส ปัญหาที่เจอ และงานที่ยังค้าง
 >
-> แทนที่ `AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md` (แผนก่อนลงมือ) และ `AWS_LAB_PUBLIC_ACCESS_PROGRESS.md` (บันทึกระหว่างทำ) ซึ่งยังดูได้ใน git history
-> ภาพรวมเฟส 1–3 และเหตุผลที่เลือกทางนี้อยู่ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md) / [AWS_LAB_GATEWAY_ROUTER.md](AWS_LAB_GATEWAY_ROUTER.md)
+> แทนที่ `AWS_LAB_PUBLIC_ACCESS_RUNBOOK.md` (แผนก่อนลงมือ), `AWS_LAB_PUBLIC_ACCESS_PROGRESS.md` (บันทึกระหว่างทำ) และ `AWS_LAB_GATEWAY_ROUTER.md` (ออกแบบเฟส 1 บน router) ซึ่งยังดูได้ใน git history
+> ภาพรวมเฟส 1–3 และการเทียบทางเลือก A / B อยู่ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md)
 >
 > branch `feature/aws-dns` / ทำ 2026-11-10 → 2026-11-12
 
@@ -26,6 +26,7 @@
 14. [คู่มือใช้งานและแก้ปัญหา](#14-คู่มือใช้งานและแก้ปัญหา)
 15. [คำศัพท์](#15-คำศัพท์)
 16. [แผนเฟส 2: public portal (ยังไม่ทำ)](#16-แผนเฟส-2-public-portal-ยังไม่ทำ)
+17. [อ้างอิงภายนอก](#17-อ้างอิงภายนอก)
 
 > กล่อง **💡 รู้ไว้** ที่แทรกตามหัวข้อ = ความรู้ที่ได้จากปัญหาที่เจอจริงระหว่างทำ (รายละเอียดเต็มอยู่ในข้อ 12)
 
@@ -367,6 +368,8 @@ VPC 10.10.0.0/16 (+ IPv6 /56)
 - ใช้ RAM จริงหลังลง gateway: เหลือ ~1450 MB (Traefik ~14 MB, cloudflared ~15 MB) / systemd จำกัด Traefik 384M, cloudflared 256M กันแย่ง RAM กับ Tailscale
 - IP ที่สำคัญ: **Tailscale `100.84.123.59` และ private `10.10.1.234` ไม่เปลี่ยน** / public IP เปลี่ยนทุกครั้งที่ stop/start (ไม่มีใครใช้ ไม่ต้องมี Elastic IP)
 
+> 💡 **รู้ไว้ (ทำไมห้ามลง Docker บน router):** Docker ตอนติดตั้งจะตั้ง iptables chain `FORWARD` ให้ policy เป็น **DROP** และเพิ่ม chain ของตัวเอง (`DOCKER`, `DOCKER-USER` ฯลฯ) แต่หน้าที่หลักของ router คือ **forward** packet จาก `tailscale0` ไป `ens5` (tailnet → VPC) → ลง Docker แล้ว traffic ของทั้งทีมที่ไป AWS อาจโดน DROP ทันที (SkyPilot SSH เข้า lab ไม่ได้ / launch ค้าง) จึงลง Traefik และ cloudflared เป็น binary + systemd และ role เช็กตอนท้ายว่า `iptables -S FORWARD` เหมือนก่อนลง
+>
 > 💡 **รู้ไว้ (IP 3 แบบของ EC2):** private IP ผูกกับ network interface (อยู่จนลบเครื่อง) / Tailscale IP ผูกกับ key ของ Tailscale บน disk / public IP ยืมจาก AWS ชั่วคราว คืนทุกครั้งที่ stop → ระบบที่ **ต่อออก** ไปหาคนอื่นเอง (cloudflared, Tailscale) ไม่สนว่า public IP จะเปลี่ยน ส่วน Elastic IP คิดเงินแม้เครื่องปิด
 >
 > 💡 **รู้ไว้:** ใช้ `t3.small` แต่ Traefik + cloudflared ใช้รวมแค่ ~30 MB สิ่งที่กิน RAM คือ OS + Tailscale ที่ต้องเหลือที่ให้เสมอ เพราะ router ล่ม = ทั้งทีมเข้า AWS ไม่ได้ (ไม่ใช่แค่ลิงก์ lab)
@@ -688,6 +691,8 @@ api: { dashboard: false }
 accessLog:
   fields: { headers: { defaultMode: drop } }   # ไม่เก็บ cookie / header ของนักศึกษา
 ```
+
+> 💡 **รู้ไว้ (`passHostHeader` ต้องเป็น true):** ค่าเริ่มของ Traefik คือส่ง Host เดิม (`l-<token>-8443.bell-lab.space`) ต่อให้ lab ไม่เปลี่ยนเป็น `10.10.2.x` ซึ่งจำเป็นกับ **code-server** เพราะมันเทียบ Origin ของ websocket กับ Host (หรือ `X-Forwarded-Host`) ไม่ตรง = terminal / editor ต่อไม่ได้ / ผลข้างเคียงคือ Vite เห็นโดเมนเราแล้วบล็อก (ข้อ 13) — ถ้าจะแก้ Vite ด้วยการปิด `passHostHeader` (ทาง B) ต้องเทส code-server ก่อนเสมอ
 
 > 💡 **รู้ไว้ (เขียนขั้นเช็กให้ถูกทั้งรอบแรกและรอบรันซ้ำ):** เจอบั๊กในขั้นเช็กของ role เอง 2 ครั้ง ทั้งที่ tunnel ทำงานปกติ
 > 1. เดิมนับบรรทัด `Registered tunnel connection` ใน log **3 นาทีล่าสุด** → รอบแรกผ่าน (service เพิ่ง start) แต่รันซ้ำแล้วไม่ restart บรรทัดนั้นเก่าเกินช่วง → นับได้ 0 → เปลี่ยนเป็นถามสถานะตรง ๆ ที่ `/ready`
@@ -1205,3 +1210,18 @@ GOOGLE_REDIRECT_URI=https://{{ webservice_public_domain }}/auth/callback
 ### 16.9 เฟส 3 (ยังไม่ออกแบบละเอียด)
 
 forward-auth (ต้อง login ก่อนเปิดลิงก์ lab ไม่ใช่แค่รู้ token) + แยก domain ของ lab ดู [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md) ข้อ 6 / cookie ชื่อ `__Host-` ทำได้เฉพาะ HTTPS (ต้อง `Secure` + ไม่มี `Domain`) ทางเดิมที่เป็น HTTP ใช้ไม่ได้ จึงเลื่อนมาทำพร้อมเฟส 3
+
+---
+
+## 17. อ้างอิงภายนอก
+
+| หัวข้อ | ลิงก์ | ใช้ตรงไหน |
+|---|---|---|
+| Docker แก้ iptables `FORWARD` | https://docs.docker.com/engine/network/packet-filtering-firewalls/ | เหตุผลที่ไม่ลง Docker บน router (ข้อ 5.2) |
+| Traefik HTTP provider | https://doc.traefik.io/traefik/providers/http/ | Traefik ดึงตาราง route จาก backend (ข้อ 4.4, 9.2) |
+| Traefik entryPoint `respondingTimeouts` | https://doc.traefik.io/traefik/routing/entrypoints/ | `readTimeout` / `idleTimeout` 600s (ข้อ 9.2) |
+| Cloudflare Tunnel ingress / wildcard | https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/configure-tunnels/local-management/configuration-file/ | `*.bell-lab.space` → `127.0.0.1:8081` (ข้อ 8) |
+| Tailscale tags | https://tailscale.com/kb/1068/tags | ติด `tag:vlab-router` (ข้อ 7) |
+| Vite `server.allowedHosts` | https://vite.dev/config/server-options.html#server-allowedhosts | "Blocked request" ของพอร์ต 5173 (ข้อ 13) |
+
+อ้างอิงอื่นของเฟส 1–3 ดู "อ้างอิงภายนอก" ใน [AWS_LAB_PUBLIC_ACCESS.md](AWS_LAB_PUBLIC_ACCESS.md)
