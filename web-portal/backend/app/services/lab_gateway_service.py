@@ -131,7 +131,9 @@ def build_routes(db: DbSession) -> dict:
 
     1 พอร์ตของ 1 session = router 1 ตัว (Host → service) + service 1 ตัว (→ upstream)
     upstream ที่ไม่ผ่าน upstream_ok ถูกข้ามพร้อม log warning (session อื่นยังใช้ได้)
-    ไม่มี session = {"http": {"routers": {}, "services": {}}} (Traefik รับได้ ทุก Host ได้ 404)
+    ไม่มี route = {} (ทุก Host ได้ 404) — ห้ามคืน {"http": {"routers": {}, ...}} หรือ {"http": {}}:
+    Traefik 3.7 decode ไม่ได้ ("routers cannot be a standalone element") แล้วไม่อัปเดตตาราง
+    (ลองกับ traefik v3.7.16 จริงแล้ว 2026-11-12 มีแค่ {} ที่ผ่าน)
     """
     routers: dict[str, dict] = {}
     services: dict[str, dict] = {}
@@ -148,4 +150,6 @@ def build_routes(db: DbSession) -> dict:
                 "entryPoints": [TRAEFIK_ENTRYPOINT],
             }
             services[name] = {"loadBalancer": {"servers": [{"url": url}]}}
+    if not routers:
+        return {}
     return {"http": {"routers": routers, "services": services}}

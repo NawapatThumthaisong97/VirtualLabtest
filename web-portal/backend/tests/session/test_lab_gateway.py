@@ -168,15 +168,21 @@ def add_gw_session(db, world):
 
 
 def router_names(table):
-    return set(table["http"]["routers"])
+    # ตารางว่างเป็น {} (ไม่มี key "http")
+    return set(table.get("http", {}).get("routers", {}))
 
 
 class TestBuildRoutes:
     """lab gateway: route table"""
 
     def test_empty(self, db):
-        """no sessions -> empty table in Traefik format"""
-        assert gw.build_routes(db) == {"http": {"routers": {}, "services": {}}}
+        """no sessions -> {} (Traefik 3.7 cannot decode empty routers / http maps)"""
+        assert gw.build_routes(db) == {}
+
+    def test_only_bad_upstreams_is_empty(self, db, add_gw_session):
+        """every port skipped -> {} too, not {"http": {"routers": {}}}"""
+        add_gw_session(upstreams={"22": "http://10.10.2.14:22"})
+        assert gw.build_routes(db) == {}
 
     def test_running_session_all_ports(self, db, add_gw_session):
         """RUNNING AWS session with token -> one router + service per port"""
@@ -303,10 +309,10 @@ class TestRoutesEndpoint:
         assert set(body["http"]["routers"]) == {f"s-{s.gateway_token}-8443"}
 
     def test_empty_table(self, client):
-        """no AWS lab running -> {"http":{"routers":{},"services":{}}}"""
+        """no AWS lab running -> {} (empty Traefik config, every Host gets 404)"""
         r = client.get(ROUTES_PATH, headers={"X-Gateway-Token": GATEWAY_TOKEN})
         assert r.status_code == 200
-        assert r.json() == {"http": {"routers": {}, "services": {}}}
+        assert r.json() == {}
 
     @pytest.mark.parametrize("headers", [
         {},
