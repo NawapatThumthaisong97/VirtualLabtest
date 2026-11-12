@@ -715,6 +715,37 @@ wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้�
 - **รอบ 6: `ok=21 changed=0 failed=0`** ✅ ผ่านทุกเช็ก (404 host มั่ว / ดึง route ได้ / tunnel ต่อ / tailscale up / ip_forward=1 / FORWARD chain ไม่เปลี่ยน) / RAM router เหลือ 1452 MB (เกณฑ์ ≥ 800) Traefik ใช้ ~14 MB cloudflared ~15 MB / `https://l-test-8080.bell-lab.space/` = 404 จาก Traefik
 - เกณฑ์ R1–R4 ของรันบุ๊ค (เทสจริงกับ lab) ทำในเฟส F
 
+### 2026-11-12 — สรุปปัญหาทั้งหมดตอนรัน Ansible (B3 → E6)
+
+รายละเอียดของแต่ละข้ออยู่ในบันทึก B3 / E3 / E6 ด้านบน ตารางนี้ไว้ดูภาพรวม
+
+| # | ช่วง | อาการ | สาเหตุ | แก้ | ประเภท |
+|---|---|---|---|---|---|
+| 1 | B3 | playbook ไม่เจอเครื่อง web | `site.yml` ใช้ group `webservice` แต่ `.example` เขียน `webportal` | เปลี่ยนชื่อ group | config |
+| 2 | B3 | rsync copy `.venv` ของเครื่องเราไป VM | sync task / `.dockerignore` ไม่ตัด `.venv` | `--exclude=.venv` + `.dockerignore` | บั๊ก role `web-service` |
+| 3 | B3, E6 | `DEPRECATION WARNING: The connection's stdin object is deprecated` | คำเตือนของ Ansible รุ่นนี้ตอน rsync | ไม่ต้องแก้ | ปกติ |
+| 4 | B3 | "Verify backend reaches SkyPilot" ได้ 401 | token ออกโดย server ตัวอื่น (2026-10-20) | Service Account ใหม่บน `masterlab2` | config |
+| 5 | B3 | pod บน master resolve ชื่อไม่ได้ (SkyPilot / cloudflared ล่ม) | role `k3s-server` ฝัง DNS ของเน็ตตอนติดตั้ง (`192.168.1.1`) | รัน `--tags k3s-server` ใหม่ / **ทางถาวรยังค้าง** | บั๊ก role `k3s-server` |
+| 6 | B3 | VM master ค้างตอน restart k3s | VM ค้าง ~157 วิ (RAM ของ PC / sleep) | reset VM | สภาพแวดล้อม |
+| 7 | B3 | task scan ของ `k3s-server` fail | `all.yml` ไม่มี `registry_users` | **ยังค้าง** (ไม่เกี่ยวงานนี้) | config |
+| 8 | E4 | SSH เข้า router ไม่ได้ (`tailnet policy does not permit`) | router ใช้ Tailscale SSH (ดู ACL ไม่ดู key) | กฎ `ssh` admin → `tag:vlab-router` | config |
+| 9 | E6 | `--check` fail ที่ `Install traefik binary` (`Source ... does not exist`) | โหมดซ้อมไม่ดาวน์โหลดจริง ขั้นแตกไฟล์เลยหาไฟล์ไม่เจอ | ไม่ต้องแก้ | ปกติ |
+| 10 | E6 | `context deadline exceeded` | VM backend ปิด | เปิด VM | สภาพแวดล้อม |
+| 11 | E6 | backend ตอบ 404 | `LAB_GATEWAY_ENABLED=false` | host var `webservice_lab_gateway_enabled: true` | config |
+| 12 | E6 | web-service อ่าน kubeconfig ไม่ได้ | VM master ปิด | เปิด VM | สภาพแวดล้อม |
+| 13 | E6 | "cloudflared connected" fail ทั้งที่ tunnel ต่อ | นับบรรทัด log ช่วง 3 นาที รันซ้ำแล้วบรรทัดเก่าเกินช่วง | ถาม `/ready` ตรง ๆ | บั๊ก role `lab-gateway` (ขั้นเช็ก) |
+| 14 | E6 | Traefik `routers cannot be a standalone element` | ไม่มี lab → backend คืน `{"http":{"routers":{}}}` Traefik 3.7 decode ไม่ได้ | คืน `{}` + แก้ test | **บั๊ก backend (A5)** |
+| 15 | E6 | `/ready` ตอบ 200 แต่ยัง fail | cloudflared ตอบ `text/plain` → `uri` ไม่สร้าง `.json` | `content \| from_json` | บั๊ก role `lab-gateway` (ขั้นเช็ก) |
+| 16 | E6 | รัน test ที่ใช้ DB ในเครื่องไม่ได้ | Docker Desktop ปิด | รันบน `webserverlab2` กับ DB แยก `virtual_lab_test` (84/84) | สภาพแวดล้อม |
+
+**แยกประเภท:** บั๊กในโค้ดแอปมี **ตัวเดียว (#14)** — ระบบพังจริง (ตาราง route ไม่อัปเดต) / #13, #15 เป็นบั๊กในขั้นเช็กของ role ระหว่างนั้น cloudflared / tunnel ทำงานปกติ ไม่กระทบใคร / ที่เหลือเป็น config, เครื่องปิด หรือพฤติกรรมปกติของ Ansible
+
+**บทเรียน:**
+- เช็กก่อนรันว่า master / web / router ขึ้นใน `tailscale status` — 3 รอบ fail เพราะเครื่องปิด (#10, #12, รวมถึง router ถูก stop ระหว่างวัน)
+- เช็กท้าย role คุ้ม: #14 ไม่มี unit test ตัวไหนจับได้ (test เช็กแค่ว่า backend คืนรูปแบบที่เราคิดเอง ไม่เคยลองกับ Traefik จริง) แต่ role จับได้ → ต่อไปรูปแบบที่ส่งให้โปรแกรมอื่นอ่าน ให้ลองกับโปรแกรมตัวจริงด้วย
+- เช็กต้องถูกทั้งรอบแรก (เพิ่ง restart) และรอบรันซ้ำ (ไม่ restart) — #13 / #15 ผ่านแค่กรณีแรก
+- error ที่เปลี่ยนทุกรอบ = คืบหน้า: timeout → 404 → decode error = ผ่าน network → ACL → token → รูปแบบข้อมูล ทีละช่วง
+
 ---
 
 ## เรื่องที่ค้าง / ต้องถาม
