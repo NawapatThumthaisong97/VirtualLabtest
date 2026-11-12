@@ -884,7 +884,7 @@ ansible-playbook -i inventory.home.yml site.yml --limit webservice --tags web-se
 # จากเครื่องใน tailnet
 curl -s -H "X-Gateway-Token: <vault_lab_gateway_token>" http://<BACKEND_TS_IP>:8000/api/internal/v1/gateway/routes
 ```
-ยังไม่มี lab AWS เปิด = `{"http":{"routers":{},"services":{}}}`
+ยังไม่มี lab AWS เปิด = `{}` (ไม่ใช่ `{"http":{"routers":{},...}}` — Traefik 3.7 decode ไม่ได้ ดู progress E6)
 
 ### 1F.3 เทส router ยังทำงานเดิม (ทำหลัง 1B / 1C / 1E / 1F ทุกครั้ง)
 

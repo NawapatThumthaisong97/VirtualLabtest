@@ -715,6 +715,46 @@ wildcard `*` แบบ Proxied ได้ setting ทั้ง zone มาด้�
 - **รอบ 6: `ok=21 changed=0 failed=0`** ✅ ผ่านทุกเช็ก (404 host มั่ว / ดึง route ได้ / tunnel ต่อ / tailscale up / ip_forward=1 / FORWARD chain ไม่เปลี่ยน) / RAM router เหลือ 1452 MB (เกณฑ์ ≥ 800) Traefik ใช้ ~14 MB cloudflared ~15 MB / `https://l-test-8080.bell-lab.space/` = 404 จาก Traefik
 - เกณฑ์ R1–R4 ของรันบุ๊ค (เทสจริงกับ lab) ทำในเฟส F
 
+### 2026-11-12 — F0: Vite ใน music-lab ไม่รับ hostname ของ gateway ❌ (ต้องแก้ image)
+
+**ทำไมต้องเช็ก:** Vite ≥ 5.4.12 (แพตช์ความปลอดภัย ม.ค. 2025) ตอบ "Blocked request. This host is not allowed" ถ้า Host ไม่ใช่ localhost / IP / ที่อยู่ใน `server.allowedHosts` → ลิงก์ `l-<token>-5173.bell-lab.space` เปิดไม่ได้ (G4)
+
+**ผล:**
+- `music-lab/client/package.json` = `"vite": "^5.4.0"` ไม่มี lockfile → build เมื่อไหร่ได้ 5.4 ล่าสุดตอนนั้น / image ใน ECR `vlab/music-lab-ide:lab-01` push 2026-10-11 → ได้ 5.4.x ที่มีการบล็อกแน่นอน
+- `vite.config.js` ไม่มี `allowedHosts` (มีแค่ `host: true` ซึ่งเป็น boolean ไม่ถูกนับเป็น host ที่อนุญาต)
+- **env `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` ที่ backend ส่ง (A7) ใช้ไม่ได้:** โหลด vite จาก npm มา grep แล้ว 5.4.11 / 5.4.12 / 5.4.21 (ล่าสุดของ 5.4) / 6.0.9 ไม่มีชื่อนี้ใน `dist` เลย — `getAdditionalAllowedHosts` ใน 5.4.21 อ่านแค่ `server.host` (string), `hmr.host`, `preview.host`, `server.origin` → ข้อสมมติในรันบุ๊ค D10 ผิดสำหรับ 5.4
+- `vite.config.js` ถูก bake อยู่ใน image (`skypilot/Dockerfile`: `COPY client/ /app/client/`) → แก้แล้วต้อง build + push ECR ใหม่ (`build-images.yml` บนเครื่อง registry → `ecr-sync`) / เครื่อง `register` offline 5 วัน และ `all.yml` เราไม่มี `registry_users`
+- กระทบแค่พอร์ต 5173 (Vite) — 8443 (code-server) / 8080 (server) ไม่เกี่ยว เทส G1–G3, G5–G9, G11 ทำต่อได้
+
+### 2026-11-12 — F1–F3 + เทสที่ไม่ต้องเปิด lab ✅
+
+ก่อนเทส VM `webserverlab2` ค้างอีกรอบ (SSH timeout, `tailscale status` `rx 0`, Traefik `Provider error` 19 ครั้ง / 2 นาที) → reset ใน VirtualBox แล้วกลับมาปกติ / ระหว่าง backend ล่ม ลิงก์ที่ไม่มี lab ยังได้ 404 จาก Traefik (ใช้ตารางล่าสุด)
+
+| เทส | ทำยังไง | ผล |
+|---|---|---|
+| F1 เปิด flag | `webservice_lab_gateway_enabled: true` ใน inventory (ทำตอน E6) / `.env` บน VM = `LAB_GATEWAY_ENABLED=true`, `LAB_GATEWAY_DOMAIN=bell-lab.space` | ✅ |
+| F2 ตาราง route | `curl` endpoint พร้อม token จาก WSL | `{}` ✅ (ไม่มี lab AWS) / แก้รันบุ๊ค 1F.2 ให้เป็น `{}` แล้ว |
+| G8 ไม่มี / ผิด token | `curl` ไม่ใส่ header / `X-Gateway-Token: wrong` | 404 / 404 ✅ |
+| G6 token มั่ว | `https://l-aaaaaaaaaaaaaaaa-8443.bell-lab.space/` จากอินเทอร์เน็ต | 404 ✅ |
+| R1 router ยัง route | `tailscale status` บน router / master เห็น PrimaryRoutes ของ router | `10.10.2.0/24`, `10.10.3.0/24` ✅ |
+| Traefik หลัง backend กลับมา | `journalctl -u traefik` 15 วิล่าสุด | `Provider error` 0 ✅ |
+| G9 router เข้าเครื่องอื่นไม่ได้ | จาก router `/dev/tcp` ไป master `:22` `:6443`, backend `:22` `:5432`, backend `:8000` | blocked ×4, **`:8000` OPEN** ✅ ตรง ACL |
+
+**เตรียมเทสที่ต้องเปิด lab (R2, G1–G5, G11):** DB บน VM มี user 5 / course 3 / lab 6 แต่ **ทุก lab เป็น `run_target = KUBERNETES`** ไม่มี lab AWS / lab "OOP with Spring Boot" ใช้ image `skypilot/music-lab:lab-01` ซึ่งมีใน ECR (`skypilot/music-lab:lab-01` push 2026-10-19) / config AWS ของ backend ครบ (`ECR_REGISTRY_HOST`, `AWS_LAB_AMI`, `AWS_INSTANCE_TYPE=m7i-flex.large`) → ต้องเปลี่ยน lab นี้เป็น `AWS` ก่อน Start
+- เปลี่ยนแล้ว (2026-11-12, DB ของ VM ทดสอบ): `update labs set run_target='AWS' where id='03a18386-1558-4bcf-9399-4b79cc1ae22b'` / ports ของ image = 8080, 5173, 8443 (อยู่ในช่วง 3000–9999 ทั้งหมด) / **คืนค่า:** `update labs set run_target='KUBERNETES' where id='03a18386-…'`
+
+### 2026-11-12 — R2 + G1 + G2/G4 รอบแรก: Start lab บน AWS ผ่าน gateway ✅ (5173 ติด Vite ตามคาด)
+
+- กด Start ไม่ได้ทีแรก: "User already has a running session" = session ตัวอย่างจาก seed (`36b6b716…`, pod `lab-se301-sophia`, endpoints `localhost`, หมดอายุ 2026-11-11 แต่ยัง RUNNING) → ตั้งเป็น STOPPED ใน DB ทดสอบ
+- login ด้วย user seed `sophia.dav@dome.tu.ac.th` (รหัสตาม `app/seeds/seed.py`)
+- หน้ารอ lab ไม่ใช่ WebSocket: frontend ส่ง HTTP request เดียว backend ถือไว้จน lab พร้อมแล้วตอบ (`LabDetail.tsx`) / `setInterval` ใน `LabLoader.tsx` แค่ animation → ระหว่างรอห้ามรีเฟรช
+- ระหว่างรอ PC เข้าเว็บไม่ได้ชั่วคราว: VM ปกติ แต่ Tailscale ฝั่ง PC เห็น VM `offline` / relay → กลับมาเอง / Traefik มี `Provider error` ช่วงนั้น (ล่าสุด 15:19:04 UTC) หลังจากนั้น 0
+- **R2 ✅** launch ผ่าน: cluster `music-lab-1794496777` (`m7i-flex.large` 2 vCPU / 8 GB — Pete ตั้งไว้ใน commit `72f9a12` เพราะบัญชี AWS free plan สร้างได้แค่บางชนิด, ~$0.12/ชม.) / image `skypilot/music-lab:lab-01`
+- **G1 ✅** หน้าเว็บแสดงลิงก์ `https://l-<token>-{5173,8080,8443}.bell-lab.space` / ตาราง route บน router ได้ 3 router → `http://10.10.2.73:{5173,8080,8443}`
+- 8443 (code-server) ✅ เปิดหน้า login ของ code-server ผ่าน gateway ได้ / รหัส = `musiclab` (ค่าเริ่มของ `music-lab/skypilot/run.sh` `${IDE_PASSWORD:-musiclab}` backend ไม่ได้ส่ง `IDE_PASSWORD`) — **ข้อสังเกตความปลอดภัย:** ทุก lab รหัสเดียวกันและอยู่ใน repo → กุญแจจริงเหลือแค่ token ในลิงก์ (80 bit) ควรสุ่มรหัสต่อ session ภายหลัง
+- 8080 ✅ ได้หน้า "Not Found — The requested URL was not found on the server" = หน้า 404 ของ Flask (server ของ music-lab) ตอบเอง → gateway ส่งถึงแล้ว แค่ `/` ไม่มี route (API อยู่ `/api/...`) / ถ้า gateway ไม่รู้จัก host จะได้ 404 ข้อความสั้นของ Traefik ไม่ใช่หน้านี้
+- 5173 ❌ **"Blocked request. This host ("l-…-5173.bell-lab.space") is not allowed"** ตรงกับที่คาดใน F0 → รอแก้ `allowedHosts` + build image
+
 ### 2026-11-12 — สรุปปัญหาทั้งหมดตอนรัน Ansible (B3 → E6)
 
 รายละเอียดของแต่ละข้ออยู่ในบันทึก B3 / E3 / E6 ด้านบน ตารางนี้ไว้ดูภาพรวม
