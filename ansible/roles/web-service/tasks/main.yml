@@ -14,6 +14,21 @@
       webservice_skypilot_endpoint="" เพื่อใช้ SkyPilot ใน container แทน
   when: webservice_skypilot_endpoint | length > 0
 
+# เปิด lab gateway แต่ค่าไม่ครบ = backend ไม่ start (settings.check_lab_gateway) เช็กก่อนลงอะไรทั้งหมด
+# token ใช้แค่ A-Z a-z 0-9 _ - กัน # / ช่องว่าง / quote ทำให้ .env อ่านผิด
+- name: Validate lab gateway settings
+  ansible.builtin.assert:
+    that:
+      - webservice_lab_gateway_domain | length > 0
+      - webservice_lab_gateway_token | length >= 32
+      - webservice_lab_gateway_token is match('^[A-Za-z0-9_-]+$')
+    fail_msg: >-
+      webservice_lab_gateway_enabled=true ต้องตั้ง vault_lab_gateway_token ใน group_vars/all.yml
+      (ยาว >= 32 ตัว สร้างด้วย python3 -c 'import secrets;print(secrets.token_urlsafe(48))')
+      และ webservice_lab_gateway_domain
+    quiet: true
+  when: webservice_lab_gateway_enabled | bool
+
 # ---------- Docker ----------
 # ติดตั้งจาก repo ทางการของ Docker ไม่ใช้ docker.io ของ Ubuntu
 # เพราะตัวนั้นเก่าและไม่มี compose v2 plugin ติดมาด้วย
@@ -92,6 +107,7 @@
     rsync_opts:
       - "--exclude=node_modules"
       - "--exclude=venv"
+      - "--exclude=.venv"
       - "--exclude=__pycache__"
       - "--exclude=.env"
       - "--exclude=storage"

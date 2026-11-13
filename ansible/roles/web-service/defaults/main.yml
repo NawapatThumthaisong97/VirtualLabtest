@@ -78,6 +78,14 @@ webservice_prelaunch_lead_minutes: 10
 webservice_prelaunch_claim_minutes: 15
 webservice_prelaunch_max_parallel: 5
 
+# ---------- lab gateway (docs/AWS_LAB_GATEWAY.md ข้อ 9.1) ----------
+# lab AWS ได้ลิงก์ https://l-<token>-<port>.<domain> ผ่าน Traefik บน vlab-ts-router แทน private IP
+# ปิดไว้จนกว่าจะลง role lab-gateway บน router แล้ว เปิด: host var webservice_lab_gateway_enabled: true ใน inventory (ข้อ 9.1)
+webservice_lab_gateway_enabled: false
+webservice_lab_gateway_domain: bell-lab.space
+# รหัสลับร่วมกับ Traefik (header X-Gateway-Token) ค่าเดียวกับที่ role lab-gateway ใช้ — ต้องยาว >= 32 ตัวเมื่อเปิด
+webservice_lab_gateway_token: "{{ vault_lab_gateway_token | default('') }}"
+
 # ---------- SIEM (k8s/siem ของ Nawapat ใน namespace siem-system) ----------
 # token ของตัวส่ง log (Vector / Falco / Sigma) ใช้ได้กับ POST /api/v1/logs อย่างเดียว ว่าง = ปิด
 # สร้าง: python3 -c 'import secrets;print(secrets.token_urlsafe(48))' ใส่ค่าเดียวกันใน Secret siem-collector-secrets

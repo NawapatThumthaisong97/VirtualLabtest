@@ -71,6 +71,11 @@ class Session(Base):
     # คาบ online: scheduler เปิดเครื่องรอไว้ให้ตอนไหน (null = นักศึกษากด Start เอง) / นักศึกษามารับตอนไหน
     prelaunched_at = Column(DateTime(timezone=True), nullable=True)
     claimed_at = Column(DateTime(timezone=True), nullable=True)
+    # lab gateway (docs/AWS_LAB_GATEWAY.md ข้อ 4.3): lab AWS เปิดผ่าน https://l-<token>-<port>.<domain>
+    # endpoints = URL ที่นักศึกษาเปิด / upstreams = ปลายทางจริงที่ Traefik ส่งต่อ {"8443": "http://10.10.2.14:8443"}
+    # ห้ามใส่ 2 field นี้ใน SessionResponse: token = กุญแจเข้า lab, upstreams = IP ภายใน
+    gateway_token = Column(String(32), nullable=True, unique=True)
+    upstreams = Column(JSONB, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="sessions", foreign_keys=[user_id])

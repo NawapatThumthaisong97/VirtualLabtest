@@ -1,0 +1,13 @@
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart traefik
+  ansible.builtin.systemd:
+    name: traefik
+    state: restarted
+
+- name: restart cloudflared-lab
+  ansible.builtin.systemd:
+    name: cloudflared-lab
+    state: restarted

@@ -2,7 +2,7 @@
 #
 # ชื่อ host ต้องไม่ซ้ำกับชื่อ group ไม่งั้น Ansible จะเตือน
 # "Found both group and host with same name" และการอ้าง groups[...] อาจกำกวม
-# จึงใช้ master-1 / webportal-1 แทน master / webportal
+# จึงใช้ master-1 / webservice-1 แทน master / webservice
 
 all:
   children:
@@ -18,10 +18,17 @@ all:
       hosts:
         registry-host:
           ansible_host: "100.0.0.3"
-    webportal:
+    webservice:
       hosts:
-        webportal-1:
+        webservice-1:
           ansible_host: "100.0.0.4"
+    # AWS subnet router (vlab-ts-router) ที่ลง lab gateway — Tailscale IP ของ router / user ของ Ubuntu AMI
+    # เข้าผ่าน Tailscale SSH (กฎ ssh admin → tag:vlab-router ใน tailscale/vlab-acl.hujson.example)
+    aws_router:
+      hosts:
+        aws-router-1:
+          ansible_host: "100.0.0.5"
+          ansible_user: "ubuntu"
   vars:
     ansible_user: "your-ssh-user"
     ansible_become: yes

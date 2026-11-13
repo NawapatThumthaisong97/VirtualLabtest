@@ -21,10 +21,15 @@ resource "aws_iam_instance_profile" "ts_router" {
 # no auth key here.
 resource "aws_instance" "ts_router" {
   ami                    = data.aws_ami.ubuntu.id
-  instance_type          = "t3.micro"
+  instance_type          = "t3.small" # t3.micro (1 GB) ไม่พอ Tailscale + cloudflared + Traefik ของ lab gateway
   subnet_id              = aws_subnet.public_a.id
   vpc_security_group_ids = [aws_security_group.ts_router.id]
   iam_instance_profile   = aws_iam_instance_profile.ts_router.name
+
+  # T3 เป็น unlimited อยู่แล้ว เขียนไว้ให้เห็นว่าตั้งใจ: credit หมดกลางคาบ = proxy ช้าทั้งห้อง
+  credit_specification {
+    cpu_credits = "unlimited"
+  }
 
   metadata_options {
     http_endpoint = "enabled"

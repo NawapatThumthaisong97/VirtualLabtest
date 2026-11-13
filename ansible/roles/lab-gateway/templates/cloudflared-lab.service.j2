@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+[Unit]
+Description=cloudflared tunnel vlab-lab-gateway
+After=network-online.target traefik.service
+Wants=network-online.target
+
+[Service]
+User=cloudflared
+Group=cloudflared
+# TUNNEL_TOKEN อยู่ในไฟล์นี้ (ไม่ใส่ใน ExecStart = ไม่โผล่ใน ps / journal)
+EnvironmentFile=/etc/cloudflared/lab-gateway.env
+# --protocol http2 ตาม role skypilot-node (QUIC/udp 7844 ไม่ได้เปิดใน SG, เปิดแค่ tcp 7844)
+# --metrics ปักพอร์ตไว้ให้ role เช็ก /ready (ไม่ปัก = cloudflared สุ่มในช่วง 20241–20245)
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --protocol http2 --metrics {{ lab_gateway_cloudflared_metrics }} run
+Restart=on-failure
+RestartSec=3
+StateDirectory=cloudflared
+Environment=HOME=/var/lib/cloudflared
+MemoryMax={{ lab_gateway_cloudflared_memory_max }}
+CPUQuota=50%
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

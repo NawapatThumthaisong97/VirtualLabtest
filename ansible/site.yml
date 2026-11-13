@@ -38,3 +38,12 @@
     - { role: common, tags: ['common'] }
     - { role: tailscale, tags: ['tailscale'] }
     - { role: web-service, tags: ['web-service'] }
+
+# lab gateway (docs/AWS_LAB_GATEWAY.md ข้อ 9.2) — cloudflared + Traefik บน AWS subnet router
+# ไม่รัน common / tailscale: Tailscale ของ router ตั้งด้วยมือ (subnet route) ห้าม role ไปแตะ flag
+# ต้องมี group webservice ใน inventory ด้วย (Traefik ดึงตาราง route จาก backend เครื่องนั้น)
+- name: Provision lab gateway on the AWS Tailscale router
+  hosts: aws_router
+  become: yes
+  roles:
+    - { role: lab-gateway, tags: ['lab-gateway'] }

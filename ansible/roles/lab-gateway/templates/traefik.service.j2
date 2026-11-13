@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Traefik (vlab lab gateway)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=traefik
+Group=traefik
+ExecStart=/usr/local/bin/traefik --configFile=/etc/traefik/traefik.yml
+Restart=on-failure
+RestartSec=3
+MemoryMax={{ lab_gateway_traefik_memory_max }}
+CPUQuota=70%
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -21,6 +21,7 @@ from app.services.warm_pod_service import (DIRECT_POD_PREFIX, LAB_LABEL, WARM_PO
 from app.models.session import Session as SessionModel, SessionStatus, SessionEndReason, ServiceType
 from app.models.class_slot import ClassSlot, ClassSlotStatus
 from app.services import admin_billing_service, admin_log_service
+from app.services import lab_gateway_service as lab_gateway
 from app.models.user import User
 from app.models.lab import Lab, LabStatus, RunTarget
 from app.models.lab_image import ImageStatus, LabImage
@@ -165,17 +166,20 @@ class SessionService:
         run_target: RunTarget = RunTarget.KUBERNETES,
         pin_node: Optional[str] = None,
         autostop_minutes: Optional[int] = None,
+        gateway_token: Optional[str] = None,
     ) -> dict:
         """สร้าง SkyPilot task config (dict) จาก LabImage ตาม run_target ของ lab
 
         pin_node = ชื่อ node ที่ต้องให้ pod ลง (K3s เท่านั้น ดู LAB_ISOLATION_ENABLED)
         autostop_minutes = อายุเครื่องแทน lifespan_minutes (AWS เท่านั้น — เครื่องที่ prelaunch เปิดรอไว้)
+        gateway_token = token ของ lab gateway (AWS เท่านั้น) ใส่ env ลิงก์ public เข้า container
 
         คืนเป็น dict แล้วส่งเข้า sky.Task.from_yaml_config ตรง ๆ แทนการต่อ YAML ด้วย
         f-string แบบเดิม ซึ่งพังเมื่อค่า env มี ':' หรือ '#' และเมื่อ entrypoint มีหลายบรรทัด
         """
         if run_target == RunTarget.AWS:
-            return self._build_aws_task(lab_image, app_name, env, autostop_minutes)
+            return self._build_aws_task(lab_image, app_name, env, autostop_minutes, gateway_token)
+        # K3s ไม่ผ่าน gateway (เปิดจากเครื่องแลปผ่าน localhost) ไม่ส่ง token ต่อ
         return self._build_k8s_task(lab_image, app_name, env, pin_node)
 
     def _lab_envs(self, lab_image: LabImage, env: str) -> dict[str, str]:
@@ -229,7 +233,8 @@ class SessionService:
         return task
 
     def _build_aws_task(self, lab_image: LabImage, app_name: str, env: str,
-                        autostop_minutes: Optional[int] = None) -> dict:
+                        autostop_minutes: Optional[int] = None,
+                        gateway_token: Optional[str] = None) -> dict:
         """AWS: VM mode บน EC2 ใน private subnet
 
         ไม่ใช้ image_id: docker: เพราะแบบนั้น SkyPilot ต้องลง runtime ลงใน container ใหม่
@@ -249,7 +254,11 @@ class SessionService:
         # env ของ lab ต้องส่งเข้า container ไม่ใช่ VM เลยแปลงเป็น -e ของ docker run
         docker_args = ["--rm", "--name", "lab"]
         docker_args += [arg for port in ports for arg in ("-p", f"{port}:{port}")]
-        for key, value in self._lab_envs(lab_image, env).items():
+        envs = self._lab_envs(lab_image, env)
+        if gateway_token:
+            # lab gateway: Vite allowed hosts + VLAB_PUBLIC_URL_<port> (ไม่แตะ _lab_envs ที่ K3s / warm pod ใช้ร่วม)
+            envs.update(lab_gateway.gateway_envs(gateway_token, ports))
+        for key, value in envs.items():
             docker_args += ["-e", f"{key}={value}"]
         if lab_image.workdir:
             docker_args += ["-w", lab_image.workdir]
@@ -457,6 +466,9 @@ class SessionService:
         """
         cluster_name = self._cluster_name(lab_image, unique=prelaunched_at is not None)
         is_cloud = run_target == RunTarget.AWS
+        # lab gateway: token ต้องรู้ก่อนสร้าง task (env ลิงก์ public อยู่ใน docker run) จึงสุ่มตรงนี้
+        # แล้วใส่ทั้ง task และ record — prelaunch เรียกฟังก์ชันนี้ด้วย จึงได้ token ตั้งแต่ PENDING
+        gateway_token = lab_gateway.new_token() if settings.LAB_GATEWAY_ENABLED and is_cloud else None
 
         task_config = self.create_fastapi_task(
             lab_image=lab_image,
@@ -465,6 +477,7 @@ class SessionService:
             run_target=run_target,
             pin_node=pin_node,
             autostop_minutes=autostop_minutes,
+            gateway_token=gateway_token,
         )
         # ขอ token ก่อนสร้าง record จะได้ไม่มี session ค้างถ้าแค่ขอ token ไม่ผ่าน
         secrets = None
@@ -490,6 +503,7 @@ class SessionService:
 
             class_slot_id=class_slot_id,
             prelaunched_at=prelaunched_at,
+            gateway_token=gateway_token,
         )
         self.db.add(new_session)
         self.db.commit()
@@ -522,7 +536,18 @@ class SessionService:
         }
 
         new_session.sky_job_id = job_id
-        new_session.endpoints = formatted_endpoints
+        if new_session.gateway_token:
+            # lab gateway: IP ภายในเก็บไว้ให้ Traefik (upstreams) นักศึกษาเห็นลิงก์ public (endpoints)
+            new_session.upstreams = formatted_endpoints
+            new_session.endpoints = lab_gateway.public_endpoints(new_session.gateway_token,
+                                                                 formatted_endpoints.keys())
+            dropped = sorted(set(formatted_endpoints) - set(new_session.endpoints))
+            if dropped:
+                # พอร์ตนอก LAB_GATEWAY_PORT_MIN–MAX เปิดผ่าน gateway ไม่ได้ ปุ่มของพอร์ตนั้นจะไม่แสดง (docs/AWS_LAB_GATEWAY.md ข้อ 4.6)
+                logger.warning(f"[gateway] {cluster_name}: ports {dropped} outside "
+                               f"{settings.LAB_GATEWAY_PORT_MIN}-{settings.LAB_GATEWAY_PORT_MAX}, no public link")
+        else:
+            new_session.endpoints = formatted_endpoints
         new_session.status = SessionStatus.RUNNING
         # autostop เริ่มนับตอน launch เสร็จ (wait_for: none) หน้าเว็บใช้นับถอยหลังได้
         new_session.expires_at = datetime.utcnow() + timedelta(

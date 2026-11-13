@@ -6,3 +6,4 @@
 100.99.154.106      tag:vlab-server     # mn (K3s server)
 100.68.15.113       tag:vlab-worker     # wn1 (K3s agent)
 100.119.124.73      tag:vlab-registry   # rn (camp registry: 5001 pull / 5002 push)
+100.84.123.59       tag:vlab-router     # vlab-ts-router (AWS subnet router + lab gateway)
