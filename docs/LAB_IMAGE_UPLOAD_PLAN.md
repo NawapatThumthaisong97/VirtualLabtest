@@ -70,7 +70,7 @@ Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5
 
 ## 3. Phase 1: ฟอร์มและการอัปโหลด
 
-> ทำแล้ว รายละเอียดทุกจุดที่แก้และเหตุผลอยู่ใน [LAB_IMAGE_UPLOAD_PHASE1.md](LAB_IMAGE_UPLOAD_PHASE1.md)
+> ทำแล้ว รายละเอียดทุกจุดที่แก้และเหตุผลอยู่ใน [LAB_IMAGE_UPLOAD_WORKING.md](LAB_IMAGE_UPLOAD_WORKING.md)
 
 ### 3.1 เป้าหมาย
 - อาจารย์ที่มี Dockerfile ถูกต้อง (มี `EXPOSE` และ `CMD`) กรอกแค่ไฟล์, repository:tag, description, CPU/RAM, lifespan ก็อัปโหลดได้
@@ -128,6 +128,8 @@ backend: `alembic upgrade head` แล้ว restart / frontend: build ใหม
 ---
 
 ## 4. Phase 2: รันเหมือนกันทุกที่ และแจ้งเมื่อพร้อมจริง
+
+> ทำแล้ว (ยังต้องลองบนเครื่องจริง) รายละเอียดอยู่ใน [LAB_IMAGE_UPLOAD_WORKING.md](LAB_IMAGE_UPLOAD_WORKING.md) ส่วน Phase 2
 
 ### 4.1 AWS ใช้ `--entrypoint` (ข้อ 2.2)
 ไฟล์: [session_service.py:255-293](../web-portal/backend/app/services/session_service.py#L255-L293) (`_build_aws_task`)

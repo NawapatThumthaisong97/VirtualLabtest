@@ -45,10 +45,51 @@ from app.utils.logger import logger
 # session ที่ PENDING นานกว่านี้ถือว่าค้าง (launch จริง: K3s ~5 นาที, AWS ~2.5 นาที)
 PENDING_TIMEOUT = timedelta(minutes=20)
 
-# รอ job ของ lab ผ่าน setup จนเป็น RUNNING (AWS: docker login + pull ~10 วินาที)
+# รอ job ของ lab ผ่าน setup จนเป็น RUNNING (AWS: docker login + pull ~10 วินาที + รอ app พร้อม ≤ AWS_LAB_READY_TIMEOUT)
 JOB_START_TIMEOUT = timedelta(minutes=10)
 JOB_POLL_SECONDS = 5
 JOB_STARTING_STATUSES = {None, "INIT", "PENDING", "SETTING_UP"}
+
+# ชื่อ container ของ lab บน VM ของ AWS (เครื่องละ 1 lab)
+AWS_LAB_CONTAINER = "lab"
+
+
+def _aws_wait_ready_script(ports: list, timeout_seconds: int) -> str:
+    """bash ท้าย setup ของ AWS: รอจนทุก port ของ lab รับ TCP ได้ (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 4.4)
+
+    - ต่อที่ IP ของ container ไม่ใช่ 127.0.0.1:<port> ของ VM เพราะ docker-proxy รับ TCP บน host port
+      ได้ทันทีแม้ app ข้างในยังไม่ฟัง เช็ก localhost จึงผ่านตลอด
+    - container ตายระหว่างรอ = ล้มทันที (ไม่ต้องรอจนหมดเวลา) พร้อมพิมพ์ log ท้าย ๆ ของ container
+      ลง log ของ setup (create_session เก็บท้าย log ไว้ก่อนลบเครื่อง ดู FAILED_LOG_TAIL_LINES)
+    - ไม่มี port = เช็กแค่ว่า container ยังไม่ตายใน 3 วินาทีแรก (คำสั่งที่จบเองจะถูกจับได้ตรงนี้)
+    exit 1 = setup ล้ม -> job เป็น FAILED_SETUP -> _wait_job_running raise -> session FAILED + ลบเครื่อง
+    """
+    name = AWS_LAB_CONTAINER
+    port_list = " ".join(str(int(p)) for p in ports)
+    # template ของ docker inspect ({{.State.Running}}) ใน f-string ต้องเขียนเป็น {{{{ }}}}
+    return (
+        "# ---- wait for the lab to be ready\n"
+        "vlab_fail() {\n"
+        '  echo "vlab: $1" >&2\n'
+        f"  sudo docker logs --tail 50 {name} >&2 2>&1 || true\n"
+        "  exit 1\n"
+        "}\n"
+        "vlab_running() {\n"
+        f"  [ \"$(sudo docker inspect -f '{{{{.State.Running}}}}' {name} 2>/dev/null)\" = true ]\n"
+        "}\n"
+        f"vlab_ip=$(sudo docker inspect -f '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' {name})\n"
+        f"vlab_deadline=$((SECONDS + {int(timeout_seconds)}))\n"
+        f"for vlab_port in {port_list}; do\n"
+        "  until timeout 1 bash -c \"</dev/tcp/$vlab_ip/$vlab_port\" 2>/dev/null; do\n"
+        '    vlab_running || vlab_fail "lab container exited before port $vlab_port was ready"\n'
+        f'    [ "$SECONDS" -lt "$vlab_deadline" ] || vlab_fail "port $vlab_port not ready after {int(timeout_seconds)}s"\n'
+        "    sleep 2\n"
+        "  done\n"
+        '  echo "vlab: port $vlab_port ready"\n'
+        "done\n"
+        "sleep 3\n"
+        'vlab_running || vlab_fail "lab container exited right after start"\n'
+    )
 
 # ตอน launch พัง เก็บท้าย log ของ job ไว้ก่อนลบ cluster (ลบแล้ว sky logs ดูไม่ได้อีก)
 FAILED_LOG_TAIL_LINES = 50
@@ -251,9 +292,11 @@ class SessionService:
         image = f"{settings.ECR_REGISTRY_HOST}/{lab_image.full_image_name}"
         ports = lab_image.get_skypilot_resources().get("ports") or []
 
-        # env ของ lab ต้องส่งเข้า container ไม่ใช่ VM เลยแปลงเป็น -e ของ docker run
-        docker_args = ["--rm", "--name", "lab"]
+        # -d: เปิด container ใน setup แล้วรอ port ก่อน (ดู _aws_wait_ready_script) ไม่ใช้ --rm เพื่อให้ยังอ่าน
+        # log ของ container ที่ล้มได้ (VM ถูกลบเมื่อ session จบอยู่แล้ว)
+        docker_args = ["-d", "--name", AWS_LAB_CONTAINER]
         docker_args += [arg for port in ports for arg in ("-p", f"{port}:{port}")]
+        # env ของ lab ต้องส่งเข้า container ไม่ใช่ VM เลยแปลงเป็น -e ของ docker run
         envs = self._lab_envs(lab_image, env)
         if gateway_token:
             # lab gateway: Vite allowed hosts + VLAB_PUBLIC_URL_<port> (ไม่แตะ _lab_envs ที่ K3s / warm pod ใช้ร่วม)
@@ -262,12 +305,17 @@ class SessionService:
             docker_args += ["-e", f"{key}={value}"]
         if lab_image.workdir:
             docker_args += ["-w", lab_image.workdir]
-        docker_run = "sudo docker run " + " ".join(shlex.quote(a) for a in docker_args)
         # entrypoint ว่าง = ใช้ ENTRYPOINT/CMD ของ image เอง เช่น code-server ที่ตั้ง ENTRYPOINT ไว้
-        # ถ้าต่อคำสั่งท้าย docker run จะกลายเป็น argument ของ ENTRYPOINT นั้นแล้วพัง
-        # (K3s ใช้ไม่ได้แบบนี้ เพราะ SkyPilot แทน command ของ pod เอง ต้องมี run เสมอ)
+        # มีค่า = --entrypoint /bin/sh ... -c "<entrypoint>" ทับ ENTRYPOINT ของ image จริง แบบเดียวกับ
+        # command: ["/bin/sh", "-c", ...] ของ pod ในห้องแลป (เดิมต่อ "/bin/bash -c ..." ท้าย image ซึ่งกลายเป็น
+        # argument ของ ENTRYPOINT เดิม image ที่ตั้ง ENTRYPOINT ไว้จึงเปิดในห้องแลปได้แต่บน AWS พัง)
         entrypoint = (lab_image.entrypoint_script or "").strip()
-        command = f" /bin/bash -c {shlex.quote(entrypoint)}" if entrypoint else ""
+        if entrypoint:
+            docker_args += ["--entrypoint", "/bin/sh"]
+        docker_args.append(image)
+        if entrypoint:
+            docker_args += ["-c", entrypoint]
+        docker_run = "sudo docker run " + " ".join(shlex.quote(a) for a in docker_args)
 
         resources: dict[str, Any] = {
             "infra": f"aws/{settings.AWS_REGION}",
@@ -283,14 +331,23 @@ class SessionService:
         return {
             "name": app_name,
             "resources": resources,
+            # setup จบ = app พร้อมแล้ว: _wait_job_running รอจน job เป็น RUNNING ซึ่งเกิดหลัง setup จบเท่านั้น
+            # app ไม่ขึ้น = setup ล้ม (FAILED_SETUP) -> create_session ตั้ง FAILED แล้วลบเครื่องเอง
+            # entrypoint ถูก shlex.quote เป็นก้อนเดียว ถึงจะมีหลายบรรทัดก็อยู่ใน -c ของ container ไม่หลุดไปรันบน VM
             "setup": (
                 f'echo "$ECR_TOKEN" | sudo docker login -u AWS --password-stdin {registry}\n'
                 f"sudo docker pull {shlex.quote(image)}\n"
+                # setup รันซ้ำได้ (sky launch เข้า cluster เดิม) ชื่อ container ต้องไม่ชนของรอบก่อน
+                f"sudo docker rm -f {AWS_LAB_CONTAINER} >/dev/null 2>&1 || true\n"
+                f"{docker_run} >/dev/null\n"
+                f"{_aws_wait_ready_script(ports, settings.AWS_LAB_READY_TIMEOUT)}"
             ),
             # foreground: job อยู่ใน RUNNING ตลอดที่ lab เปิด (_wait_job_running ใช้สถานะนี้)
-            # ส่ง entrypoint เป็นก้อนเดียวผ่าน bash -c ถ้าต่อท้ายตรง ๆ แล้ว entrypoint มีหลายบรรทัด
-            # บรรทัดที่ 2 เป็นต้นไปจะไปรันบน VM แทนที่จะรันใน container
-            "run": f"{docker_run} {shlex.quote(image)}{command}\n",
+            # log ของ container ไหลเข้า log ของ job, exit code ของ job = exit code ของ container
+            "run": (
+                f"sudo docker logs -f {AWS_LAB_CONTAINER} &\n"
+                f'exit "$(sudo docker wait {AWS_LAB_CONTAINER})"\n'
+            ),
         }
 
     def _cluster_name(self, lab_image: LabImage, unique: bool = False) -> str:

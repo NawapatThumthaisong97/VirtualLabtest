@@ -237,6 +237,9 @@ class Settings(BaseSettings):
     LAB_MACHINE_LAUNCH: Literal["pod", "skypilot"] = "pod"
     # รอ pod ตรง Ready สูงสุดกี่วินาที (รวม pull image ตอนไม่มีคาบ ~700 MB จาก registry ในบ้าน)
     DIRECT_POD_READY_TIMEOUT: int = 180
+    # AWS: หลัง docker run รอให้ทุก port ของ lab ตอบได้นานสุดกี่วินาที ไม่ทัน = setup ล้ม, session FAILED, เครื่องถูกลบ
+    # (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 4.4) ต้องรวมกับเวลา pull แล้วไม่เกิน JOB_START_TIMEOUT (10 นาที)
+    AWS_LAB_READY_TIMEOUT: int = 180
 
     # คาบ online (docs/AWS_PRELAUNCH.md): เปิด EC2 รอไว้ให้นักศึกษาทุกคนที่ลงทะเบียนก่อนคาบ
     # ปิดไว้เป็นค่าเริ่มต้น เพราะเปิดแล้วเสียเงิน AWS จริงทุกคาบ online ทำงานใน scheduler รอบเดียวกับ prewarm

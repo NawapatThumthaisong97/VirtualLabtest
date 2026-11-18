@@ -230,7 +230,13 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
                         </div>
                         <dl className="grid grid-cols-[110px_1fr] gap-x-2 gap-y-1">
                           <dt className="text-slate-400">Ports</dt>
-                          <dd className="font-mono">{image.exposedPorts.length ? image.exposedPorts.join(', ') : '—'}</dd>
+                          <dd className="font-mono">
+                            {image.exposedPorts.length ? image.exposedPorts.join(', ') : '—'}
+                            {/* เติมจาก EXPOSE ตอนสแกนผ่าน (อาจารย์เว้นว่างไว้) */}
+                            {summary?.portsFromImage === true && image.exposedPorts.length > 0 && (
+                              <> <FromImage /></>
+                            )}
+                          </dd>
                           <dt className="text-slate-400">Entrypoint</dt>
                           <dd className="break-all font-mono">{image.entrypointScript || <FromImage />}</dd>
                           <dt className="text-slate-400">Workdir</dt>

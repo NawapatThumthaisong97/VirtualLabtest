@@ -214,6 +214,7 @@ class ScanReconciler:
         verdict = outcome.get("verdict")
         summary = _summary_from(outcome)
         if verdict == "PASS" and outcome.get("digest"):
+            _fill_ports_from_image(image, summary)
             self._finish(image, ScanStatus.PASSED, summary, now, digest=outcome["digest"])
             self._approve_and_drop_archive(image)
             result.passed.append(image_id)
@@ -333,6 +334,45 @@ class ScanReconciler:
             except DomainError as error:
                 # ถูกอ้างอิงอยู่ / ไม่ใช่ PENDING / R2 ลบไม่ได้ -> ข้ามแถวนี้ รอบหน้าลองใหม่
                 logger.warning(f"Scan reconciler could not reject {image_id}: {error}")
+
+
+NO_PORTS_WARNING = "No ports: the image has no EXPOSE and none were entered, so students get no link to the lab"
+
+
+def ports_from_exposed(exposed) -> list[int]:
+    """summary.image.exposedPorts จาก runner -> list ของ port tcp
+
+    runner 1.1.0 ส่งเป็น int เรียงแล้วและตัด /proto ทิ้ง ([8080, 5173]) ทำให้แยก udp ไม่ได้
+    รับรูปแบบ "8080/tcp" ไว้ด้วย (ถ้า runner รุ่นหน้าส่ง proto มา จะข้าม udp ได้เอง ไม่มี /proto = tcp ตามกติกาของ Docker)
+    ค่าแปลก ๆ (ไม่ใช่ตัวเลข, นอกช่วง 1-65535, ซ้ำ) ข้ามทิ้ง ลำดับตามที่ได้มา
+    """
+    ports: list[int] = []
+    for raw in exposed if isinstance(exposed, list) else []:
+        number, _, proto = str(raw).strip().partition("/")
+        if (proto or "tcp").lower() != "tcp" or not number.isdigit():
+            continue
+        port = int(number)
+        if 1 <= port <= 65535 and port not in ports:
+            ports.append(port)
+    return ports
+
+
+def _fill_ports_from_image(image: LabImage, summary: dict) -> None:
+    """อาจารย์เว้น Exposed ports ว่าง -> ใช้ EXPOSE ของ image (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 4.2)
+
+    เรียกตอน PASS ก่อน approve (commit พร้อม _finish) ค่าที่อาจารย์กรอกเองชนะเสมอ ไม่ถูกทับ
+    summary["portsFromImage"] = True ให้หน้าเว็บบอกได้ว่า port มาจาก image
+    ทั้งสองทางว่าง: ยัง approve ได้ (lab ที่ไม่ต้องมีหน้าเว็บก็มี) แต่เตือนอาจารย์ใน warnings
+    """
+    if image.exposed_ports:
+        return
+    ports = ports_from_exposed((summary.get("image") or {}).get("exposedPorts"))
+    if ports:
+        # กำหนด list ใหม่ (ไม่ append ของเดิม) SQLAlchemy จึงเห็นว่าคอลัมน์ JSONB เปลี่ยน
+        image.exposed_ports = ports
+        summary["portsFromImage"] = True
+    else:
+        summary["warnings"] = [*summary.get("warnings", []), NO_PORTS_WARNING]
 
 
 def _summary_from(outcome: dict) -> dict:

@@ -417,7 +417,7 @@ Phase 1 ไม่แตะ K3s หรือ AWS จึงทดสอบบน�
 
 | # | เรื่อง | ผลกระทบ | แก้ใน |
 |---|---|---|---|
-| 1 | **ports ว่างยังไม่ถูกเติมจาก EXPOSE** | image ที่อาจารย์ไม่กรอก ports (รวมทุก image ที่สร้างจาก Lab Builder) **lab เปิดได้แต่ไม่มีลิงก์ให้นักศึกษา** placeholder "Empty = use the image's EXPOSE" จะเป็นจริงหลัง Phase 2 | Phase 2 ข้อ 4.2 — **ควร release Phase 1 พร้อม Phase 2** หรือบอกอาจารย์ให้กรอก ports ไปก่อน |
+| 1 | **ports ว่างยังไม่ถูกเติมจาก EXPOSE** | image ที่อาจารย์ไม่กรอก ports (รวมทุก image ที่สร้างจาก Lab Builder) **lab เปิดได้แต่ไม่มีลิงก์ให้นักศึกษา** placeholder "Empty = use the image's EXPOSE" จะเป็นจริงหลัง Phase 2 | Phase 2 ข้อ 4.2 — **ควร release Phase 1 พร้อม Phase 2** หรือบอกอาจารย์ให้กรอก ports ไปก่อน (**แก้แล้วใน Phase 2** ดูข้อ P2-7) |
 | 2 | `_build_k8s_task` (ทางเก่าผ่าน SkyPilot บน K3s) ยังเติม `/bin/bash /run.sh` เมื่อ entrypoint ว่าง | ถ้ายังมีการใช้ทางนี้ image ที่ไม่มี `/run.sh` จะเปิดไม่ขึ้น ห้องแลปตอนนี้ใช้ direct pod / warm pod เป็นหลัก | เรื่องที่ต้องตัดสินใจข้อ 1 ในแผน |
 | 3 | reload / ปิดแท็บ การอัปโหลดหาย | มีคำเตือนแล้ว แต่กันไม่ได้ 100% (เช่นเครื่องดับ) | ถ้าจำเป็นค่อยทำ R2 multipart upload |
 | 4 | ไม่มีหน้าแก้ไข config ของ image หลังอัปโหลด | กรอกผิดต้องอัปใหม่ด้วย tag ใหม่ | ยังไม่อยู่ในแผน |
@@ -474,3 +474,328 @@ Phase 1 ไม่แตะ K3s หรือ AWS จึงทดสอบบน�
 6. ทำไม `UploadTray` ต้องอยู่นอก `RouterProvider` และทำไมในถาดถึงไม่มีลิงก์ไปหน้า Lab images
 7. ถ้า `hasInProgress` ไม่นับการอัปที่ `done` แถวในรายการจะค้างที่สถานะไหน เพราะอะไร
 8. หลัง Phase 1 อาจารย์อัป image ที่มี `EXPOSE 8080` โดยไม่กรอก ports นักศึกษาจะเปิด lab ได้ไหม ได้ลิงก์ไหม (ดูข้อ 11)
+
+---
+---
+
+# Phase 2: รันเหมือนกันทุกที่ และแจ้งเมื่อพร้อมจริง
+
+> ส่วนหนึ่งของ [LAB_IMAGE_UPLOAD_PLAN.md](LAB_IMAGE_UPLOAD_PLAN.md) (ข้อ 4) · branch `feature/lab-image-upload-p2` (แตกจาก Phase 1)
+> หัวข้อของ Phase นี้ขึ้นต้นด้วย **P2-** จะได้ไม่ชนกับเลขข้อของ Phase 1 ข้างบน
+
+## สารบัญ Phase 2
+
+| ข้อ | เรื่อง |
+|---|---|
+| P2-1 | [ปัญหาก่อนแก้](#p2-1-ปัญหาก่อนแก้) |
+| P2-2 | [ผลหลังแก้](#p2-2-ผลหลังแก้) |
+| P2-3 | [ไฟล์ที่แก้ทั้งหมด](#p2-3-ไฟล์ที่แก้ทั้งหมด) |
+| P2-4 | [AWS: `--entrypoint /bin/sh`](#p2-4-aws---entrypoint-binsh) |
+| P2-5 | [AWS: เปิด container ใน setup แล้วรอ port](#p2-5-aws-เปิด-container-ใน-setup-แล้วรอ-port) |
+| P2-6 | [ห้องแลป: readinessProbe](#p2-6-ห้องแลป-readinessprobe) |
+| P2-7 | [เติม port จาก EXPOSE ตอนสแกนผ่าน](#p2-7-เติม-port-จาก-expose-ตอนสแกนผ่าน) |
+| P2-8 | [เทส](#p2-8-เทส) |
+| P2-9 | [สิ่งที่ต้องลองบนเครื่องจริง](#p2-9-สิ่งที่ต้องลองบนเครื่องจริง) |
+| P2-10 | [Deploy](#p2-10-deploy) |
+| P2-11 | [ข้อจำกัดที่ยังเหลือ](#p2-11-ข้อจำกัดที่ยังเหลือ) |
+| P2-12 | [บทเรียนระหว่างทำ](#p2-12-บทเรียนระหว่างทำ) |
+| P2-13 | [คำศัพท์และแนวคิด](#p2-13-คำศัพท์และแนวคิด) |
+| P2-14 | [คำถามทบทวน](#p2-14-คำถามทบทวน) |
+
+---
+
+## P2-1. ปัญหาก่อนแก้
+
+| # | อาการ | ต้นเหตุในโค้ดเดิม |
+|---|---|---|
+| 1 | image ที่ตั้ง `ENTRYPOINT` ไว้ (เช่น code-server) + อาจารย์กรอก Entrypoint: ห้องแลปเปิดได้ แต่ AWS พัง | AWS ต่อ `/bin/bash -c "<entrypoint>"` **ท้ายชื่อ image** ซึ่ง Docker ถือเป็น `CMD` ใหม่ แล้วส่งเป็น argument ให้ `ENTRYPOINT` เดิม ส่วนห้องแลปใช้ `command:` ของ pod ซึ่ง**ทับ** `ENTRYPOINT` |
+| 2 | ห้องแลปใช้ `/bin/sh` แต่ AWS ใช้ `/bin/bash` | image เล็ก ๆ (busybox, alpine) ไม่มี bash เปิดในห้องแลปได้ แต่บน AWS พัง |
+| 3 | นักศึกษาได้ลิงก์ตั้งแต่ app ยังไม่พร้อม | ห้องแลป: pod ไม่มี readinessProbe จึง Ready ทันทีที่ container เริ่ม / AWS: `docker run` อยู่ใน `run` และ backend ถือว่าสำเร็จทันทีที่ job เป็น RUNNING (ก่อน app ขึ้น) |
+| 4 | app ตายทันทีหลังเริ่ม (คำสั่งจบเอง, ไฟล์หาย) บน AWS ไม่มีใครรู้ | job จบไปเงียบ ๆ session ยังเป็น RUNNING จนหมดอายุ |
+| 5 | อาจารย์ไม่กรอก port = ไม่มีลิงก์ (ช่องโหว่ที่ Phase 1 ทิ้งไว้) | ไม่มีใครเอา `EXPOSE` ของ image มาใช้ |
+
+---
+
+## P2-2. ผลหลังแก้
+
+```
+อาจารย์อัป image (ไม่กรอก port) ──► สแกนผ่าน ──► exposed_ports = EXPOSE ของ image ──► APPROVED
+                                              └─ ไม่มี EXPOSE เลย: approve แต่ขึ้น warning "No ports …"
+
+นักศึกษากด Start
+  ห้องแลป: pod ขึ้น ─► readinessProbe ต่อ TCP port แรกได้ ─► Ready ─► ส่งลิงก์
+  AWS:     setup: pull ─► docker run -d ─► รอทุก port ตอบ ─► setup จบ ─► job RUNNING ─► ส่งลิงก์
+           app ไม่ขึ้นใน 180 วินาที / container ตาย ─► setup ล้ม ─► session FAILED + ลบเครื่อง + เก็บ log ไว้
+```
+
+---
+
+## P2-3. ไฟล์ที่แก้ทั้งหมด
+
+| ไฟล์ | แก้อะไร |
+|---|---|
+| [session_service.py](../web-portal/backend/app/services/session_service.py) | `_build_aws_task`: `--entrypoint /bin/sh`, `docker run -d` ย้ายไป `setup`, `run` เหลือ `docker logs -f` + `docker wait` / ฟังก์ชันใหม่ `_aws_wait_ready_script` / ค่าคงที่ `AWS_LAB_CONTAINER` |
+| [settings.py](../web-portal/backend/app/configs/settings.py) | `AWS_LAB_READY_TIMEOUT = 180` |
+| [warm_pod_service.py](../web-portal/backend/app/services/warm_pod_service.py) | `_lab_container` ใส่ `readinessProbe` (tcpSocket port แรก) |
+| [scan_reconciler.py](../web-portal/backend/app/services/scan_reconciler.py) | `_collect` เรียก `_fill_ports_from_image` ตอน PASS / ฟังก์ชันใหม่ `ports_from_exposed`, `NO_PORTS_WARNING` |
+| [labImage.ts](../web-portal/frontend/src/services/labImage.ts) / [LabImageTab.tsx](../web-portal/frontend/src/components/instructor/LabImageTab.tsx) | `scanSummary.portsFromImage` → แสดง *from image* ข้าง port |
+| [test_task_builder.py](../web-portal/backend/tests/session/test_task_builder.py) | เทส AWS ชุดใหม่ + รันสคริปต์รอ port จริงด้วย bash |
+| [test_direct_pod.py](../web-portal/backend/tests/session/test_direct_pod.py) | เทส readinessProbe |
+| [test_scan_collect.py](../web-portal/backend/tests/lab_image/test_scan_collect.py) | ใหม่: เทสการเก็บผลสแกนและเติม port (เดิม `_collect` ไม่มีเทสเลย) |
+| [test_lab_gateway.py](../web-portal/backend/tests/session/test_lab_gateway.py) | อ่าน env ของ container จาก `setup` แทน `run` (P2-12.3) |
+
+**ไม่แตะ:** Ansible, Terraform, K8s manifest, scan-runner, AMI, DB schema (ไม่มี migration)
+
+---
+
+## P2-4. AWS: `--entrypoint /bin/sh`
+
+### Docker รันอะไรเมื่อมีทั้ง ENTRYPOINT และ CMD
+คำสั่งที่ container รันจริง = `ENTRYPOINT` ต่อด้วย `CMD`
+
+| คำสั่ง `docker run` | image code-server (`ENTRYPOINT ["code-server"]`) รันจริง |
+|---|---|
+| `docker run img` | `code-server <CMD เดิม>` ✅ |
+| `docker run img /bin/bash -c "x"` (**แบบเดิม**) | `code-server /bin/bash -c "x"` ❌ คำสั่งของเรากลายเป็น argument ของ code-server |
+| `docker run --entrypoint /bin/sh img -c "x"` (**แบบใหม่**) | `/bin/sh -c "x"` ✅ |
+
+ใน K8s, `command:` ของ container = ทับ `ENTRYPOINT` และ `args:` = ทับ `CMD` ห้องแลปใช้ `command: ["/bin/sh", "-c", x]` จึงตรงกับแบบใหม่ทุกอย่าง
+
+### โค้ด
+```python
+entrypoint = (lab_image.entrypoint_script or "").strip()
+if entrypoint:
+    docker_args += ["--entrypoint", "/bin/sh"]   # option ต้องอยู่ก่อนชื่อ image
+docker_args.append(image)
+if entrypoint:
+    docker_args += ["-c", entrypoint]            # หลังชื่อ image = CMD = argument ของ /bin/sh
+```
+- entrypoint ว่าง: ไม่มีทั้ง `--entrypoint` และ `-c` Docker ใช้ของ image เอง (เหมือนเดิม)
+- ทุก argument ผ่าน `shlex.quote` entrypoint หลายบรรทัดจึงยังเป็นก้อนเดียวอยู่ใน `-c`
+- `--entrypoint` ของ Docker รับได้แค่ executable ตัวเดียว (ไม่รับ argument) จึงต้องแยก `-c` ไปไว้หลังชื่อ image
+
+---
+
+## P2-5. AWS: เปิด container ใน setup แล้วรอ port
+
+### ทำไมต้องย้ายไป `setup`
+SkyPilot มี 2 ช่วง: `setup` (รันครั้งเดียว ต้องจบ) แล้วตามด้วย `run` (งานหลัก) สถานะ job เป็น `SETTING_UP` ระหว่าง setup และเป็น `RUNNING` เมื่อเริ่ม `run`
+backend มี `_wait_job_running` ([session_service.py](../web-portal/backend/app/services/session_service.py)) ที่รอจน job เป็น `RUNNING` แล้วถือว่าเปิด lab สำเร็จ
+
+| | setup | run | backend เห็น RUNNING ตอน |
+|---|---|---|---|
+| เดิม | login + pull | `docker run` (foreground) | container **เพิ่งเริ่ม** (app ยังไม่ฟัง) |
+| ใหม่ | login + pull + `docker run -d` + **รอ port** | `docker logs -f` + `docker wait` | app **ตอบ TCP ทุก port แล้ว** |
+
+ข้อดีคือไม่ต้องแก้ `_wait_job_running` เลย และถ้าสคริปต์รอ `exit 1` job จะเป็น `FAILED_SETUP` ซึ่ง `_wait_job_running` raise อยู่แล้ว → `create_session` ตั้ง FAILED, เก็บท้าย log ไว้ (`FAILED_LOG_TAIL_LINES`) แล้วลบเครื่อง **ทางล้มเหลวทั้งหมดเป็นโค้ดเดิมที่เทสกับ AWS จริงมาแล้ว**
+
+### setup ใหม่
+```bash
+echo "$ECR_TOKEN" | sudo docker login -u AWS --password-stdin <ecr>
+sudo docker pull <image>
+sudo docker rm -f lab >/dev/null 2>&1 || true        # setup รันซ้ำบน cluster เดิมได้ ชื่อต้องไม่ชน
+sudo docker run -d --name lab -p 8080:8080 -e ... [--entrypoint /bin/sh] <image> [-c '<entrypoint>'] >/dev/null
+# ---- wait for the lab to be ready   (จาก _aws_wait_ready_script)
+vlab_ip=$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' lab)
+vlab_deadline=$((SECONDS + 180))
+for vlab_port in 8080; do
+  until timeout 1 bash -c "</dev/tcp/$vlab_ip/$vlab_port"; do
+    vlab_running || vlab_fail "lab container exited before port $vlab_port was ready"
+    [ "$SECONDS" -lt "$vlab_deadline" ] || vlab_fail "port $vlab_port not ready after 180s"
+    sleep 2
+  done
+done
+sleep 3
+vlab_running || vlab_fail "lab container exited right after start"
+```
+
+### run ใหม่
+```bash
+sudo docker logs -f lab &                 # log ของ app ไหลเข้า log ของ job (sky logs ดูได้)
+exit "$(sudo docker wait lab)"            # job อยู่ใน RUNNING จน container จบ, exit code เดียวกับ container
+```
+
+### จุดที่ต้องเข้าใจ
+- **ทำไมเช็กที่ IP ของ container ไม่ใช่ `127.0.0.1:8080`:** `-p 8080:8080` ทำให้ `docker-proxy` บน VM ฟัง port 8080 ทันทีตั้งแต่ container เริ่ม แม้ app ข้างในยังไม่ฟัง การต่อ localhost จึงสำเร็จเสมอและไม่ได้บอกอะไรเลย ส่วนการต่อ IP ของ container ตรง ๆ (บน bridge network) จะสำเร็จก็ต่อเมื่อ app ฟังจริง
+- **`/dev/tcp/<ip>/<port>`:** ความสามารถของ bash (ไม่ใช่ไฟล์จริง) เปิด TCP connection ได้โดยไม่ต้องมี `nc` หรือ `curl` ใน AMI `timeout 1` กันการค้างถ้าปลายทางไม่ตอบ
+- **`$SECONDS`:** ตัวแปรของ bash ที่นับวินาทีตั้งแต่ shell เริ่ม ใช้ทำ deadline รวมของทุก port (ไม่ใช่ 180 วินาทีต่อ port)
+- **เช็กว่า container ยังรันอยู่ทุกรอบ:** คำสั่งที่จบเองหรือ app ที่ crash จะล้มทันที ไม่ต้องรอจนครบ 180 วินาที และพิมพ์ `docker logs --tail 50` ไว้ให้ดูว่าทำไม
+- **`sleep 3` ท้ายสุด:** จับกรณีที่ app เปิด port แป๊บเดียวแล้วตาย และกรณี lab ที่ไม่มี port เลย (loop ไม่ทำงาน) ซึ่งยังต้องรู้ว่าคำสั่งไม่ได้จบเอง
+- **เอา `--rm` ออก:** ถ้ามี `--rm` container ที่ตายจะถูกลบทันทีพร้อม log `vlab_fail` จะอ่าน log ไม่ได้ VM ทั้งเครื่องถูกลบตอน session จบอยู่แล้ว จึงไม่มีขยะค้าง
+- **`{{{{ }}}}` ในโค้ด Python:** template ของ `docker inspect` ใช้ `{{ }}` ซึ่งใน f-string ต้อง escape เป็น `{{{{ }}}}`
+- **งบเวลา:** `JOB_START_TIMEOUT` (10 นาที) ต้องครอบทั้ง pull (~1 นาที) + รอ app (`AWS_LAB_READY_TIMEOUT` 180 วินาที)
+- **prelaunch ได้ผลนี้ด้วย** เพราะ [prelaunch_service.py](../web-portal/backend/app/services/prelaunch_service.py) ใช้ `_run_sky_launch` และ task ตัวเดียวกัน
+- **lab gateway ไม่กระทบ:** ยังใช้ `-p port:port` เหมือนเดิม Traefik ส่งต่อไปที่ IP ของ VM
+
+---
+
+## P2-6. ห้องแลป: readinessProbe
+
+```python
+if ports:
+    container["readinessProbe"] = {
+        "tcpSocket": {"port": int(ports[0])},
+        "periodSeconds": 2,
+        "timeoutSeconds": 1,
+    }
+```
+
+| probe | ล้มแล้วเกิดอะไร | ใช้ไหม |
+|---|---|---|
+| readiness | pod ไม่ Ready (ไม่ส่ง traffic / ไม่นับว่าพร้อม) แต่**ไม่ฆ่า** container | ✅ |
+| liveness | kubelet **ฆ่าและ restart** container | ❌ app ที่เริ่มช้า (code-server, Vite) จะถูก restart วน |
+| startup | กัน liveness ไว้จนกว่าจะผ่านครั้งแรก | ไม่ต้องใช้ เพราะไม่มี liveness |
+
+- **ใครใช้ผล Ready:** direct pod วน `is_ready(pod)` จนครบ `DIRECT_POD_READY_TIMEOUT` (180 วินาที) อยู่แล้ว ([session_service.py](../web-portal/backend/app/services/session_service.py) `_launch_direct_pod`) ส่วน warm pod แจกเฉพาะตัวที่ Ready และมีทาง "รอ warm pod ที่กำลังขึ้น" อยู่แล้ว ไม่ต้องแก้ทั้งสองที่
+- **ทำไมแค่ port แรก:** probe หนึ่งตัวเช็กได้ port เดียว ส่วนการเช็กหลาย port ต้องใช้ `exec` ซึ่ง image อาจไม่มี `nc` หรือ `bash` port แรกเกือบทุก image คือ app หลัก (ตัดสินใจไว้ในแผนข้อ 9 เรื่องที่ 2)
+- **ไม่ใส่ `failureThreshold`:** readiness ที่ล้มไม่ทำอะไรกับ container ระยะเวลาที่รอรวมคุมด้วย `DIRECT_POD_READY_TIMEOUT` อยู่แล้ว
+- **NetworkPolicy `vlab-lab-isolation` ปิดขาเข้าทั้งหมด** แต่ kubelet ต่อ pod IP จากเครื่องตัวเอง และ kube-router ของ k3s ปล่อย traffic จาก node ตัวเองผ่าน ([lab-isolation-networkpolicy.yaml](../k8s/lab-isolation-networkpolicy.yaml) บรรทัด 7-11) **ข้อนี้ต้องยืนยันบนเครื่องจริง** (P2-9)
+- **hostPort ไม่สนใจ readiness:** traffic ที่เข้า hostPort วิ่งตรงไป container ไม่ผ่าน Service จึงไม่ถูกกันเมื่อไม่ Ready ประโยชน์ของ probe ในระบบเราคือ **"backend จะไม่ส่งลิงก์จนกว่าจะ Ready"**
+- DaemonSet ของ warm pod ที่สร้างไว้ก่อน deploy ยังไม่มี probe จะได้ probe เมื่อ prewarm scheduler สร้างใหม่ในคาบถัดไป
+
+---
+
+## P2-7. เติม port จาก EXPOSE ตอนสแกนผ่าน
+
+```python
+if verdict == "PASS" and outcome.get("digest"):
+    _fill_ports_from_image(image, summary)                              # ใหม่
+    self._finish(image, ScanStatus.PASSED, summary, now, digest=...)   # commit ทั้ง port และ summary
+    self._approve_and_drop_archive(image)
+```
+
+### `_fill_ports_from_image(image, summary)`
+| อาจารย์กรอก port | image มี EXPOSE | ผล |
+|---|---|---|
+| กรอก | (อะไรก็ได้) | ไม่แตะ **ค่าที่อาจารย์กรอกชนะเสมอ** |
+| ไม่กรอก | มี | `exposed_ports = EXPOSE`, `summary.portsFromImage = True` |
+| ไม่กรอก | ไม่มี | ยัง approve แต่เพิ่ม `NO_PORTS_WARNING` ลง `summary.warnings` (lab ที่ไม่ต้องมีหน้าเว็บก็มีได้) |
+
+- **ทำตอน PASS เท่านั้น:** image ที่ FAIL ใช้ไม่ได้อยู่แล้ว ไม่ต้องเติมหรือเตือน
+- **ทำก่อน `_finish`:** `_finish` เป็นตัว commit จึงบันทึก port กับ summary พร้อมกันใน transaction เดียว และเติมก่อน `approve_image` เพื่อให้ image ที่ APPROVED มี port แล้วเสมอ (ถ้า Phase 4 จองเลข port ตอน approve จะได้เห็น port ครบ)
+- **`image.exposed_ports = ports` (list ใหม่) ไม่ใช่ `.append`:** SQLAlchemy ตรวจการเปลี่ยนแปลงของคอลัมน์ JSONB จากการ**กำหนดค่าใหม่** ถ้าแก้ list เดิมในที่ มันจะไม่รู้และไม่ save
+- **หน้าเว็บ:** แสดง *from image* ข้าง port เมื่อ `portsFromImage` เป็นจริง และ warning ขึ้นในกล่อง Warnings เดิมของแถวนั้น
+
+### `ports_from_exposed(exposed)`
+runner 1.1.0 ส่ง `summary.image.exposedPorts` เป็น **int ที่เรียงแล้วและตัด `/proto` ทิ้ง** ([runner.py](../scan-runner/runner.py) `step_validate`) เช่น `EXPOSE 8080 53/udp` ได้ `[53, 8080]` **แยก udp ไม่ได้** ฟังก์ชันจึงรับทั้ง `8080` และ `"8080/tcp"` ถ้า runner รุ่นหน้า (Phase 3) ส่ง proto มา จะข้าม udp ได้เองโดยไม่ต้องแก้ backend
+
+---
+
+## P2-8. เทส
+
+### Backend
+| กลุ่ม | เทส |
+|---|---|
+| AWS task | entrypoint → `--entrypoint /bin/sh` อยู่ก่อน image และ `-c` อยู่หลัง / entrypoint ว่าง & `NULL` → ไม่มี `--entrypoint` / entrypoint หลายบรรทัดอยู่ใน `-c` / ลำดับใน setup: login → pull → rm → run -d → รอ port / run มีแค่ logs + wait / `bash -n` ผ่านทั้ง setup และ run / SkyPilot โหลด task ได้ |
+| สคริปต์รอ port (**รันจริงด้วย bash**) | ทุก port เปิด → 0 / port ไม่เปิด → 1 หลังหมดเวลา พร้อม log / container ตาย → 1 ทันที / ไม่มี port แต่ container ตาย → 1 |
+| Pod ห้องแลป | probe อยู่ที่ port แรก ไม่มี liveness / ไม่มี port → ไม่มี probe |
+| เก็บผลสแกน (ไฟล์ใหม่) | port ว่าง → ได้ EXPOSE + approve / port ที่กรอกไม่ถูกทับ / ไม่มีทั้งคู่ → approve + warning / summary ถูกตัดจนไม่มี `image` → warning ไม่ crash / FAIL → ไม่แตะ port / `ports_from_exposed` 7 แบบ |
+
+เทสสคริปต์รอ port ใช้ **docker ปลอม**: ใส่โฟลเดอร์ที่มีสคริปต์ `sudo` (ส่งต่อคำสั่ง) และ `docker` (ตอบ IP = 127.0.0.1 และสถานะ running จากไฟล์) ไว้หน้า `PATH` แล้วเปิด socket จริงใน Python ให้สคริปต์ต่อ ทำให้เทส logic ของ bash ได้โดยไม่ต้องมี Docker
+
+### ลองกับ Docker จริง (ครั้งเดียว ไม่ได้อยู่ในชุดเทส)
+รันสคริปต์ที่สร้างจาก `_aws_wait_ready_script` จริง ใน container `docker:cli` ที่ mount `docker.sock` ของ Docker Desktop ให้เปิด container `busybox:1.36` จริง 3 แบบ:
+
+| แบบ | entrypoint | ผล |
+|---|---|---|
+| ปกติ | `httpd -f -p 8080` | `port 8080 ready`, exit 0, 3 วินาที |
+| คำสั่งจบเอง | `echo starting; exit 3` | `exited before port 8080 was ready` + log `starting`, exit 1, 2 วินาที |
+| ฟังแค่ 127.0.0.1 | `httpd -f -p 127.0.0.1:8080` | `port 8080 not ready after 12s`, exit 1 |
+
+แบบที่ 3 คือปัญหาที่ hint ในฟอร์ม Phase 1 เตือนไว้ ("must listen on 0.0.0.0") ตอนนี้ระบบจับได้แล้ว แทนที่จะส่งลิงก์ที่เปิดไม่ได้ให้นักศึกษา
+
+### ผล
+| ชุด | ผล |
+|---|---|
+| Backend ทั้งหมด | **737 passed, 2 failed, 3 skipped** (2 ตัวที่ล้มคือเทส SIEM ที่ต้องมี docker ใน WSL เหมือน Phase 1) |
+| Frontend `vitest run` / `tsc -b` | 69 passed / ผ่าน |
+
+รอบแรกที่รันทั้งชุดมีอีก 3 ตัวล้ม ซึ่งเป็นเทสที่ต้องแก้ตามโค้ดใหม่ ดู P2-12.3
+
+---
+
+## P2-9. สิ่งที่ต้องลองบนเครื่องจริง
+
+เทสข้างบนพิสูจน์ logic แล้ว แต่ 3 เรื่องนี้ขึ้นกับสภาพแวดล้อมจริง ต้องลองตอนเปิดเครื่อง
+
+| # | ลองอะไร | ต้องเปิด | ดูอะไร |
+|---|---|---|---|
+| 1 | กด Start lab จากเครื่องแลปที่เปิด `LAB_ISOLATION_ENABLED` | mn, wn1, rn | pod เป็น Ready (ถ้า NetworkPolicy บล็อก probe จะค้าง 0/1 แล้ว timeout ใน 180 วินาที) `kubectl get pod -o wide` และ `describe pod` ดู Events `Readiness probe failed` |
+| 2 | เปิด lab AWS ด้วย image ที่มี ENTRYPOINT (code-server) + กรอก entrypoint | AWS | ขึ้นได้ และ session เป็น RUNNING หลัง app พร้อมจริง |
+| 3 | เปิด lab AWS ด้วย image ที่ app ฟัง 127.0.0.1 | AWS | session FAILED ภายใน ~4 นาที, เครื่องถูกลบ, log มีข้อความ `vlab: port ... not ready` |
+| 4 | อัป image ที่มี `EXPOSE` โดยไม่กรอก port | mn, rn, R2 webhook | หลังสแกนผ่าน หน้า Lab images แสดง port + *from image* |
+
+ข้อ 1 สำคัญที่สุด ถ้าไม่ผ่าน lab ในห้องแลปจะเปิดไม่ได้เลย ทางถอยคือเอา probe ออก (ลบ 7 บรรทัดใน `_lab_container`)
+
+---
+
+## P2-10. Deploy
+
+1. merge (พร้อม Phase 1)
+2. backend restart (ไม่มี migration ใหม่ใน Phase 2)
+3. frontend build ใหม่
+4. ไม่ต้องรัน Ansible ไม่ต้องแตะ Terraform / AMI
+5. (ถ้าต้องการให้ warm pod ที่สร้างไว้แล้วได้ probe ทันที) ลบ DaemonSet ของ warm pod ปัจจุบัน ให้ scheduler สร้างใหม่ ไม่ทำก็ได้ คาบถัดไปจะได้เอง
+
+---
+
+## P2-11. ข้อจำกัดที่ยังเหลือ
+
+| # | เรื่อง | ผลกระทบ | แก้ใน |
+|---|---|---|---|
+| 1 | ห้องแลปเช็กแค่ port แรก | port ที่ 2, 3 ของ image อาจยังไม่พร้อมตอนส่งลิงก์ (AWS เช็กครบทุก port แล้ว) | Phase 5 (smoke test) หรือ sidecar |
+| 2 | runner 1.1.0 ตัด `/udp` ทิ้ง | image ที่ `EXPOSE 53/udp` จะได้ port 53 เป็น tcp | Phase 3 ให้ runner ส่ง proto |
+| 3 | app ที่ใช้เวลาเริ่ม > 180 วินาที | เดิมเปิดได้ (แค่ลิงก์ใช้ไม่ได้ช่วงแรก) ตอนนี้ล้ม | ปรับ `DIRECT_POD_READY_TIMEOUT` / `AWS_LAB_READY_TIMEOUT` |
+| 4 | image ที่อนุมัติไปแล้วก่อน Phase 2 และ port ว่าง | ไม่ถูกเติมย้อนหลัง (เติมตอนสแกนผ่านเท่านั้น) | ไม่น่ามี เพราะก่อน Phase 1 ฟอร์มบังคับใส่ port ไว้แล้ว |
+| 5 | `_build_k8s_task` (ทางเก่าผ่าน SkyPilot) ไม่มี readiness | ถ้ายังใช้ทางนี้ จะส่งลิงก์ก่อนพร้อมเหมือนเดิม | เรื่องที่ต้องตัดสินใจข้อ 1 ในแผน |
+
+---
+
+## P2-12. บทเรียนระหว่างทำ
+
+### P2-12.1 เทสไปอยู่ผิด class
+ตอนแทรก class ใหม่ `TestAwsWaitReadyScript` กลางไฟล์ เทส `test_secret_is_accepted_and_not_in_envs` ที่อยู่ถัดไปกลายเป็น method ของ class ใหม่โดยไม่ตั้งใจ (Python ดูจากการเยื้อง) เทสยังผ่าน แต่ไปโผล่ในกลุ่มผิดในตารางสรุป
+จับได้เพราะรันด้วย `-k WaitReady` แล้วเห็นเทสที่ไม่เกี่ยวโผล่มาด้วย
+> **💡** หลังแก้ไฟล์เทส ให้ดูรายชื่อเทสที่รันจริง (`-v` หรือตารางสรุป) ไม่ใช่แค่ดูว่า "passed"
+
+### P2-12.2 PowerShell กินเครื่องหมายคำพูดของคำสั่งที่ซ้อนกัน
+`docker run ... sh -c '... "$c" ...'` จาก PowerShell ทำให้ `"` หายไปบางตัว แก้ด้วยการเขียนคำสั่งลงไฟล์ `.sh` แล้วรันไฟล์แทน
+> **💡** ถ้าคำสั่งต้องผ่าน shell มากกว่า 1 ชั้น (PowerShell → docker → sh → bash) ให้เขียนเป็นไฟล์ อย่าพยายาม escape
+
+### P2-12.3 ย้าย `docker run` แล้วเทสของ lab gateway ล้ม / เกือบผ่านแบบหลอก
+[test_lab_gateway.py](../web-portal/backend/tests/session/test_lab_gateway.py) อ่าน env ของ container จาก `task["run"]` / `task.run` พอ `docker run` ย้ายไป `setup` มี 2 ตัวล้ม (ดี เพราะรู้ทันที) แต่อีกตัวเช็กว่า `"VLAB_PUBLIC_URL_" not in task.run` ซึ่ง**ยังผ่าน** ทั้งที่ตอนนี้ `run` ไม่มี `docker run` แล้ว เทสตัวนี้จึงไม่ได้ทดสอบอะไรเลย แก้ให้เช็กทั้ง `setup` และ `run`
+อีกตัวคือเทสใหม่ของเราเองที่ล้มด้วย `KeyError: 'setup'` เพราะ `sky.Task.from_yaml_config` **ดึง key ออกจาก dict ที่ส่งเข้าไป** ต้องเก็บค่าไว้ก่อนเรียก
+> **💡** เวลาย้ายของจากที่หนึ่งไปอีกที่ ให้ค้นทุกเทสที่อ่านจากที่เดิม (`grep 'task.run'`) ไม่ใช่แค่ดูตัวที่ล้ม
+> เทสแบบ "X ต้องไม่อยู่ใน Y" จะผ่านเงียบ ๆ เมื่อ Y ว่างหรือย้ายที่ไปแล้ว
+
+### P2-12.4 docker-proxy ทำให้ "port เปิด" ไม่ได้แปลว่า "app พร้อม"
+เป็นเหตุผลที่ต้องเช็กที่ IP ของ container (P2-5) ยืนยันได้จากเคส `httpd -p 127.0.0.1:8080` ใน P2-8 ถ้าเช็กที่ localhost ของ VM เคสนี้จะผ่านทั้งที่ไม่มีใครเข้าได้
+
+---
+
+## P2-13. คำศัพท์และแนวคิด
+
+| คำ | ความหมาย |
+|---|---|
+| `ENTRYPOINT` / `CMD` | คำสั่งของ image: container รัน `ENTRYPOINT + CMD` อาร์กิวเมนต์ท้าย `docker run <image>` ทับแค่ `CMD` ส่วน `--entrypoint` ทับ `ENTRYPOINT` |
+| `command` / `args` (K8s) | `command` ทับ `ENTRYPOINT`, `args` ทับ `CMD` |
+| readinessProbe | การเช็กว่า container พร้อมรับงานหรือยัง ล้ม = ไม่ Ready แต่ไม่ถูกฆ่า |
+| livenessProbe | การเช็กว่า container ยังไม่ค้าง ล้ม = ถูก restart |
+| `tcpSocket` probe | probe ที่ผ่านเมื่อต่อ TCP ได้ ไม่สนว่า app ตอบอะไร ใช้ได้กับทุก image (ไม่ต้องมีเครื่องมือใน image) |
+| docker-proxy | process ของ Docker ที่ฟัง host port ของ `-p` แทน container รับ connection ได้ตั้งแต่ container เริ่ม |
+| `/dev/tcp/host/port` | ความสามารถของ bash เปิด TCP connection ผ่านการ redirect |
+| `$SECONDS` | ตัวแปรของ bash: วินาทีตั้งแต่ shell เริ่ม |
+| `FAILED_SETUP` | สถานะ job ของ SkyPilot เมื่อ `setup` จบด้วย exit code ไม่ใช่ 0 |
+| JSONB mutation | SQLAlchemy ไม่รู้ว่า list / dict ในคอลัมน์ JSONB ถูกแก้ในที่ ต้องกำหนดค่าใหม่ (หรือใช้ `MutableList`) |
+
+---
+
+## P2-14. คำถามทบทวน
+
+1. ถ้า AWS ยังต่อ `/bin/sh -c "<entrypoint>"` ท้ายชื่อ image (ไม่ใช้ `--entrypoint`) image ที่ **ไม่มี** ENTRYPOINT จะทำงานไหม แล้ว image code-server ล่ะ
+2. ทำไมการรอ port ต้องอยู่ใน `setup` ไม่ใช่ต้น `run`
+3. ถ้าเปลี่ยนสคริปต์ให้เช็ก `127.0.0.1:$port` แทน IP ของ container เทสข้อไหนใน P2-8 (Docker จริง) จะเปลี่ยนผล
+4. ทำไมไม่ใส่ livenessProbe คู่กับ readinessProbe
+5. ถ้า `_fill_ports_from_image` ใช้ `image.exposed_ports.extend(ports)` จะเกิดอะไรขึ้น
+6. image ที่ `EXPOSE 8080 53/udp` หลัง Phase 2 จะได้ port อะไร และ Phase ไหนจะแก้
+7. ถ้า probe ถูก NetworkPolicy บล็อกจริงบนเครื่องแลป อาการที่นักศึกษาเห็นคืออะไร ใช้เวลานานแค่ไหนถึงจะรู้

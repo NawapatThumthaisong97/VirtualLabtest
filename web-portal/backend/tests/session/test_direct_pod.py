@@ -41,6 +41,21 @@ class TestPodSpec:
         assert c["command"] == ["/bin/sh", "-c", "/bin/bash /run.sh"]
         assert {"name": "IDE_PASSWORD", "value": "x"} in c["env"]
 
+    def test_readiness_probe_on_first_port(self, world):
+        """Pod is Ready only when the app accepts TCP on its first port (students never get a link too early)"""
+        [c] = build_lab_pod(world.k8s_image, "worker-pete", "0123456789abcdef")["spec"]["containers"]
+        probe = c["readinessProbe"]
+        assert probe["tcpSocket"] == {"port": 8080}
+        assert probe["periodSeconds"] == 2
+        assert "livenessProbe" not in c  # app ที่ช้าต้องไม่ถูก restart วน
+
+    def test_no_ports_no_readiness_probe(self, world, db):
+        """Image without ports: no probe, Ready as soon as the container runs (as before)"""
+        world.k8s_image.exposed_ports = []
+        db.flush()
+        [c] = build_lab_pod(world.k8s_image, "worker-pete", "0123456789abcdef")["spec"]["containers"]
+        assert "readinessProbe" not in c
+
     def test_null_entrypoint_keeps_image_command(self, world, db):
         """entrypoint_script NULL (Advanced left empty): no command, so K8s runs the image's ENTRYPOINT / CMD"""
         world.k8s_image.entrypoint_script = None

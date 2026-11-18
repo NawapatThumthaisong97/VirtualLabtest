@@ -42,6 +42,12 @@ DIRECT_LABEL = "vlab/direct"
 FATAL_WAITING_REASONS = {"ErrImagePull", "ImagePullBackOff", "InvalidImageName",
                          "CreateContainerConfigError", "CrashLoopBackOff"}
 
+# readinessProbe ของ lab: pod เป็น Ready ก็ต่อเมื่อ app รับ TCP ที่ port แรกได้จริง (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 4.3)
+# ถี่พอให้นักศึกษาไม่ต้องรอนานหลัง app ขึ้น ระยะรอรวมคุมด้วย DIRECT_POD_READY_TIMEOUT ไม่ใช่ failureThreshold
+# (readiness ล้มไม่ฆ่า container แค่ไม่ Ready) ไม่ใส่ livenessProbe: app ที่ช้าจะถูก restart วนโดยไม่จำเป็น
+READINESS_PERIOD_SECONDS = 2
+READINESS_TIMEOUT_SECONDS = 1
+
 
 def _target_node(pod) -> Optional[str]:
     """เครื่องของ pod: spec.nodeName ถ้าผูกแล้ว ไม่งั้นดูจาก node affinity ที่ DaemonSet ใส่ (matchFields metadata.name)"""
@@ -116,6 +122,15 @@ def _lab_container(lab_image) -> dict:
     entrypoint = (lab_image.entrypoint_script or "").strip()
     if entrypoint:
         container["command"] = ["/bin/sh", "-c", entrypoint]
+    # Ready = app รับ TCP ที่ port แรกได้แล้ว direct pod รอ is_ready และ warm pod ที่แจกต้อง Ready จึงไม่มีใคร
+    # ได้ลิงก์ก่อน app พร้อม kubelet ต่อ pod IP จากเครื่องตัวเอง ซึ่ง NetworkPolicy vlab-lab-isolation ยังปล่อยให้ผ่าน
+    # (kube-router ไม่กัน traffic จาก node ตัวเอง) port แรก = app หลักเกือบทุก image ส่วน port อื่นไม่เช็ก
+    if ports:
+        container["readinessProbe"] = {
+            "tcpSocket": {"port": int(ports[0])},
+            "periodSeconds": READINESS_PERIOD_SECONDS,
+            "timeoutSeconds": READINESS_TIMEOUT_SECONDS,
+        }
     if lab_image.workdir:
         container["workingDir"] = lab_image.workdir
     requests = {k: v for k, v in (("cpu", _cpu(lab_image.cpu_requirement)),

@@ -344,9 +344,12 @@ class TestRoutesEndpoint:
 # ---------------------------------------------------------------- A7: token ไหลเข้า task ของ AWS
 
 def docker_env(task: dict) -> dict[str, str]:
-    """env ที่ส่งเข้า container (-e KEY=VALUE ใน docker run ของ AWS task)"""
-    import shlex
-    argv = shlex.split(task["run"])
+    """env ที่ส่งเข้า container (-e KEY=VALUE ใน docker run ของ AWS task)
+
+    docker run อยู่ใน setup ตั้งแต่ Phase 2 (รอ port ก่อนจบ setup) ใช้ตัวแยกเดียวกับ test_task_builder
+    """
+    from tests.session.test_task_builder import docker_run_argv
+    argv = docker_run_argv(task)
     return dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-e")
 
 
@@ -411,7 +414,8 @@ class TestStartWithGateway:
         svc.create_session(world.user.id, world.aws_lab.id)
         s = only_session(db, world)
         [(_, task)] = fake_sky.launched
-        assert f"VLAB_PUBLIC_URL_8080=https://l-{s.gateway_token}-8080.bell-lab.space" in task.run
+        # docker run (และ -e ทั้งหมด) อยู่ใน setup ตั้งแต่ Phase 2
+        assert f"VLAB_PUBLIC_URL_8080=https://l-{s.gateway_token}-8080.bell-lab.space" in task.setup
 
     def test_running_session_in_route_table(self, svc, db, world, fake_sky, gateway_on):
         """after Start the session shows up in the Traefik table"""
@@ -431,6 +435,8 @@ class TestStartWithGateway:
         assert s.upstreams is None
         assert s.endpoints == {"8080": "http://10.10.2.14:8080"}
         [(_, task)] = fake_sky.launched
+        # docker run อยู่ใน setup ตั้งแต่ Phase 2 (เช็ก run อย่างเดียวจะผ่านเสมอโดยไม่ได้ทดสอบอะไร)
+        assert "VLAB_PUBLIC_URL_" not in task.setup
         assert "VLAB_PUBLIC_URL_" not in task.run
 
     def test_k8s_no_token(self, svc, db, world, fake_sky, gateway_on):

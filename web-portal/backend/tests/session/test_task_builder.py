@@ -6,7 +6,14 @@
 บรรทัดแรกของ docstring ของ class / เทส = ชื่อ group / case ในตารางสรุป (conftest.py)
 case ที่ขึ้นต้นด้วย "Regression:" คือบั๊กที่เคยเจอตอนเทสกับ cluster / AWS จริง
 """
+import os
 import shlex
+import shutil
+import socket
+import stat
+import subprocess
+import sys
+import time
 
 import pytest
 import sky
@@ -15,7 +22,11 @@ from sky.utils import common_utils
 from app.exceptions.domain import ClusterOperationError
 from app.models.lab import RunTarget
 from app.configs.settings import settings
+from app.services.session_service import _aws_wait_ready_script
 from tests.conftest import AMI, ECR_HOST, REGISTRY
+
+IMAGE_REF = f"{ECR_HOST}/skypilot/music-lab:lab-01"
+WAIT_MARKER = "# ---- wait for the lab to be ready"
 
 
 def build(service, image, target=RunTarget.KUBERNETES):
@@ -23,8 +34,15 @@ def build(service, image, target=RunTarget.KUBERNETES):
 
 
 def docker_run_argv(task: dict) -> list[str]:
-    """แยก run: ของ AWS กลับเป็น argument แบบที่ shell จะเห็น"""
-    return shlex.split(task["run"])
+    """argument ของ `sudo docker run ...` ใน setup ของ AWS แบบที่ shell จะเห็น
+
+    ตัดเอาช่วงระหว่าง "sudo docker run" ถึงสคริปต์รอ port (entrypoint หลายบรรทัดอยู่ในเครื่องหมายคำพูด
+    จึงแยกตามบรรทัดตรง ๆ ไม่ได้) แล้วตัด "sudo docker run" กับ ">/dev/null" ออก
+    """
+    command = task["setup"].split("sudo docker run ", 1)[1].split(WAIT_MARKER, 1)[0]
+    argv = shlex.split(command)
+    assert argv[-1] == ">/dev/null"
+    return argv[:-1]
 
 
 # ---------------------------------------------------------------- K3s
@@ -166,21 +184,62 @@ class TestAwsTask:
         task = build(service, make_image(entrypoint_script="echo 1\necho 2"), RunTarget.AWS)
         argv = docker_run_argv(task)
 
-        assert argv[-3:] == ["/bin/bash", "-c", "echo 1\necho 2"]
-        assert argv[-4] == f"{ECR_HOST}/skypilot/music-lab:lab-01"
+        assert argv[-3:] == [IMAGE_REF, "-c", "echo 1\necho 2"]
+
+    def test_regression_entrypoint_overrides_image_entrypoint(self, service, make_image):
+        """Regression: an entered entrypoint replaces the image ENTRYPOINT, like command: in the lab pod
+
+        เดิมต่อ "/bin/bash -c ..." ท้าย image ถ้า image ตั้ง ENTRYPOINT ไว้ (code-server) คำสั่งนี้กลายเป็น
+        argument ของ ENTRYPOINT เดิม เปิดในห้องแลปได้แต่บน AWS พัง
+        """
+        argv = docker_run_argv(build(service, make_image(entrypoint_script="/bin/bash /run.sh"), RunTarget.AWS))
+
+        assert argv[argv.index("--entrypoint") + 1] == "/bin/sh"
+        assert argv.index("--entrypoint") < argv.index(IMAGE_REF)  # option ต้องอยู่ก่อนชื่อ image
+        assert argv[-3:] == [IMAGE_REF, "-c", "/bin/bash /run.sh"]
 
     def test_regression_empty_entrypoint_uses_image_entrypoint(self, service, make_image):
         """Regression: empty entrypoint uses the image's own ENTRYPOINT (code-server)
 
         ถ้าต่อคำสั่งท้าย docker run จะกลายเป็น argument ของ ENTRYPOINT แล้วพัง
         """
-        task = build(service, make_image(entrypoint_script=""), RunTarget.AWS)
-        assert docker_run_argv(task)[-1] == f"{ECR_HOST}/skypilot/music-lab:lab-01"
+        argv = docker_run_argv(build(service, make_image(entrypoint_script=""), RunTarget.AWS))
+        assert argv[-1] == IMAGE_REF
+        assert "--entrypoint" not in argv
 
     def test_null_entrypoint_uses_image_entrypoint(self, service, make_image):
         """entrypoint_script NULL (column is nullable since 20261118_01) behaves like an empty one"""
-        task = build(service, make_image(entrypoint_script=None), RunTarget.AWS)
-        assert docker_run_argv(task)[-1] == f"{ECR_HOST}/skypilot/music-lab:lab-01"
+        argv = docker_run_argv(build(service, make_image(entrypoint_script=None), RunTarget.AWS))
+        assert argv[-1] == IMAGE_REF
+        assert "--entrypoint" not in argv
+
+    def test_container_starts_in_setup_and_run_waits_for_it(self, service, make_image):
+        """Setup starts the container detached and waits for its ports; run only follows it
+
+        _wait_job_running ถือว่าเปิดสำเร็จเมื่อ job เป็น RUNNING ซึ่งเกิดหลัง setup จบ
+        การรอ port ใน setup จึงทำให้ "RUNNING" แปลว่า app พร้อมแล้ว
+        """
+        task = build(service, make_image(), RunTarget.AWS)
+        setup, run = task["setup"], task["run"]
+
+        argv = docker_run_argv(task)
+        assert argv[:3] == ["-d", "--name", "lab"]
+        assert "--rm" not in argv  # เก็บ container ที่ตายไว้ให้อ่าน log ได้
+        order = [setup.index(s) for s in ("docker login", "docker pull", "docker rm -f lab", "sudo docker run", WAIT_MARKER)]
+        assert order == sorted(order)
+        assert "for vlab_port in 8080 5173 8443; do" in setup
+        assert f"vlab_deadline=$((SECONDS + {settings.AWS_LAB_READY_TIMEOUT}))" in setup
+        assert "docker run" not in run
+        assert "sudo docker logs -f lab &" in run
+        assert 'exit "$(sudo docker wait lab)"' in run
+
+    @pytest.mark.skipif(shutil.which("bash") is None or sys.platform == "win32", reason="needs bash")
+    @pytest.mark.parametrize("entrypoint", [None, "echo 'a b' \"$HOME\"\nexec sleep 1"])
+    def test_setup_and_run_are_valid_bash(self, service, make_image, entrypoint):
+        """setup / run parse as bash (bash -n), including quotes and a multi-line entrypoint"""
+        task = build(service, make_image(entrypoint_script=entrypoint), RunTarget.AWS)
+        for script in (task["setup"], task["run"]):
+            subprocess.run(["bash", "-n"], input=script, text=True, check=True)
 
     def test_secret_is_accepted_and_not_in_envs(self, service, make_image):
         """ECR token is a hidden secret, not a plain env"""
@@ -191,6 +250,106 @@ class TestAwsTask:
         assert secret.get_secret_value() == "dummy"
         assert "dummy" not in str(secret)  # SkyPilot เก็บเป็น SecretStr แสดงผลเป็น ***
         assert "ECR_TOKEN" not in (sky_task.envs or {})
+
+    def test_task_is_accepted_by_skypilot(self, service, make_image):
+        """The new setup / run (multi-line, quotes, $(...)) still load as a SkyPilot task"""
+        task = build(service, make_image(entrypoint_script="echo 1\necho 2"), RunTarget.AWS)
+        setup, run = task["setup"], task["run"]  # from_yaml_config ดึง key ออกจาก dict ที่ส่งเข้าไป
+        sky_task = sky.Task.from_yaml_config(task, secrets_overrides=[("ECR_TOKEN", "dummy")])
+        assert sky_task.setup == setup
+        assert sky_task.run == run
+
+
+# ------------------------------------------------- สคริปต์รอ port ของ AWS (รันจริงด้วย docker ปลอม)
+
+@pytest.mark.skipif(shutil.which("bash") is None or sys.platform == "win32", reason="needs bash + /dev/tcp")
+class TestAwsWaitReadyScript:
+    """AWS wait-for-ports script
+
+    รันสคริปต์จริงด้วย bash โดยแทน sudo / docker ด้วยของปลอม: docker inspect บอก IP = 127.0.0.1
+    และบอกว่า container ยังรันอยู่ไหมตามไฟล์ state ส่วน port ใช้ socket ที่เทสเปิดเอง
+    """
+
+    @pytest.fixture
+    def fake_bin(self, tmp_path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        state = tmp_path / "running"
+        state.write_text("true")
+        scripts = {
+            "sudo": '#!/bin/bash\nexec "$@"\n',
+            "docker": (
+                "#!/bin/bash\n"
+                'case "$1 $3" in\n'
+                f'  "inspect {{{{.State.Running}}}}") cat {state} ;;\n'
+                '  "inspect "*) echo 127.0.0.1 ;;\n'
+                '  "logs "*) echo "app log line" ;;\n'
+                "esac\n"
+            ),
+        }
+        for name, body in scripts.items():
+            path = bin_dir / name
+            path.write_text(body)
+            path.chmod(path.stat().st_mode | stat.S_IEXEC)
+        return bin_dir, state
+
+    @staticmethod
+    def run_script(fake_bin, ports, timeout_seconds=4):
+        bin_dir, _ = fake_bin
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        started = time.monotonic()
+        result = subprocess.run(["bash", "-c", _aws_wait_ready_script(ports, timeout_seconds)],
+                                env=env, capture_output=True, text=True, timeout=30)
+        return result, time.monotonic() - started
+
+    @staticmethod
+    def listening_port():
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen()
+        return sock
+
+    def test_all_ports_open_succeeds(self, fake_bin):
+        """Every port accepts TCP -> exit 0"""
+        a, b = self.listening_port(), self.listening_port()
+        try:
+            result, _ = self.run_script(fake_bin, [a.getsockname()[1], b.getsockname()[1]])
+        finally:
+            a.close()
+            b.close()
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.count("ready") == 2
+
+    def test_port_never_opens_fails_after_timeout(self, fake_bin):
+        """A port that never opens -> exit 1 after the timeout, with the container log"""
+        closed = self.listening_port()
+        port = closed.getsockname()[1]
+        closed.close()  # ไม่มีใครฟังแล้ว
+        result, elapsed = self.run_script(fake_bin, [port], timeout_seconds=3)
+        assert result.returncode == 1
+        assert f"port {port} not ready after 3s" in result.stderr
+        assert "app log line" in result.stderr
+        assert elapsed < 15
+
+    def test_container_exit_fails_fast(self, fake_bin):
+        """Container already exited -> exit 1 right away, without waiting for the timeout"""
+        _, state = fake_bin
+        state.write_text("false")
+        closed = self.listening_port()
+        port = closed.getsockname()[1]
+        closed.close()
+        result, elapsed = self.run_script(fake_bin, [port], timeout_seconds=60)
+        assert result.returncode == 1
+        assert "exited before port" in result.stderr
+        assert elapsed < 10
+
+    def test_no_ports_still_catches_a_command_that_exits(self, fake_bin):
+        """No ports: a container that stops right after start still fails setup"""
+        _, state = fake_bin
+        state.write_text("false")
+        result, _ = self.run_script(fake_bin, [])
+        assert result.returncode == 1
+        assert "exited right after start" in result.stderr
 
 
 # ---------------------------------------------------------------- ชื่อ cluster

@@ -20,6 +20,8 @@ export interface ScanSummary {
   lastError?: string;
   counts?: Record<string, number>;
   trivyVersion?: string;
+  /** true = อาจารย์เว้น Exposed ports ว่าง ระบบเติมจาก EXPOSE ของ image ตอนสแกนผ่าน */
+  portsFromImage?: boolean;
   [key: string]: unknown;
 }
 
