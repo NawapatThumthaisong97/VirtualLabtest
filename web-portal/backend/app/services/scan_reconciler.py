@@ -215,6 +215,7 @@ class ScanReconciler:
         summary = _summary_from(outcome)
         if verdict == "PASS" and outcome.get("digest"):
             _fill_ports_from_image(image, summary)
+            _warn_if_no_command(image, summary)
             self._finish(image, ScanStatus.PASSED, summary, now, digest=outcome["digest"])
             self._approve_and_drop_archive(image)
             result.passed.append(image_id)
@@ -337,13 +338,16 @@ class ScanReconciler:
 
 
 NO_PORTS_WARNING = "No ports: the image has no EXPOSE and none were entered, so students get no link to the lab"
+NO_COMMAND_WARNING = (
+    "No command: the image has no ENTRYPOINT or CMD and no Entrypoint was entered, so the lab stops right after it starts"
+)
 
 
 def ports_from_exposed(exposed) -> list[int]:
     """summary.image.exposedPorts จาก runner -> list ของ port tcp
 
-    runner 1.1.0 ส่งเป็น int เรียงแล้วและตัด /proto ทิ้ง ([8080, 5173]) ทำให้แยก udp ไม่ได้
-    รับรูปแบบ "8080/tcp" ไว้ด้วย (ถ้า runner รุ่นหน้าส่ง proto มา จะข้าม udp ได้เอง ไม่มี /proto = tcp ตามกติกาของ Docker)
+    runner 1.2.0 ส่ง "8080/tcp" / "53/udp" (ข้าม udp ได้) ส่วน 1.1.0 ส่งเป็น int ที่ตัด /proto ทิ้ง ([8080, 5173])
+    ซึ่งแยก udp ไม่ได้ รับทั้งสองแบบ เพราะแถวที่สแกนด้วย 1.1.0 ยังอยู่ใน DB ไม่มี /proto = tcp ตามกติกาของ Docker
     ค่าแปลก ๆ (ไม่ใช่ตัวเลข, นอกช่วง 1-65535, ซ้ำ) ข้ามทิ้ง ลำดับตามที่ได้มา
     """
     ports: list[int] = []
@@ -373,6 +377,22 @@ def _fill_ports_from_image(image: LabImage, summary: dict) -> None:
         summary["portsFromImage"] = True
     else:
         summary["warnings"] = [*summary.get("warnings", []), NO_PORTS_WARNING]
+
+
+def _warn_if_no_command(image: LabImage, summary: dict) -> None:
+    """image ไม่มี ENTRYPOINT / CMD และอาจารย์ไม่ได้กรอก Entrypoint = container จบทันทีที่เริ่ม (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 5)
+
+    เตือนที่ backend ไม่ใช่ใน runner เพราะ runner ไม่รู้ว่าอาจารย์กรอก Entrypoint ไว้หรือเปล่า
+    เตือนเฉพาะเมื่อรู้แน่ว่าไม่มี: runner 1.2.0 ส่ง key entrypoint / cmd มาเสมอ (list ว่าง = ไม่ได้ตั้ง)
+    ไม่มี key = runner 1.1.0 หรือถูกตัดออกเพราะผลใหญ่เกิน 4 KB -> ไม่รู้ ไม่เตือน
+    """
+    if (image.entrypoint_script or "").strip():
+        return
+    info = summary.get("image")
+    if not isinstance(info, dict) or "entrypoint" not in info or "cmd" not in info:
+        return
+    if not info["entrypoint"] and not info["cmd"]:
+        summary["warnings"] = [*summary.get("warnings", []), NO_COMMAND_WARNING]
 
 
 def _summary_from(outcome: dict) -> dict:

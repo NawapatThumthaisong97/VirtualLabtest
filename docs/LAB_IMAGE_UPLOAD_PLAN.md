@@ -207,6 +207,8 @@ restart backend อย่างเดียว
 
 ## 5. Phase 3: scanner อ่าน config ของ image
 
+> ทำแล้ว (ยังต้องรัน Ansible บน rn และลองสแกนจริง) รายละเอียดอยู่ใน [LAB_IMAGE_UPLOAD_WORKING.md](LAB_IMAGE_UPLOAD_WORKING.md) ส่วน Phase 3
+
 ### 5.1 ทำไม
 ใน Phase 1 ช่องว่างแปลว่า "ใช้ค่าจาก image" แต่อาจารย์ยังมองไม่เห็นว่าค่านั้นคืออะไร Phase นี้ทำให้หน้า Lab Image แสดงได้ว่า "image นี้จะรัน: `code-server --bind-addr 0.0.0.0:8080`" และเตือนเมื่อ image ไม่มีคำสั่งให้รันเลย ซึ่งแปลว่า container จะจบทันที
 

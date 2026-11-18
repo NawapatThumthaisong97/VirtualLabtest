@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.lab_image import ImageStatus, LabImage, ScanStatus
-from app.services.scan_reconciler import NO_PORTS_WARNING, ports_from_exposed
+from app.services.scan_reconciler import NO_COMMAND_WARNING, NO_PORTS_WARNING, ports_from_exposed
 from tests.fakes import FakeK8s
 from tests.lab_image.test_scan_launch import ETAG, reconcile, scan_settings  # noqa: F401 (autouse fixture)
 
@@ -21,14 +21,20 @@ def k8s():
 
 @pytest.fixture
 def scanned(db, world, k8s):
-    """แถว RUNNING ที่ Job สแกนจบแล้วด้วยผล verdict / exposedPorts ที่กำหนด"""
+    """แถว RUNNING ที่ Job สแกนจบแล้วด้วยผล verdict / exposedPorts ที่กำหนด
 
-    def _make(verdict="PASS", exposed=(8080,), ports=(), image_info=True):
+    command=None = ผลแบบ runner 1.1.0 (ไม่มี key entrypoint / cmd)
+    command=(entrypoint, cmd) = ผลแบบ runner 1.2.0
+    """
+
+    def _make(verdict="PASS", exposed=(8080,), ports=(), image_info=True, command=None, entrypoint_script=None):
         job_name = f"scan-{uuid.uuid4().hex[:12]}"
-        image = _image(db, world, job_name, list(ports))
-        summary = {"runnerVersion": "1.1.0"}
+        image = _image(db, world, job_name, list(ports), entrypoint_script)
+        summary = {"runnerVersion": "1.1.0" if command is None else "1.2.0"}
         if image_info:
             summary["image"] = {"os": "linux", "architecture": "amd64", "user": "", "exposedPorts": list(exposed)}
+            if command is not None:
+                summary["image"].update(entrypoint=list(command[0]), cmd=list(command[1]), workingDir="")
         k8s.add_job(job_name, "SUCCEEDED", result={
             "imageId": str(image.id), "etag": ETAG, "verdict": verdict, "retryable": False,
             "reasons": [] if verdict == "PASS" else ["blocked"], "warnings": ["image runs as root"],
@@ -39,10 +45,11 @@ def scanned(db, world, k8s):
     return _make
 
 
-def _image(db, world, job_name, ports):
+def _image(db, world, job_name, ports, entrypoint_script=None):
     image = LabImage(
         id=uuid.uuid4(), uploaded_by=world.owner.id, course_id=world.course.id,
         repository="vlab/collect-test", tag=f"lab-{uuid.uuid4().hex[:6]}", size_mb=10,
+        entrypoint_script=entrypoint_script,
         status=ImageStatus.PENDING, scan_status=ScanStatus.RUNNING, scan_attempts=1,
         scan_job_name=job_name, scan_started_at=datetime.now(timezone.utc), exposed_ports=ports,
         archive_key=f"lab-images/{uuid.uuid4().hex}_image.tar", archive_etag=ETAG,
@@ -105,6 +112,56 @@ class TestFillPortsFromImage:
         assert image.scan_status is ScanStatus.FAILED
         assert image.exposed_ports == []
         assert NO_PORTS_WARNING not in image.scan_summary["warnings"]
+
+    def test_runner_1_2_ports_skip_udp(self, db, k8s, fake_r2, scanned):
+        """runner 1.2.0 keeps the protocol: EXPOSE 53/udp 8080 gives only 8080"""
+        image = scanned(exposed=["53/udp", "8080/tcp"], command=([], ["httpd"]))
+        reconcile(db, k8s, fake_r2)
+
+        db.refresh(image)
+        assert image.exposed_ports == [8080]
+
+
+class TestNoCommandWarning:
+    """Scan PASS warns when the container would have nothing to run"""
+
+    def run(self, db, k8s, fake_r2, scanned, **kwargs):
+        image = scanned(**kwargs)
+        reconcile(db, k8s, fake_r2)
+        db.refresh(image)
+        return image
+
+    def test_no_entrypoint_no_cmd_nothing_entered(self, db, k8s, fake_r2, scanned):
+        """Image sets neither ENTRYPOINT nor CMD and no Entrypoint entered: approved, with a warning"""
+        image = self.run(db, k8s, fake_r2, scanned, command=([], []))
+        assert image.status is ImageStatus.APPROVED
+        assert NO_COMMAND_WARNING in image.scan_summary["warnings"]
+
+    def test_entered_entrypoint_is_enough(self, db, k8s, fake_r2, scanned):
+        """The instructor's Entrypoint replaces the image's command, so nothing to warn about"""
+        image = self.run(db, k8s, fake_r2, scanned, command=([], []), entrypoint_script="httpd -f -p 8080")
+        assert NO_COMMAND_WARNING not in image.scan_summary["warnings"]
+
+    @pytest.mark.parametrize("command", [(["/entrypoint.sh"], []), ([], ["httpd"])], ids=["entrypoint", "cmd"])
+    def test_image_has_a_command(self, db, k8s, fake_r2, scanned, command):
+        """ENTRYPOINT or CMD alone is enough"""
+        image = self.run(db, k8s, fake_r2, scanned, command=command)
+        assert NO_COMMAND_WARNING not in image.scan_summary["warnings"]
+
+    def test_unknown_with_old_runner(self, db, k8s, fake_r2, scanned):
+        """Runner 1.1.0 (no entrypoint / cmd keys): unknown, so no warning instead of a false alarm"""
+        image = self.run(db, k8s, fake_r2, scanned)
+        assert NO_COMMAND_WARNING not in image.scan_summary["warnings"]
+
+    def test_unknown_when_image_info_trimmed(self, db, k8s, fake_r2, scanned):
+        """summary.image dropped to fit 4 KB: unknown, no warning"""
+        image = self.run(db, k8s, fake_r2, scanned, image_info=False)
+        assert NO_COMMAND_WARNING not in image.scan_summary["warnings"]
+
+    def test_failed_scan_is_not_warned(self, db, k8s, fake_r2, scanned):
+        """FAIL: the image is not usable anyway"""
+        image = self.run(db, k8s, fake_r2, scanned, verdict="FAIL", command=([], []))
+        assert NO_COMMAND_WARNING not in image.scan_summary["warnings"]
 
 
 class TestPortsFromExposed:

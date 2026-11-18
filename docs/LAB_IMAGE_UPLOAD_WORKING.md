@@ -744,7 +744,7 @@ runner 1.1.0 ส่ง `summary.image.exposedPorts` เป็น **int ที่
 | # | เรื่อง | ผลกระทบ | แก้ใน |
 |---|---|---|---|
 | 1 | ห้องแลปเช็กแค่ port แรก | port ที่ 2, 3 ของ image อาจยังไม่พร้อมตอนส่งลิงก์ (AWS เช็กครบทุก port แล้ว) | Phase 5 (smoke test) หรือ sidecar |
-| 2 | runner 1.1.0 ตัด `/udp` ทิ้ง | image ที่ `EXPOSE 53/udp` จะได้ port 53 เป็น tcp | Phase 3 ให้ runner ส่ง proto |
+| 2 | runner 1.1.0 ตัด `/udp` ทิ้ง | image ที่ `EXPOSE 53/udp` จะได้ port 53 เป็น tcp | Phase 3 ให้ runner ส่ง proto (**แก้แล้วใน Phase 3** ดูข้อ P3-4) |
 | 3 | app ที่ใช้เวลาเริ่ม > 180 วินาที | เดิมเปิดได้ (แค่ลิงก์ใช้ไม่ได้ช่วงแรก) ตอนนี้ล้ม | ปรับ `DIRECT_POD_READY_TIMEOUT` / `AWS_LAB_READY_TIMEOUT` |
 | 4 | image ที่อนุมัติไปแล้วก่อน Phase 2 และ port ว่าง | ไม่ถูกเติมย้อนหลัง (เติมตอนสแกนผ่านเท่านั้น) | ไม่น่ามี เพราะก่อน Phase 1 ฟอร์มบังคับใส่ port ไว้แล้ว |
 | 5 | `_build_k8s_task` (ทางเก่าผ่าน SkyPilot) ไม่มี readiness | ถ้ายังใช้ทางนี้ จะส่งลิงก์ก่อนพร้อมเหมือนเดิม | เรื่องที่ต้องตัดสินใจข้อ 1 ในแผน |
@@ -799,3 +799,294 @@ runner 1.1.0 ส่ง `summary.image.exposedPorts` เป็น **int ที่
 5. ถ้า `_fill_ports_from_image` ใช้ `image.exposed_ports.extend(ports)` จะเกิดอะไรขึ้น
 6. image ที่ `EXPOSE 8080 53/udp` หลัง Phase 2 จะได้ port อะไร และ Phase ไหนจะแก้
 7. ถ้า probe ถูก NetworkPolicy บล็อกจริงบนเครื่องแลป อาการที่นักศึกษาเห็นคืออะไร ใช้เวลานานแค่ไหนถึงจะรู้
+
+---
+---
+
+# Phase 3: scanner อ่าน config ของ image
+
+> ส่วนหนึ่งของ [LAB_IMAGE_UPLOAD_PLAN.md](LAB_IMAGE_UPLOAD_PLAN.md) (ข้อ 5) · ทำบน branch `feature/course-system` (ต่อจาก Phase 1–2)
+> หัวข้อของ Phase นี้ขึ้นต้นด้วย **P3-**
+
+## สารบัญ Phase 3
+
+| ข้อ | เรื่อง |
+|---|---|
+| P3-1 | [ปัญหาก่อนแก้](#p3-1-ปัญหาก่อนแก้) |
+| P3-2 | [ผลหลังแก้](#p3-2-ผลหลังแก้) |
+| P3-3 | [ไฟล์ที่แก้ทั้งหมด](#p3-3-ไฟล์ที่แก้ทั้งหมด) |
+| P3-4 | [Runner: `image_info()`](#p3-4-runner-image_info) |
+| P3-5 | [Runner: ผลต้องไม่เกิน 4 KB](#p3-5-runner-ผลต้องไม่เกิน-4-kb) |
+| P3-6 | [ขึ้นเวอร์ชันเป็น 1.2.0](#p3-6-ขึ้นเวอร์ชันเป็น-120) |
+| P3-7 | [Backend: เตือนเมื่อไม่มีคำสั่งให้รัน](#p3-7-backend-เตือนเมื่อไม่มีคำสั่งให้รัน) |
+| P3-8 | [Frontend: แสดงค่าจาก image](#p3-8-frontend-แสดงค่าจาก-image) |
+| P3-9 | [เทส](#p3-9-เทส) |
+| P3-10 | [Deploy (ลำดับสำคัญ)](#p3-10-deploy-ลำดับสำคัญ) |
+| P3-11 | [ข้อจำกัดที่ยังเหลือ](#p3-11-ข้อจำกัดที่ยังเหลือ) |
+| P3-12 | [บทเรียนระหว่างทำ](#p3-12-บทเรียนระหว่างทำ) |
+| P3-13 | [คำศัพท์และแนวคิด](#p3-13-คำศัพท์และแนวคิด) |
+| P3-14 | [คำถามทบทวน](#p3-14-คำถามทบทวน) |
+
+---
+
+## P3-1. ปัญหาก่อนแก้
+
+| # | อาการ | ต้นเหตุ |
+|---|---|---|
+| 1 | ช่องที่อาจารย์เว้นว่างแสดงแค่ *from image* แต่ไม่รู้ว่า image จะรัน**อะไร** | runner 1.1.0 อ่านแค่ `os`, `architecture`, `User`, `ExposedPorts` ไม่ได้อ่าน `Entrypoint`, `Cmd`, `WorkingDir` |
+| 2 | image ที่ไม่มีคำสั่งให้รันเลย (ไม่มีทั้ง `ENTRYPOINT` และ `CMD`) ผ่านการสแกนเงียบ ๆ แล้วไปตายตอนนักศึกษาเปิด | ไม่มีใครรู้ข้อมูลนี้ |
+| 3 | `EXPOSE 53/udp` ถูกนับเป็น port 53 แบบ tcp | runner 1.1.0 ตัด `/proto` ทิ้ง (ข้อจำกัดที่ 2 ของ Phase 2) |
+
+---
+
+## P3-2. ผลหลังแก้
+
+หน้า Lab images (แถวที่อาจารย์เว้นว่าง):
+```
+Ports        8080 from image
+Entrypoint   /bin/sh -c "httpd -f -p 8080 -h /www" from image
+Workdir      /www from image
+```
+image ที่ไม่มีคำสั่งให้รันเลย:
+```
+Entrypoint   (none) from image
+Warnings     • No command: the image has no ENTRYPOINT or CMD and no Entrypoint was entered, so the lab stops right after it starts
+```
+
+---
+
+## P3-3. ไฟล์ที่แก้ทั้งหมด
+
+| ไฟล์ | แก้อะไร |
+|---|---|
+| [runner.py](../scan-runner/runner.py) | `image_info()`, `tcp_ports()`, `_command()` ใหม่ / `step_validate` ใช้ `image_info` / `encode_result` ตัดคำสั่งก่อน port / `RUNNER_VERSION = "1.2.0"` |
+| [Dockerfile](../scan-runner/Dockerfile) | `ARG RUNNER_VERSION=1.2.0` |
+| [scan-runner-image/defaults/main.yml](../ansible/roles/scan-runner-image/defaults/main.yml) | `scan_runner_version: "1.2.0"` (**Ansible ไฟล์เดียวที่แก้ใน Phase 3**) |
+| [settings.py](../web-portal/backend/app/configs/settings.py) | `SCAN_RUNNER_VERSION = "1.2.0"` |
+| [scan_reconciler.py](../web-portal/backend/app/services/scan_reconciler.py) | `_warn_if_no_command()` + `NO_COMMAND_WARNING` / docstring ของ `ports_from_exposed` |
+| [labImage.ts](../web-portal/frontend/src/services/labImage.ts) | type `ScannedImageInfo` |
+| [LabImageTab.tsx](../web-portal/frontend/src/components/instructor/LabImageTab.tsx) | `FromImage` แสดงค่าจริง / `imageCommand()` |
+| [tests/test_image_info.py](../scan-runner/tests/test_image_info.py) | ใหม่: เทส `image_info` และ `encode_result` (13 ข้อ) |
+| [test_scan_collect.py](../web-portal/backend/tests/lab_image/test_scan_collect.py) | เทสรูปแบบ 1.2.0 และคำเตือนไม่มีคำสั่ง |
+| [test_scan_launch.py](../web-portal/backend/tests/lab_image/test_scan_launch.py) | ชื่อ image ของ scanner เป็น `:1.2.0` |
+| [imageCommand.test.ts](../web-portal/frontend/src/__tests__/imageCommand.test.ts) | ใหม่ |
+
+**ไม่แตะ:** Terraform, K8s manifest, migration (ค่าใหม่อยู่ใน `scan_summary` ซึ่งเป็น JSONB อยู่แล้ว)
+
+---
+
+## P3-4. Runner: `image_info()`
+
+```python
+def image_info(config: dict) -> dict:
+    runtime = config.get("config") or {}
+    ...
+    return {
+        "os": ..., "architecture": ..., "user": ...,
+        "exposedPorts": ["53/udp", "8080/tcp"],     # เดิม [53, 8080]
+        "entrypoint": ["/bin/sh", "-c"],              # ใหม่
+        "cmd": ["httpd -f -p 8080 -h /www"],          # ใหม่
+        "workingDir": "/www",                         # ใหม่
+    }
+```
+`config` คือผลของ `skopeo inspect --config` ซึ่งเป็น JSON ตามสเปก OCI image config ค่าที่ต้องใช้อยู่ใต้ key `config` (ตัวเล็ก) ได้แก่ `Entrypoint`, `Cmd`, `WorkingDir`, `ExposedPorts`, `User`
+
+### ทำไมแยกเป็นฟังก์ชันล้วน
+เดิม logic นี้อยู่ใน `step_validate` ปนกับการเรียก skopeo เทสไม่ได้ถ้าไม่มี skopeo และไฟล์ tar จริง พอแยกเป็น `image_info(config)` ที่รับ dict คืน dict ก็เทสได้ด้วย dict ตัวอย่างล้วน ๆ (หลัก "functional core, imperative shell" แบบเดียวกับ `evaluate_report` ใน scan guide ข้อ 6.3)
+
+### กติกาของแต่ละค่า
+| ค่า | กติกา | ทำไม |
+|---|---|---|
+| `exposedPorts` | `"<port>/<proto>"` เรียงตามเลข ไม่มี proto = tcp, ตัดเลขนอก 1–65535, สูงสุด 20 ตัว | เก็บ proto ไว้ให้ backend ข้าม udp ได้ |
+| `entrypoint` / `cmd` | **list เสมอ** (ว่าง = image ไม่ได้ตั้ง) สูงสุด 10 argument ตัวละ ≤ 120 ตัวอักษร | ให้ backend แยก "ไม่มีคำสั่ง" ออกจาก "ไม่รู้" ได้ (P3-7) |
+| `workingDir` | `""` = ไม่ได้ตั้ง | |
+| ค่าที่ไม่ใช่ list (`"npm start"`, `null`, ตัวเลข) | ถือว่าไม่ได้ตั้ง | config ที่ tool อื่นสร้างอาจแปลก ต้องไม่ทำให้ runner พัง |
+
+### shell form vs exec form
+| ใน Dockerfile | ใน config ของ image |
+|---|---|
+| `CMD ["httpd", "-f"]` (exec form) | `"Cmd": ["httpd", "-f"]` |
+| `CMD httpd -f` (shell form) | `"Cmd": ["/bin/sh", "-c", "httpd -f"]` ← Docker แปลงให้ตอน build |
+
+runner จึงต้องรองรับแค่ list ส่วนหน้าเว็บใส่เครื่องหมายคำพูดครอบ argument ที่มีช่องว่าง (`/bin/sh -c "httpd -f"`) จะได้อ่านออกว่าเป็นก้อนเดียว
+
+### `tcp_ports()` และคำเตือนเดิม
+คำเตือน "declared ports … not all EXPOSEd" (ช่อง port ที่อาจารย์กรอกไม่ตรงกับ EXPOSE) ตอนนี้เทียบเฉพาะ port tcp เดิมเทียบกับทุก port ซึ่งรวม udp ด้วย
+
+---
+
+## P3-5. Runner: ผลต้องไม่เกิน 4 KB
+
+ผลของ Job ส่งกลับทาง **termination message** ของ container ซึ่ง K8s ตัดที่ 4,096 ไบต์ (runner ตั้งเพดานไว้ 3,500) ค่าใหม่ทำให้ผลใหญ่ขึ้น เช่น image ที่มีคำสั่งยาว 10 argument × 120 ตัว ก็กินไปแล้ว ~1.2 KB
+
+`encode_result` ตัดของทีละชั้นจนพอดี ลำดับใหม่:
+```
+secretTop → top เหลือ 2 → ลบ top → ย่อ warnings → ย่อ reasons
+→ ย่อคำสั่ง (≤ 4 argument ตัวละ ≤ 40 ตัว)        ← ใหม่
+→ ลบ entrypoint / cmd / workingDir               ← ใหม่
+→ ลบ image ทั้งก้อน (ทางสุดท้าย)
+```
+- **คำสั่งถูกตัดก่อน `exposedPorts`** เพราะ backend ใช้ `exposedPorts` เติม port ให้ lab (Phase 2) ส่วนคำสั่งใช้แค่แสดงผล
+- **ลบ key ทิ้ง ไม่ใช่ตั้งเป็น `[]`** เพราะ `[]` แปลว่า "image ไม่มีคำสั่ง" ซึ่งจะทำให้ backend เตือนผิด การไม่มี key แปลว่า "ไม่รู้" (P3-7)
+- `etag`, `verdict`, `digest` ไม่ถูกตัดเลย เพราะ reconciler ต้องใช้ตัดสินผล
+
+> **💡** ทุกครั้งที่เพิ่มข้อมูลลงช่องทางที่มีขนาดจำกัด (termination message, header, cookie) ต้องคิดเสมอว่า
+> "ถ้าเต็ม อะไรถูกตัดก่อน" และ "ฝั่งที่อ่านแยกออกไหมว่าข้อมูลถูกตัด หรือไม่มีตั้งแต่แรก"
+
+---
+
+## P3-6. ขึ้นเวอร์ชันเป็น 1.2.0
+
+tag ของ scanner ใน registry เป็น **immutable** (ห้าม push ทับ เพราะ Job ที่กำลังรันอาจใช้ tag นั้นอยู่ และ role `scan-runner-image` จะไม่ยอม push ทับถ้าเนื้อหาต่าง) แก้โค้ด runner เมื่อไหร่ต้องขึ้นเวอร์ชัน และต้องแก้ให้ตรงกัน 4 ที่:
+
+| ที่ | ใช้ทำอะไร |
+|---|---|
+| `RUNNER_VERSION` ใน `runner.py` | พิมพ์ใน `version` และใส่ใน `summary.runnerVersion` ของทุกผล |
+| `ARG RUNNER_VERSION` ใน `Dockerfile` | ค่าเริ่มต้นตอน build เอง (role ส่งค่าทับทุกครั้ง) |
+| `scan_runner_version` ใน role | tag ที่ role build และ push |
+| `SCAN_RUNNER_VERSION` ใน `settings.py` | tag ที่ backend ใส่ใน manifest ของ Job สแกน |
+
+**ไม่ได้แก้** `script/tailscale-acl.sh` ที่ใช้ `vlab/scan-runner:1.1.0` เป็น image ทดสอบเครือข่าย (`check`) เพราะใช้แค่ python3 ข้างใน และ 1.1.0 ยังอยู่ใน registry ตลอด (immutable ไม่ถูกลบ)
+
+---
+
+## P3-7. Backend: เตือนเมื่อไม่มีคำสั่งให้รัน
+
+```python
+def _warn_if_no_command(image, summary):
+    if (image.entrypoint_script or "").strip():
+        return                                    # อาจารย์กรอก Entrypoint = ทับคำสั่งของ image อยู่แล้ว
+    info = summary.get("image")
+    if not isinstance(info, dict) or "entrypoint" not in info or "cmd" not in info:
+        return                                    # ไม่รู้ (runner 1.1.0 / ถูกตัดออก) = ไม่เตือน
+    if not info["entrypoint"] and not info["cmd"]:
+        summary["warnings"].append(NO_COMMAND_WARNING)
+```
+เรียกใน `_collect` ตอน PASS ต่อจาก `_fill_ports_from_image`
+
+| image ตั้ง ENTRYPOINT/CMD | อาจารย์กรอก Entrypoint | runner | ผล |
+|---|---|---|---|
+| ไม่ทั้งคู่ | ไม่ | 1.2.0 | ⚠️ เตือน |
+| ไม่ทั้งคู่ | กรอก | 1.2.0 | ไม่เตือน |
+| ตั้งอย่างใดอย่างหนึ่ง | ไม่ | 1.2.0 | ไม่เตือน |
+| ? | ไม่ | 1.1.0 / ถูกตัด | ไม่เตือน (ไม่รู้) |
+
+**ทำไมเตือนที่ backend ไม่ใช่ใน runner:** runner ไม่รู้ว่าอาจารย์กรอก Entrypoint ไว้หรือเปล่า (backend ไม่ได้ส่งค่านั้นเข้า Job) ถ้า runner เตือนเอง image ที่อาจารย์กรอก Entrypoint ไว้ถูกต้องก็จะโดนเตือนผิด หลักคือ **runner รายงานข้อเท็จจริงของ image ส่วน backend ตัดสินโดยรวมกับสิ่งที่อาจารย์กรอก** เหตุผลเดียวกับที่คำเตือน "No ports" ใน Phase 2 อยู่ที่ backend
+
+**ทำไมเป็นแค่ warning ไม่ใช่ FAIL:** การสแกนเป็นด่านความปลอดภัย image ที่ไม่มีคำสั่งไม่ได้อันตราย แค่ใช้ไม่ได้ อาจารย์แก้ได้โดยไม่ต้องอัปใหม่ถ้ามีหน้าแก้ไข (ยังไม่มี ดูข้อจำกัด Phase 1) การปฏิเสธ image แบบนี้เป็นหน้าที่ของ smoke test ใน Phase 5
+
+---
+
+## P3-8. Frontend: แสดงค่าจาก image
+
+```tsx
+<dd>{image.entrypointScript || <FromImage value={imageCommand(summary?.image)} />}</dd>
+<dd>{image.workdir || <FromImage value={summary?.image?.workingDir || undefined} />}</dd>
+```
+`imageCommand(info)`:
+| info | แสดง |
+|---|---|
+| `entrypoint: ["/usr/bin/entrypoint.sh", "--bind-addr", "0.0.0.0:8080"], cmd: ["."]` | `/usr/bin/entrypoint.sh --bind-addr 0.0.0.0:8080 .` |
+| `entrypoint: [], cmd: ["/bin/sh", "-c", "npm run dev"]` | `/bin/sh -c "npm run dev"` |
+| `entrypoint: [], cmd: []` | `(none)` |
+| ไม่มี key (ยังไม่สแกน / runner 1.1.0) | แค่ *from image* |
+
+ต่อ `ENTRYPOINT` ด้วย `CMD` ตามลำดับที่ Docker รันจริง อาจารย์จะเห็นคำสั่งที่ container จะรันจริง ๆ
+
+---
+
+## P3-9. เทส
+
+### Runner (`scan-runner/tests`)
+`test_image_info.py` (ใหม่ 13 ข้อ): image แบบ code-server อ่านครบ / ไม่ได้ตั้งอะไรได้ key ครบเป็นค่าว่าง / `config: null` ไม่พัง / port เก็บ proto และเรียง / port แปลกถูกทิ้ง / port เกิน 20 ถูกตัด / คำสั่งยาวถูกตัดและไม่มีขึ้นบรรทัด / คำสั่งที่ไม่ใช่ list (4 แบบ) / ผลเล็กไม่ถูกตัด / ผลใหญ่: คำสั่งถูกตัดก่อนและ `exposedPorts` ยังอยู่ครบ
+รัน: `wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/Panup/VirtualLabtest && web-portal/backend/.venv/bin/python -m pytest scan-runner/tests -q'`
+
+### Backend
+`test_scan_collect.py`: รูปแบบ 1.2.0 (`["53/udp","8080/tcp"]` → `[8080]`) / กลุ่มใหม่ "No command" 7 ข้อตามตารางใน P3-7 + FAIL ไม่เตือน
+
+### Frontend
+`imageCommand.test.ts` (ใหม่ 4 ข้อ): ต่อ ENTRYPOINT + CMD / ใส่คำพูดเมื่อมีช่องว่าง / `(none)` / ไม่รู้ = `undefined`
+
+### ลองกับ scanner image จริง (ครั้งเดียว ไม่ได้อยู่ในชุดเทส)
+build `scan-runner` ด้วย Docker Desktop (`docker build -t vlab-scan-runner-local:1.2.0 scan-runner`) แล้ว:
+1. `docker run --rm vlab-scan-runner-local:1.2.0 version` → `{"runner": "1.2.0", "python": "3.14.10", "trivy": "0.76.1", "skopeo": "1.20.1"}`
+2. `docker save` image ทดสอบ 2 ตัวเป็น `/work/image.tar` แล้วรัน `validate` แบบ `--read-only --cap-drop=ALL` (วิธีจาก scan guide ข้อ 6.3)
+
+| image ทดสอบ | `summary.image` ที่ได้จาก skopeo + `image_info` จริง |
+|---|---|
+| busybox + `WORKDIR /www`, `EXPOSE 8080 53/udp`, `ENTRYPOINT ["/bin/sh","-c"]`, `CMD ["httpd -f -p 8080 -h /www"]` | `exposedPorts: ["53/udp","8080/tcp"]`, `entrypoint: ["/bin/sh","-c"]`, `cmd: ["httpd -f -p 8080 -h /www"]`, `workingDir: "/www"` |
+| `FROM scratch` + busybox binary (ไม่ตั้งอะไรเลย) | `exposedPorts: []`, `entrypoint: []`, `cmd: []`, `workingDir: "/"` |
+
+ข้อสังเกต: image จาก BuildKit ได้ `WorkingDir: "/"` แม้ไม่ได้เขียน `WORKDIR` (ไม่ใช่ `""`) หน้าเว็บจึงแสดง `/ from image` ซึ่งตรงกับที่ Docker ใช้จริง
+
+### ผล
+| ชุด | ผล |
+|---|---|
+| Runner | 22 passed (เดิม 9 + ใหม่ 13) |
+| Backend ทั้งหมด | **745 passed, 2 failed, 3 skipped** (2 ตัวที่ล้มคือเทส SIEM ที่ต้องมี docker ใน WSL เหมือน Phase 1–2) |
+| Frontend | 73 passed, `tsc -b` ผ่าน |
+
+---
+
+## P3-10. Deploy (ลำดับสำคัญ)
+
+**ต้อง build scanner บน rn ก่อน deploy backend เสมอ** ถ้าสลับลำดับ backend จะสร้าง Job ด้วย `vlab/scan-runner:1.2.0` ซึ่งยังไม่มีใน registry → Pod ค้าง `ErrImagePull` จนหมดเวลา แล้วแถวกลายเป็น ERROR
+
+1. เปิด rn แล้วจาก WSL (`ansible/`):
+   ```bash
+   ansible-playbook -i inventory.yml site.yml -K --limit rn --tags scan-runner
+   ```
+   role จะตรวจ cosign ของ Trivy → build → smoke test (`version` ต้องรายงาน Trivy ตรง) → push เข้า :5002
+2. ตรวจ: `curl -s http://100.119.124.73:5001/v2/vlab/scan-runner/tags/list` ต้องมีทั้ง `1.1.0` และ `1.2.0`
+3. แล้วค่อย restart backend (WSL หรือรัน role `web-service` ไปที่ webservice-1)
+4. อัป image ทดสอบหนึ่งตัว → ใน `scan_summary.runnerVersion` ต้องเป็น `1.2.0` และหน้าเว็บแสดงคำสั่งจาก image
+
+ถอยกลับ: ตั้ง `SCAN_RUNNER_VERSION=1.1.0` ใน `.env` ของ backend แล้ว restart (1.1.0 ยังอยู่ใน registry) backend รองรับผลของทั้งสองเวอร์ชันอยู่แล้ว
+
+---
+
+## P3-11. ข้อจำกัดที่ยังเหลือ
+
+| # | เรื่อง | ผลกระทบ |
+|---|---|---|
+| 1 | image ที่สแกนด้วย 1.1.0 ไปแล้วไม่มีข้อมูลคำสั่ง | แสดงแค่ *from image* ต้องอัปใหม่ถึงจะเห็น ไม่มีผลกับการรัน |
+| 2 | คำสั่งที่แสดงถูกตัดที่ 10 argument / 120 ตัวอักษร | ใช้แสดงผลเท่านั้น ตอนรันจริง Docker ใช้คำสั่งเต็มจาก image |
+| 3 | "No command" เป็นแค่ warning | image ยัง approve ได้ การกันไม่ให้ approve เป็นงานของ Phase 5 |
+| 4 | `User` ยังเป็นค่าเดียวที่ใช้ทำ warning "image runs as root" | ไม่เปลี่ยนจากเดิม |
+
+---
+
+## P3-12. บทเรียนระหว่างทำ
+
+### P3-12.1 ทดสอบ runner ด้วย image จริงได้โดยไม่ต้องมี cluster
+`scan-runner` เป็น image ธรรมดา build ด้วย Docker Desktop ได้ และขั้น `validate` ต้องการแค่ `/work/image.tar` จึงรันนอก K8s ได้ทั้งขั้น วิธีนี้จับปัญหาที่ unit test มองไม่เห็นได้ เช่น โค้ดใช้ syntax ที่ Python ใน alpine ไม่รองรับ หรือ skopeo ให้ JSON หน้าตาไม่เหมือนที่คิด (เช่น `WorkingDir: "/"` จาก BuildKit)
+ใช้ `--user 0` เพราะ bind mount จาก Windows ไม่มี `fsGroup` แบบใน Pod ส่วนใน Pod จริงรันเป็น 10001 ตามเดิม
+
+### P3-12.2 แยก "ไม่มี" ออกจาก "ไม่รู้"
+`[]` กับ "ไม่มี key" ดูเหมือนกันแต่ความหมายต่างกัน ถ้าใช้ `info.get("cmd") or []` ตรง ๆ image ที่สแกนด้วย 1.1.0 ทุกตัวจะถูกเตือนว่า "No command" ทั้งที่มีคำสั่ง เทส `test_unknown_with_old_runner` กันจุดนี้ไว้
+> **💡** เวลาเปลี่ยนรูปแบบข้อมูลระหว่างสองระบบที่ deploy ไม่พร้อมกัน (runner บน rn / backend บน webservice-1)
+> ฝั่งที่อ่านต้องรองรับทั้งรูปแบบเก่าและใหม่เสมอ และต้องแยก "ค่าว่าง" ออกจาก "ไม่มีข้อมูล"
+
+---
+
+## P3-13. คำศัพท์และแนวคิด
+
+| คำ | ความหมาย |
+|---|---|
+| image config | JSON ใน image ที่เก็บ `Entrypoint`, `Cmd`, `Env`, `ExposedPorts`, `WorkingDir`, `User` (ไม่ใช่ไฟล์ใน filesystem ของ image) |
+| `skopeo inspect --config` | อ่าน image config จากไฟล์ tar โดยไม่ต้องแตกหรือรัน image |
+| exec form / shell form | `CMD ["a","b"]` รันตรง / `CMD a b` Docker แปลงเป็น `["/bin/sh","-c","a b"]` |
+| termination message | ข้อความที่ container เขียนลง `/dev/termination-log` ก่อนจบ K8s เก็บไว้ใน status ของ Pod (≤ 4 KB) |
+| immutable tag | tag ที่ห้าม push ทับ เนื้อหาของ `:1.2.0` ต้องเป็นของเดิมตลอดไป |
+| BuildKit | ตัว build ของ Docker รุ่นใหม่ ใส่ค่าเริ่มต้นบางอย่างใน config ให้เอง เช่น `WorkingDir: "/"` |
+
+---
+
+## P3-14. คำถามทบทวน
+
+1. ทำไม `image_info` คืน `entrypoint: []` แทนที่จะไม่ใส่ key เมื่อ image ไม่ได้ตั้ง
+2. ถ้า `encode_result` ลบ `image` ทั้งก้อนก่อนตัดคำสั่ง จะกระทบ Phase 2 อย่างไร
+3. image ที่ Dockerfile เขียน `CMD npm start` (shell form) จะแสดงในหน้าเว็บว่าอะไร
+4. ถ้า deploy backend ที่ตั้ง `SCAN_RUNNER_VERSION=1.2.0` ก่อนรัน Ansible บน rn จะเห็นอาการอะไร ที่ไหน
+5. ทำไมคำเตือน "No command" อยู่ใน backend ไม่ใช่ใน runner
+6. ทำไมไม่ต้องแก้ `script/tailscale-acl.sh` ที่ยังอ้าง `scan-runner:1.1.0`

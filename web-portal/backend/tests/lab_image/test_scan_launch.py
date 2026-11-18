@@ -157,7 +157,7 @@ def test_retry_deletes_previous_job_and_uses_next_attempt_name(db, k8s, fake_r2,
 
 def test_runner_image_defaults_from_registry_host(monkeypatch):
     monkeypatch.setattr(settings, "SCAN_RUNNER_IMAGE", None)
-    assert settings.scan_runner_image == "100.64.0.3:5001/vlab/scan-runner:1.1.0"
+    assert settings.scan_runner_image == "100.64.0.3:5001/vlab/scan-runner:1.2.0"
     monkeypatch.setattr(settings, "SCAN_RUNNER_IMAGE", RUNNER)
     assert settings.scan_runner_image == RUNNER
 

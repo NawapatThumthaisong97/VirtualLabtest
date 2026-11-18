@@ -12,6 +12,7 @@ import {
   labImageService,
   type CreateLabImagePayload,
   type LabImage,
+  type ScannedImageInfo,
 } from '../../services/labImage'
 import { startUpload, useUploadStore } from '../../services/labImageUploads'
 import { useToast } from '../../hooks/useToast'
@@ -238,9 +239,13 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
                             )}
                           </dd>
                           <dt className="text-slate-400">Entrypoint</dt>
-                          <dd className="break-all font-mono">{image.entrypointScript || <FromImage />}</dd>
+                          <dd className="break-all font-mono">
+                            {image.entrypointScript || <FromImage value={imageCommand(summary?.image)} />}
+                          </dd>
                           <dt className="text-slate-400">Workdir</dt>
-                          <dd className="font-mono">{image.workdir || <FromImage />}</dd>
+                          <dd className="font-mono">
+                            {image.workdir || <FromImage value={summary?.image?.workingDir || undefined} />}
+                          </dd>
                           <dt className="text-slate-400">Env vars</dt>
                           <dd className="font-mono">
                             {image.envVars && Object.keys(image.envVars).length ? Object.keys(image.envVars).join(', ') : '—'}
@@ -344,7 +349,27 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
   )
 }
 
-/** ช่องที่อาจารย์เว้นว่าง: ตอนรันใช้ค่าของ image เอง (ENTRYPOINT / CMD / WORKDIR) */
-function FromImage() {
-  return <span className="font-sans italic text-slate-400">from image</span>
+/**
+ * ช่องที่อาจารย์เว้นว่าง: ตอนรันใช้ค่าของ image เอง (ENTRYPOINT / CMD / WORKDIR)
+ * value = ค่าที่ scanner อ่านได้จาก image (runner 1.2.0) ไม่มี = ยังไม่รู้ (ยังไม่สแกน / runner เก่า)
+ */
+function FromImage({ value }: { value?: string }) {
+  return (
+    <>
+      {value && <span>{value} </span>}
+      <span className="font-sans italic text-slate-400">from image</span>
+    </>
+  )
+}
+
+/**
+ * คำสั่งที่ container จะรัน = ENTRYPOINT ต่อด้วย CMD (แบบเดียวกับ Docker)
+ * undefined = ไม่รู้ (ไม่มี key) · "(none)" = image ไม่ได้ตั้งทั้งสองอย่าง (backend เตือนใน Warnings ด้วย)
+ */
+export function imageCommand(info: ScannedImageInfo | undefined): string | undefined {
+  if (!info || !Array.isArray(info.entrypoint) || !Array.isArray(info.cmd)) return undefined
+  const args = [...info.entrypoint, ...info.cmd]
+  if (args.length === 0) return '(none)'
+  // argument ที่มีช่องว่างใส่เครื่องหมายคำพูด จะได้อ่านออกว่าเป็นก้อนเดียว
+  return args.map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg)).join(' ')
 }

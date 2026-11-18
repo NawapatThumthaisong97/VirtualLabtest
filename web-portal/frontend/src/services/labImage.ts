@@ -13,8 +13,22 @@ export const RESERVED_REPOSITORIES = ['vlab/scan-runner'];
 /** เพดานของ PUT ครั้งเดียว ต้องตรงกับ LAB_IMAGE_MAX_ARCHIVE_BYTES ของ backend (5 GiB - 5 MiB) */
 export const MAX_ARCHIVE_BYTES = 5 * 1024 ** 3 - 5 * 1024 ** 2;
 
+/** summary.image: ค่าจาก config ของ image ที่ scanner อ่านได้ (runner 1.2.0 ขึ้นไปมี entrypoint / cmd / workingDir) */
+export interface ScannedImageInfo {
+  os?: string;
+  architecture?: string;
+  user?: string;
+  /** 1.2.0: "8080/tcp" · 1.1.0: 8080 */
+  exposedPorts?: (string | number)[];
+  /** [] = image ไม่ได้ตั้ง · ไม่มี key = ไม่รู้ (runner เก่า / ถูกตัดออก) */
+  entrypoint?: string[];
+  cmd?: string[];
+  workingDir?: string;
+}
+
 export interface ScanSummary {
   verdict?: 'PASS' | 'FAIL' | 'ERROR';
+  image?: ScannedImageInfo;
   reasons?: string[];
   warnings?: string[];
   lastError?: string;

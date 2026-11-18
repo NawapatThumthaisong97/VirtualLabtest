@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, NoReturn, Optional
 
-RUNNER_VERSION = "1.1.0"
+RUNNER_VERSION = "1.2.0"
 
 WORK_DIR = os.environ.get("WORK_DIR", "/work")
 ARCHIVE_PATH = os.path.join(WORK_DIR, "image.tar")
@@ -362,25 +362,68 @@ def step_validate(state: dict) -> dict:
     if os_name != "linux" or arch != allowed_arch:
         fail(f"image platform is {os_name}/{arch}, expected linux/{allowed_arch}")
 
-    runtime = config.get("config") or {}
-    user = str(runtime.get("User") or "")
-    exposed = sorted(
-        int(port.split("/")[0])
-        for port in (runtime.get("ExposedPorts") or {})
-        if port.split("/")[0].isdigit()
-    )
+    info = image_info(config)
+    exposed_tcp = tcp_ports(info["exposedPorts"])
 
     warnings = list(state.get("warnings") or [])
+    user = info["user"]
     if user in ("", "0", "root") or user.startswith(("0:", "root:")):
         warnings.append("image runs as root")
     declared = {
         int(port) for port in os.environ.get("DECLARED_PORTS", "").split(",") if port.strip().isdigit()
     }
-    if declared and exposed and not declared.issubset(exposed):
-        warnings.append(f"declared ports {sorted(declared)} not all EXPOSEd (image exposes {exposed})")
+    if declared and exposed_tcp and not declared.issubset(exposed_tcp):
+        warnings.append(f"declared ports {sorted(declared)} not all EXPOSEd (image exposes {exposed_tcp})")
     state["warnings"] = warnings
     state["transport"] = transport
-    return {"image": {"os": os_name, "architecture": arch, "user": clip(user, 64), "exposedPorts": exposed[:20]}}
+    return {"image": info}
+
+
+# จำนวน / ความยาวสูงสุดของค่าที่อ่านจาก config ของ image (ผลทั้งก้อนต้องไม่เกิน MAX_RESULT_BYTES)
+MAX_EXPOSED_PORTS = 20
+MAX_COMMAND_ARGS = 10
+MAX_COMMAND_ARG_TEXT = 120
+
+
+def _command(value: Any) -> list[str]:
+    """Entrypoint / Cmd ของ image เป็น list (exec form) หรือ null ถ้าไม่ได้ตั้ง
+    shell form (`CMD npm start`) ถูก Docker แปลงเป็น ["/bin/sh", "-c", "npm start"] ไว้แล้วตอน build"""
+    if not isinstance(value, list):
+        return []
+    return [clip(arg, MAX_COMMAND_ARG_TEXT) for arg in value[:MAX_COMMAND_ARGS]]
+
+
+def image_info(config: dict) -> dict:
+    """ข้อมูลจาก config ของ image (ผลของ skopeo inspect --config) ที่ backend ใช้ / แสดงให้อาจารย์ดู
+
+    ฟังก์ชันล้วน ไม่แตะไฟล์หรือ tool เทสได้ด้วย dict ตัวอย่าง (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 5)
+    - exposedPorts: "8080/tcp" แบบที่ Docker เก็บ (1.1.0 ส่ง int และตัด /proto ทิ้ง แยก udp ไม่ได้)
+      เรียงตามเลข port ไม่มี /proto = tcp
+    - entrypoint / cmd: list เสมอ (ว่าง = image ไม่ได้ตั้ง) backend แยกได้ว่า "ไม่มีคำสั่ง" กับ
+      "runner รุ่นเก่า / ถูกตัดออก" (ไม่มี key) ส่วนนี้ใช้แสดงและเตือนเท่านั้น ไม่ได้เอาไปรัน
+    - workingDir: "" = ไม่ได้ตั้ง (Docker ใช้ /)
+    """
+    runtime = config.get("config") or {}
+    exposed: list[tuple[int, str]] = []
+    for raw in runtime.get("ExposedPorts") or {}:
+        number, _, proto = str(raw).partition("/")
+        if number.isdigit() and 1 <= int(number) <= 65535:
+            exposed.append((int(number), (proto or "tcp").lower()))
+    exposed = sorted(set(exposed))[:MAX_EXPOSED_PORTS]
+    return {
+        "os": config.get("os"),
+        "architecture": config.get("architecture"),
+        "user": clip(runtime.get("User") or "", 64),
+        "exposedPorts": [f"{port}/{proto}" for port, proto in exposed],
+        "entrypoint": _command(runtime.get("Entrypoint")),
+        "cmd": _command(runtime.get("Cmd")),
+        "workingDir": clip(runtime.get("WorkingDir") or "", MAX_TEXT),
+    }
+
+
+def tcp_ports(exposed: list[str]) -> list[int]:
+    """["8080/tcp", "53/udp"] -> [8080]"""
+    return [int(p.split("/")[0]) for p in exposed if p.endswith("/tcp")]
 
 
 # ------------------------------------------------------------ scan
@@ -634,12 +677,27 @@ def encode_result(result: dict) -> bytes:
 
     data = dump()
     summary = result["summary"]
+    image = summary.get("image") if isinstance(summary.get("image"), dict) else {}
+
+    def shorten_commands() -> None:
+        for key in ("entrypoint", "cmd"):
+            if key in image:
+                image[key] = [clip(arg, 40) for arg in image[key][:4]]
+
+    def drop_commands() -> None:
+        # ไม่มี key = backend ถือว่า "ไม่รู้" (ไม่เตือนว่าไม่มีคำสั่ง) ต่างจาก list ว่างที่แปลว่า "image ไม่ได้ตั้ง"
+        for key in ("entrypoint", "cmd", "workingDir"):
+            image.pop(key, None)
+
+    # ตัดของที่สำคัญน้อยก่อน exposedPorts อยู่จนถึงขั้นสุดท้าย เพราะ backend ใช้เติม port ให้ lab
     trimmers = [
         lambda: summary.pop("secretTop", None),
         lambda: summary.__setitem__("top", summary.get("top", [])[:2]),
         lambda: summary.pop("top", None),
         lambda: result.__setitem__("warnings", [clip(w, 80) for w in result["warnings"][:3]]),
         lambda: result.__setitem__("reasons", [clip(r, 120) for r in result["reasons"][:2]]),
+        shorten_commands,
+        drop_commands,
         lambda: summary.pop("image", None),
     ]
     for trim in trimmers:
