@@ -148,9 +148,39 @@ class TestPresignResult:
         assert image.disk_size == 50
         assert image.lifespan_minutes == 60
         assert image.exposed_ports == []
-        assert image.entrypoint_script == "/bin/bash /run.sh"
+        # ว่าง = ใช้ ENTRYPOINT / CMD ของ image (เดิมใส่ "/bin/bash /run.sh" ให้ ซึ่ง image ส่วนใหญ่ไม่มี)
+        assert image.entrypoint_script is None
         assert image.workdir is None
         assert image.env_vars is None
+
+    @pytest.mark.parametrize("blank", ["", "   ", None])
+    def test_blank_entrypoint_and_workdir_are_stored_as_null(self, client, db, world, auth, upload_body, blank):
+        """Empty Advanced fields mean "use the image's own value", so they are saved as NULL, never as \"\""""
+        response = client.post(
+            ENDPOINT, json=upload_body(entrypointScript=blank, workdir=blank), headers=auth(world.owner)
+        )
+        assert response.status_code == 201, response.text
+        image = _row(db, response.json()["data"]["imageId"])
+        assert image.entrypoint_script is None
+        assert image.workdir is None
+
+    def test_entrypoint_and_workdir_are_trimmed(self, client, db, world, auth, upload_body):
+        """Surrounding whitespace from the form is not kept"""
+        response = client.post(
+            ENDPOINT,
+            json=upload_body(entrypointScript="  /bin/bash /run.sh \n", workdir=" /workspace "),
+            headers=auth(world.owner),
+        )
+        image = _row(db, response.json()["data"]["imageId"])
+        assert image.entrypoint_script == "/bin/bash /run.sh"
+        assert image.workdir == "/workspace"
+
+    def test_list_returns_null_entrypoint(self, client, world, auth, upload_body):
+        """The list response carries entrypointScript = null instead of failing on a NULL column"""
+        client.post(ENDPOINT, json=upload_body(entrypointScript=None), headers=auth(world.owner))
+        response = client.get(ENDPOINT, params={"courseId": str(world.course.id)}, headers=auth(world.owner))
+        assert response.status_code == 200, response.text
+        assert response.json()["data"][0]["entrypointScript"] is None
 
     def test_server_owned_fields_are_ignored(self, client, db, world, auth, upload_body):
         """Client cannot choose archive key, status, digest or uploader"""
@@ -263,6 +293,10 @@ class TestPresignValidation:
             {"diskSize": 0},
             {"lifespanMinutes": -1},
             {"envVars": {"A": 1}},
+            # docker run -w / K8s workingDir ต้องเป็น path เต็ม
+            {"workdir": "workspace"},
+            {"workdir": "./app"},
+            {"entrypointScript": "x" * 256},
         ],
         ids=lambda o: next(iter(o)) + "=" + str(next(iter(o.values())))[:12],
     )

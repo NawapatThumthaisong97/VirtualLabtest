@@ -3,6 +3,7 @@ import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import router from './routes';
 import { AuthProvider } from './contexts/AuthContext';
 import ToastContainer from './components/ToastContainer';
+import UploadTray from './components/UploadTray';
 import { useToastStore } from './hooks/useToast';
 
 // Create a client for React Query
@@ -26,6 +27,8 @@ function App() {
         <RouterProvider router={router} />
       </AuthProvider>
       <ToastContainer toasts={toasts} onClose={removeToast} />
+      {/* นอก router: เปลี่ยนหน้าแล้วการอัปโหลด lab image ยังเดินต่อ (services/labImageUploads.ts) */}
+      <UploadTray />
     </QueryClientProvider>
   );
 }

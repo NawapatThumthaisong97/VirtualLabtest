@@ -53,10 +53,29 @@ class LabImageUploadRequest(CamelModel):
     memory_requirement: str = Field("4+", min_length=1, max_length=20)
     disk_size: int = Field(50, gt=0)
     lifespan_minutes: int = Field(60, gt=0)
+    # ว่าง = ใช้ค่าของ image เอง (ports จาก EXPOSE เติมหลังสแกนใน Phase 2, entrypoint / workdir ไม่ทับ CMD / WORKDIR)
+    # docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 3
     exposed_ports: list[int] = Field(default_factory=list)
-    entrypoint_script: str = Field("/bin/bash /run.sh", min_length=1, max_length=255)
+    entrypoint_script: str | None = Field(None, max_length=255)
     workdir: str | None = Field(None, max_length=255)
     env_vars: dict[str, str] | None = None
+
+    @field_validator("entrypoint_script", "workdir", mode="before")
+    @classmethod
+    def _blank_to_none(cls, value):
+        """"" หรือช่องว่างล้วน = ไม่ได้กรอก เก็บเป็น NULL ไม่งั้น "" จะไปทับ CMD ของ image ด้วยคำสั่งว่าง"""
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @field_validator("workdir")
+    @classmethod
+    def _check_workdir(cls, workdir: str | None) -> str | None:
+        # docker run -w และ K8s workingDir ต้องเป็น path เต็ม (relative path ทำให้ container ไม่ขึ้น)
+        if workdir is not None and not workdir.startswith("/"):
+            raise PydanticCustomError("workdir_not_absolute", "workdir must be an absolute path (start with /)")
+        return workdir
 
     # ใช้ PydanticCustomError แทน ValueError: validation handler ใน main.py ใส่ exc.errors() ลง response
     # ตรง ๆ และ ValueError จะติดไปใน ctx ซึ่ง serialize เป็น JSON ไม่ได้ (กลายเป็น 500)
@@ -128,7 +147,7 @@ class LabImageResponse(CamelModel):
     disk_size: int
     lifespan_minutes: int
     exposed_ports: list[int]
-    entrypoint_script: str
+    entrypoint_script: str | None  # None = ใช้ ENTRYPOINT / CMD ของ image
     workdir: str | None
     env_vars: dict[str, str] | None
     status: ImageStatus

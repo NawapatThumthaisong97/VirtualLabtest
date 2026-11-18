@@ -177,6 +177,11 @@ class TestAwsTask:
         task = build(service, make_image(entrypoint_script=""), RunTarget.AWS)
         assert docker_run_argv(task)[-1] == f"{ECR_HOST}/skypilot/music-lab:lab-01"
 
+    def test_null_entrypoint_uses_image_entrypoint(self, service, make_image):
+        """entrypoint_script NULL (column is nullable since 20261118_01) behaves like an empty one"""
+        task = build(service, make_image(entrypoint_script=None), RunTarget.AWS)
+        assert docker_run_argv(task)[-1] == f"{ECR_HOST}/skypilot/music-lab:lab-01"
+
     def test_secret_is_accepted_and_not_in_envs(self, service, make_image):
         """ECR token is a hidden secret, not a plain env"""
         task = build(service, make_image(), RunTarget.AWS)

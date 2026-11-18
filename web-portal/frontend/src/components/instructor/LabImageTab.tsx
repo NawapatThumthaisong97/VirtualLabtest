@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, Container, Cpu, HardDrive, MemoryStick, Plus, RefreshCw, Timer, Trash2 } from 'lucide-react'
 import ConfirmModal from '../ConfirmModal'
 import { cn } from '../../lib/utils'
 import Card from './Card'
 import SectionHeader from './SectionHeader'
 import { iconButton, primary } from './styles'
-import LabImageForm, { type UploadPhase } from './LabImageForm'
+import LabImageForm from './LabImageForm'
 import ScanStatusBadge from './ScanStatusBadge'
 import {
   apiErrorMessage,
@@ -13,6 +13,7 @@ import {
   type CreateLabImagePayload,
   type LabImage,
 } from '../../services/labImage'
+import { startUpload, useUploadStore } from '../../services/labImageUploads'
 import { useToast } from '../../hooks/useToast'
 
 interface LabImageTabProps {
@@ -36,12 +37,19 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [showForm, setShowForm] = useState(false)
-  const [phase, setPhase] = useState<UploadPhase>({ kind: 'idle' })
+  const [submitting, setSubmitting] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<LabImage | null>(null)
   const [deleting, setDeleting] = useState(false)
   const toast = useToast()
-  const abort = useRef<AbortController | null>(null)
+  // การอัปโหลดของวิชานี้ที่กำลังเดินอยู่ (อยู่ใน store กลาง ไม่หายเมื่อออกจากหน้านี้)
+  const uploads = useUploadStore((state) => state.uploads)
+  const uploadOf = (imageId: string) => uploads.find((u) => u.id === imageId && u.courseId === courseId)
+  // เปลี่ยนเมื่อการอัปโหลดของวิชานี้จบ (สำเร็จ / ล้ม / ยกเลิก) ใช้สั่งโหลดรายการใหม่
+  const finishedKey = uploads
+    .filter((u) => u.courseId === courseId && u.status !== 'uploading')
+    .map((u) => `${u.id}:${u.status}`)
+    .join(',')
 
   const fetchImages = useCallback(
     async (quiet = false) => {
@@ -68,63 +76,44 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
   }, [fetchImages])
 
   // ถามสถานะสแกนซ้ำเฉพาะตอนที่ยังมี image กำลังสแกน
-  const hasInProgress = images.some(isInProgress)
+  // รวมการอัปโหลดที่เพิ่งจบ: webhook จาก R2 อาจมาช้ากว่า PUT ไม่กี่วินาที ถ้าไม่ถามซ้ำแถวจะค้างที่ "No file received"
+  const hasInProgress =
+    images.some(isInProgress) || uploads.some((u) => u.courseId === courseId && (u.status === 'uploading' || u.status === 'done'))
   useEffect(() => {
     if (!hasInProgress) return
     const timer = window.setInterval(() => fetchImages(true), POLL_MS)
     return () => window.clearInterval(timer)
   }, [hasInProgress, fetchImages])
 
-  // ออกจากแท็บระหว่างอัปโหลด = ยกเลิก PUT
-  useEffect(() => () => abort.current?.abort(), [])
+  // การอัปโหลดจบ (แม้จบตอนอยู่หน้าอื่นแล้วกลับมา) → โหลดสถานะใหม่ แถวจะเปลี่ยนเป็น QUEUED เมื่อ webhook มาถึง
+  useEffect(() => {
+    if (finishedKey) fetchImages(true)
+  }, [finishedKey, fetchImages])
 
+  /**
+   * ขั้นที่ 1 (ขอ presigned URL) รอในฟอร์ม เพราะ error อย่างชื่อซ้ำต้องแก้ในฟอร์ม
+   * ขั้นที่ 2 (PUT ไฟล์) ส่งให้ startUpload ทำเบื้องหลัง แล้วปิดฟอร์มทันที ความคืบหน้าอยู่ที่ UploadTray
+   */
   const handleUpload = async (payload: CreateLabImagePayload, file: File) => {
-    setPhase({ kind: 'requesting' })
+    setSubmitting(true)
     let upload
     try {
       upload = await labImageService.createUpload(payload)
     } catch (error: any) {
-      setPhase({ kind: 'idle' })
       const status = error?.response?.status
       toast.error(
         status === 409 ? 'Name already taken' : status === 403 ? 'Not allowed' : 'Could not start upload',
         apiErrorMessage(error),
       )
       return
-    }
-
-    abort.current = new AbortController()
-    setPhase({ kind: 'uploading', percent: 0 })
-    try {
-      await labImageService.uploadArchive(
-        upload,
-        file,
-        (percent) => setPhase({ kind: 'uploading', percent }),
-        abort.current.signal,
-      )
-    } catch (error: any) {
-      setPhase({ kind: 'idle' })
-      fetchImages(true)
-      if (error?.name === 'CanceledError') return
-      const status = error?.response?.status
-      toast.error(
-        'Upload failed',
-        status === 412
-          ? 'A file was already uploaded for this image. Use a new tag to upload again.'
-          : status === 403
-            ? 'The upload link expired. Submit the form again to get a new one.'
-            : 'Check your connection and submit again with the same name and tag.',
-      )
-      return
     } finally {
-      abort.current = null
+      setSubmitting(false)
     }
 
-    setPhase({ kind: 'idle' })
+    void startUpload(upload, file, payload)
     setShowForm(false)
     setExpanded(upload.imageId)
-    toast.success('Upload complete', `${upload.repository}:${upload.tag} is queued for a security scan.`)
-    fetchImages(true)
+    fetchImages(true) // ให้แถว draft โผล่ในรายการพร้อมแถบความคืบหน้า
   }
 
   const handleDelete = async () => {
@@ -201,6 +190,8 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
           <ul className="mt-5 overflow-hidden rounded-xl border border-slate-200">
             {images.map((image) => {
               const open = expanded === image.id
+              const upload = uploadOf(image.id)
+              const uploading = upload?.status === 'uploading'
               const summary = image.scanSummary
               const reasons = summary?.reasons ?? []
               const warnings = summary?.warnings ?? []
@@ -217,6 +208,9 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
                         {image.repository}:{image.tag}
                       </p>
                       <p className="truncate text-[11px] text-slate-400">
+                        {uploading ? (
+                          <span className="font-semibold text-blue-600">Uploading {upload.percent}% · </span>
+                        ) : null}
                         {image.description || 'No description'} · {image.sizeMb} MB · added {formatDateTime(image.createdAt)}
                       </p>
                     </div>
@@ -238,9 +232,9 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
                           <dt className="text-slate-400">Ports</dt>
                           <dd className="font-mono">{image.exposedPorts.length ? image.exposedPorts.join(', ') : '—'}</dd>
                           <dt className="text-slate-400">Entrypoint</dt>
-                          <dd className="break-all font-mono">{image.entrypointScript}</dd>
+                          <dd className="break-all font-mono">{image.entrypointScript || <FromImage />}</dd>
                           <dt className="text-slate-400">Workdir</dt>
-                          <dd className="font-mono">{image.workdir || '—'}</dd>
+                          <dd className="font-mono">{image.workdir || <FromImage />}</dd>
                           <dt className="text-slate-400">Env vars</dt>
                           <dd className="font-mono">
                             {image.envVars && Object.keys(image.envVars).length ? Object.keys(image.envVars).join(', ') : '—'}
@@ -274,7 +268,7 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
                           )}
                         </dl>
 
-                        {!image.archiveUploadedAt && image.status === 'pending' && (
+                        {!image.archiveUploadedAt && image.status === 'pending' && !uploading && upload?.status !== 'done' && (
                           <p className="rounded-lg bg-slate-100 px-3 py-2 text-slate-600">
                             No file received yet. If the upload was interrupted, upload again with the same name and tag.
                           </p>
@@ -335,11 +329,16 @@ export default function LabImageTab({ courseId }: LabImageTabProps) {
       {showForm && (
         <LabImageForm
           courseId={courseId}
-          phase={phase}
+          submitting={submitting}
           onSubmit={handleUpload}
           onCancel={() => setShowForm(false)}
         />
       )}
     </>
   )
+}
+
+/** ช่องที่อาจารย์เว้นว่าง: ตอนรันใช้ค่าของ image เอง (ENTRYPOINT / CMD / WORKDIR) */
+function FromImage() {
+  return <span className="font-sans italic text-slate-400">from image</span>
 }

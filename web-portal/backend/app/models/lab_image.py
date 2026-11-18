@@ -58,7 +58,8 @@ class LabImage(Base):
     exposed_ports = Column(JSONB, nullable=False, default=lambda: [])           # [8080, 5173, 8443]
 
     # Container Runtime
-    entrypoint_script = Column(String(255), nullable=False, default="/bin/bash /run.sh")  # path to startup script
+    # NULL = ใช้ ENTRYPOINT / CMD ของ image เอง มีค่า = รันผ่าน /bin/sh -c ทับคำสั่งของ image
+    entrypoint_script = Column(String(255), nullable=True)
     workdir = Column(String(255), nullable=True)                                # working directory (optional, defaults to image WORKDIR)
     
     # Environment Variables (optional)

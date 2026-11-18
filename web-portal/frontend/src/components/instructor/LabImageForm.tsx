@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
-import { FileArchive, Loader2, Plus, UploadCloud, X } from 'lucide-react'
+import { useFieldArray, useForm, type FieldErrors } from 'react-hook-form'
+import { ChevronDown, FileArchive, Loader2, Plus, UploadCloud, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { iconButton, primary, secondary } from './styles'
 import { errorText, hintText, inputClass, labelClass } from './formStyles'
@@ -25,18 +25,25 @@ export interface LabImageFormValues {
   envVars: { key: string; value: string }[]
 }
 
-/** ความคืบหน้าที่ LabImageTab ส่งกลับมาแสดง */
-export type UploadPhase =
-  | { kind: 'idle' }
-  | { kind: 'requesting' }
-  | { kind: 'uploading'; percent: number }
-
 interface LabImageFormProps {
   courseId: string
-  phase: UploadPhase
+  /** กำลังขอ presigned URL (ตัวไฟล์อัปเบื้องหลังผ่าน services/labImageUploads.ts ฟอร์มปิดได้ทันที) */
+  submitting: boolean
   onSubmit: (payload: CreateLabImagePayload, file: File) => void
   onCancel: () => void
 }
+
+/** ช่องในส่วน Advanced: ว่างทั้งหมดได้ = ใช้ค่าจาก image (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 3.2) */
+const ADVANCED_FIELDS = ['entrypointScript', 'exposedPorts', 'workdir', 'envVars'] as const
+
+/** มีช่องไหนใน Advanced ที่กรอกไว้บ้าง (แสดงบนหัวข้อที่พับอยู่ จะได้ไม่ลืมว่ากรอกอะไรไว้) */
+export const countAdvancedFilled = (values: Pick<LabImageFormValues, (typeof ADVANCED_FIELDS)[number]>): number =>
+  [
+    values.entrypointScript.trim(),
+    values.exposedPorts.trim(),
+    values.workdir.trim(),
+    values.envVars.some((row) => row.key.trim()) ? 'x' : '',
+  ].filter(Boolean).length
 
 // กติกาเดียวกับ backend (lab_image_schema.RepositoryName / ImageTag)
 const NAME_PATTERN = /^[a-z0-9]+(?:(?:\.|_|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:\.|_|__|-+)[a-z0-9]+)*)*$/
@@ -70,12 +77,13 @@ const parsePorts = (raw: string): number[] | string => {
   return ports
 }
 
-export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: LabImageFormProps) {
+export default function LabImageForm({ courseId, submitting, onSubmit, onCancel }: LabImageFormProps) {
   const [file, setFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
-  const busy = phase.kind !== 'idle'
+  const busy = submitting
 
   const {
     register,
@@ -92,15 +100,22 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
       memoryRequirement: '4+',
       diskSize: '50',
       lifespanMinutes: '60',
-      exposedPorts: '8080, 5173, 8443',
-      entrypointScript: '/bin/bash /run.sh',
-      workdir: '/workspace',
-      envVars: [{ key: 'IDE_PASSWORD', value: '' }],
+      // ว่าง = ใช้ค่าจาก image ไม่เดาค่าแทนอาจารย์ (เดิมใส่ 8080/5173/8443 และ /bin/bash /run.sh ซึ่งผิดกับ image ส่วนใหญ่)
+      exposedPorts: '',
+      entrypointScript: '',
+      workdir: '',
+      envVars: [],
     },
   })
   const env = useFieldArray({ control, name: 'envVars' })
   const name = watch('name')
   const tag = watch('tag')
+  const advancedFilled = countAdvancedFilled({
+    entrypointScript: watch('entrypointScript'),
+    exposedPorts: watch('exposedPorts'),
+    workdir: watch('workdir'),
+    envVars: watch('envVars'),
+  })
 
   const pickFile = (picked: File | undefined | null) => {
     if (!picked) return
@@ -149,7 +164,7 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
         diskSize: Number(values.diskSize),
         lifespanMinutes: Number(values.lifespanMinutes),
         exposedPorts: ports,
-        entrypointScript: values.entrypointScript.trim(),
+        entrypointScript: values.entrypointScript.trim() || null,
         workdir: values.workdir.trim() || null,
         envVars: Object.keys(envVars).length ? envVars : null,
       },
@@ -158,8 +173,10 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
   }
 
   // กันไม่ให้ submit ด้วยปุ่มก่อนเช็คไฟล์ (react-hook-form ไม่รู้จัก state ของไฟล์)
-  const onValid = handleSubmit(submit, () => {
+  // error อยู่ในส่วน Advanced ที่พับไว้: เปิดให้เห็น ไม่งั้นกดแล้วเหมือนไม่เกิดอะไรขึ้น
+  const onValid = handleSubmit(submit, (formErrors: FieldErrors<LabImageFormValues>) => {
     if (!file) setFileError('Attach the image .tar file')
+    if (ADVANCED_FIELDS.some((field) => formErrors[field])) setAdvancedOpen(true)
   })
 
   return (
@@ -360,39 +377,68 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
             ))}
           </div>
 
-          {/* ---------- container ---------- */}
+          {/* ---------- advanced: ว่างได้ทั้งหมด = ใช้ค่าจาก image ---------- */}
           <div className="md:col-span-2 mt-2 border-t border-slate-100 pt-4">
-            <p className="text-sm font-bold text-slate-800">Container</p>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((open) => !open)}
+              aria-expanded={advancedOpen}
+              aria-controls="img-advanced"
+              className="flex w-full items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <span className="text-sm font-bold text-slate-800">Advanced settings</span>
+              {advancedFilled > 0 && (
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                  {advancedFilled} set
+                </span>
+              )}
+              <ChevronDown size={16} className={cn('ml-auto text-slate-400 transition', advancedOpen && 'rotate-180')} aria-hidden />
+            </button>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Optional. If your Dockerfile has <code className="font-mono">EXPOSE</code> and <code className="font-mono">CMD</code>, leave
+              these empty and the image's own values are used.
+            </p>
           </div>
 
+          {/* ใช้ class ซ่อนแทนการไม่ render: ช่องยังลงทะเบียนกับฟอร์มอยู่ ค่าที่กรอกไว้ไม่หายตอนพับ */}
+          <div id="img-advanced" className={cn('gap-4 md:col-span-2 md:grid-cols-2', advancedOpen ? 'grid' : 'hidden')}>
           <div>
-            <label htmlFor="img-entrypoint" className={labelClass}>
-              Entrypoint script <span className="text-red-500">*</span>
-            </label>
+            <label htmlFor="img-entrypoint" className={labelClass}>Entrypoint</label>
             <input
               id="img-entrypoint"
               {...register('entrypointScript', {
-                required: 'Entrypoint is required',
                 maxLength: { value: 255, message: 'At most 255 characters' },
               })}
               aria-invalid={!!errors.entrypointScript}
               className={cn(inputClass(!!errors.entrypointScript), 'font-mono')}
-              placeholder="/bin/bash /run.sh"
+              placeholder="Empty = use the image's ENTRYPOINT / CMD"
               disabled={busy}
             />
-            {errors.entrypointScript && <p className={errorText}>{errors.entrypointScript.message}</p>}
+            {errors.entrypointScript ? (
+              <p className={errorText}>{errors.entrypointScript.message}</p>
+            ) : (
+              <p className={hintText}>Runs with /bin/sh -c. It must keep running in the foreground; if it exits, the lab stops.</p>
+            )}
           </div>
 
           <div>
             <label htmlFor="img-workdir" className={labelClass}>Working directory</label>
             <input
               id="img-workdir"
-              {...register('workdir', { maxLength: { value: 255, message: 'At most 255 characters' } })}
+              {...register('workdir', {
+                maxLength: { value: 255, message: 'At most 255 characters' },
+                validate: (v) => !v.trim() || v.trim().startsWith('/') || 'Use a full path that starts with /',
+              })}
+              aria-invalid={!!errors.workdir}
               className={cn(inputClass(!!errors.workdir), 'font-mono')}
-              placeholder="/workspace"
+              placeholder="Empty = use the image's WORKDIR"
               disabled={busy}
             />
-            <p className={hintText}>Empty = use the image's WORKDIR</p>
+            {errors.workdir ? (
+              <p className={errorText}>{errors.workdir.message}</p>
+            ) : (
+              <p className={hintText}>Full path, e.g. /workspace</p>
+            )}
           </div>
 
           <div className="md:col-span-2">
@@ -407,13 +453,15 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
               })}
               aria-invalid={!!errors.exposedPorts}
               className={cn(inputClass(!!errors.exposedPorts), 'font-mono')}
-              placeholder="8080, 5173, 8443"
+              placeholder="Empty = use the image's EXPOSE"
               disabled={busy}
             />
             {errors.exposedPorts ? (
               <p className={errorText}>{errors.exposedPorts.message}</p>
             ) : (
-              <p className={hintText}>Separate with commas. Students reach the lab through these ports.</p>
+              <p className={hintText}>
+                Separate with commas, e.g. 8080, 5173. The app must listen on 0.0.0.0, not 127.0.0.1, or students can't reach it.
+              </p>
             )}
           </div>
 
@@ -471,31 +519,17 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
                 })}
               </div>
             )}
-            <p className={hintText}>Stored as plain text in the lab config. Don't put real credentials here.</p>
+            <p className={hintText}>
+              Config values the app needs. Stored as plain text and visible to students; never put real passwords here.
+            </p>
+          </div>
           </div>
         </form>
 
-        {phase.kind === 'uploading' && (
-          <div className="mt-6" aria-live="polite">
-            <div className="mb-1.5 flex justify-between text-xs font-semibold text-slate-600">
-              <span>Uploading {file?.name}</span>
-              <span>{phase.percent}%</span>
-            </div>
-            <div
-              className="h-2 overflow-hidden rounded-full bg-slate-100"
-              role="progressbar"
-              aria-valuenow={phase.percent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Upload progress"
-            >
-              <div className="h-full rounded-full bg-blue-600 transition-[width]" style={{ width: `${phase.percent}%` }} />
-            </div>
-            <p className={hintText}>Keep this page open until the upload finishes.</p>
-          </div>
-        )}
-
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <p className="mr-auto self-center text-[11px] text-slate-400">
+            The file uploads in the background. You can keep using the site; just don't close this tab.
+          </p>
           <button className={secondary} onClick={onCancel} type="button" disabled={busy}>
             Cancel
           </button>
@@ -506,7 +540,7 @@ export default function LabImageForm({ courseId, phase, onSubmit, onCancel }: La
             disabled={busy}
           >
             {busy ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <UploadCloud size={15} aria-hidden />}
-            {phase.kind === 'requesting' ? 'Preparing upload…' : phase.kind === 'uploading' ? 'Uploading…' : 'Upload image'}
+            {busy ? 'Preparing upload…' : 'Upload image'}
           </button>
         </div>
       </div>

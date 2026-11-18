@@ -4,7 +4,8 @@ import PrimaryButton from './PrimaryButton';
 import { FileDrop, FormNote, IconInput, IllustratedTextarea, inputBox, label } from './fields';
 import { BookIcon } from './icons';
 import { labService } from '../../services/lab';
-import { MAX_ARCHIVE_BYTES, apiErrorMessage, labImageService } from '../../services/labImage';
+import { MAX_ARCHIVE_BYTES, apiErrorMessage, labImageService, type CreateLabImagePayload } from '../../services/labImage';
+import { startUpload } from '../../services/labImageUploads';
 
 export interface LabForm {
   name: string;
@@ -16,15 +17,13 @@ export interface LabForm {
 
 const initial: LabForm = { name: '', description: '', expired: '', document: null, image: null };
 
-// ค่าเริ่มต้นเดียวกับฟอร์ม Lab images ของเพื่อน (LabImageForm) — อาจารย์ไม่ต้องกรอกเอง
+// ค่าเริ่มต้นเดียวกับฟอร์ม Lab images (LabImageForm) — อาจารย์ไม่ต้องกรอกเอง
+// ports / entrypoint / workdir ไม่ส่ง = ใช้ EXPOSE / CMD / WORKDIR ของ image (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 3)
 const IMAGE_DEFAULTS = {
   cpuRequirement: '2+',
   memoryRequirement: '4+',
   diskSize: 50,
   lifespanMinutes: 60,
-  exposedPorts: [8080, 5173, 8443],
-  entrypointScript: '/bin/bash /run.sh',
-  workdir: '/workspace',
 };
 
 /** ชื่อ image ที่ registry ยอมรับ: vlab/<รหัสวิชา>-lab<ลำดับ> ตัวพิมพ์เล็ก a-z0-9 กับ - */
@@ -87,17 +86,20 @@ export default function CreateLabModal({ open, onClose, onCreated, courseId, cou
       if (form.image) {
         setBusy('กำลังเตรียมอัปโหลด image...');
         try {
-          const upload = await labImageService.createUpload({
+          const payload: CreateLabImagePayload = {
             courseId,
             repository: repositoryFor(courseCode, lab.orderNo),
             tag: tagNow(),
             fileSizeBytes: form.image.size,
             description: form.name.trim(),
             ...IMAGE_DEFAULTS,
-          });
-          await labImageService.uploadArchive(upload, form.image, (p) => setBusy(`กำลังอัปโหลด image ${p}%`));
-          // ผูกทันทีทั้งที่ยังสแกนไม่จบ — backend ไม่ให้ publish จนกว่า image จะผ่าน
+          };
+          const upload = await labImageService.createUpload(payload);
+          // ผูกก่อนอัปไฟล์ — backend ไม่ให้ publish จนกว่า image จะสแกนผ่าน จึงผูก draft ไว้ได้เลย
+          // (ผูกก่อนเพราะตัวไฟล์อัปเบื้องหลัง modal ปิดไปแล้วจะไม่มีใครผูกให้)
           await labService.update(lab.id, { imageId: upload.imageId });
+          // ไฟล์อัปเบื้องหลัง ความคืบหน้าอยู่ที่ UploadTray มุมซ้ายล่าง ปิด modal / เปลี่ยนหน้าได้
+          void startUpload(upload, form.image, payload);
         } catch (e) {
           failed.push(`image: ${apiErrorMessage(e)}`);
         }

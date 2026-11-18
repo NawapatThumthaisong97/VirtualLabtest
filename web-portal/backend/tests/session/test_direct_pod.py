@@ -41,6 +41,13 @@ class TestPodSpec:
         assert c["command"] == ["/bin/sh", "-c", "/bin/bash /run.sh"]
         assert {"name": "IDE_PASSWORD", "value": "x"} in c["env"]
 
+    def test_null_entrypoint_keeps_image_command(self, world, db):
+        """entrypoint_script NULL (Advanced left empty): no command, so K8s runs the image's ENTRYPOINT / CMD"""
+        world.k8s_image.entrypoint_script = None
+        db.flush()
+        [c] = build_lab_pod(world.k8s_image, "worker-pete", "0123456789abcdef")["spec"]["containers"]
+        assert "command" not in c
+
 
 class TestLaunch:
     """Start from a lab machine without a warm pod"""

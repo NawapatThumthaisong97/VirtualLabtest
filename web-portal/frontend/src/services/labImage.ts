@@ -37,7 +37,8 @@ export interface LabImage {
   diskSize: number;
   lifespanMinutes: number;
   exposedPorts: number[];
-  entrypointScript: string;
+  /** null = ใช้ ENTRYPOINT / CMD ของ image */
+  entrypointScript: string | null;
   workdir: string | null;
   envVars: Record<string, string> | null;
   status: ImageStatus;
@@ -61,8 +62,9 @@ export interface CreateLabImagePayload {
   memoryRequirement: string;
   diskSize: number;
   lifespanMinutes: number;
-  exposedPorts: number[];
-  entrypointScript: string;
+  /** ว่าง = ใช้ EXPOSE / ENTRYPOINT / CMD / WORKDIR ของ image (docs/LAB_IMAGE_UPLOAD_PLAN.md ข้อ 3) */
+  exposedPorts?: number[];
+  entrypointScript?: string | null;
   workdir?: string | null;
   envVars?: Record<string, string> | null;
 }
