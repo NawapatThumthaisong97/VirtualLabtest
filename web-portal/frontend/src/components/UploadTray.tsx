@@ -1,5 +1,5 @@
 /**
- * ถาดแสดงการอัปโหลด lab image ที่ยังไม่จบ มุมซ้ายล่างของทุกหน้า (toast อยู่มุมขวาล่าง)
+ * ถาดแสดงการอัปโหลด lab image ที่ยังไม่จบ มุมขวาล่างของทุกหน้า ใต้ toast (อยู่ใน ToastContainer)
  * mount ครั้งเดียวใน App.tsx ข้างนอก router จึงอยู่ตลอดไม่ว่าจะเปลี่ยนหน้าไปไหน
  * สถานะจริงอยู่ใน services/labImageUploads.ts
  */
@@ -39,7 +39,7 @@ export default function UploadTray() {
   return (
     <section
       aria-label="Image uploads"
-      className="fixed bottom-4 left-4 z-50 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+      className="pointer-events-auto w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
     >
       <header className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
         <UploadCloud size={14} aria-hidden />

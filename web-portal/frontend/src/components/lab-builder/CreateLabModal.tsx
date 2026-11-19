@@ -98,7 +98,7 @@ export default function CreateLabModal({ open, onClose, onCreated, courseId, cou
           // ผูกก่อนอัปไฟล์ — backend ไม่ให้ publish จนกว่า image จะสแกนผ่าน จึงผูก draft ไว้ได้เลย
           // (ผูกก่อนเพราะตัวไฟล์อัปเบื้องหลัง modal ปิดไปแล้วจะไม่มีใครผูกให้)
           await labService.update(lab.id, { imageId: upload.imageId });
-          // ไฟล์อัปเบื้องหลัง ความคืบหน้าอยู่ที่ UploadTray มุมซ้ายล่าง ปิด modal / เปลี่ยนหน้าได้
+          // ไฟล์อัปเบื้องหลัง ความคืบหน้าอยู่ที่ UploadTray มุมขวาล่าง ปิด modal / เปลี่ยนหน้าได้
           void startUpload(upload, form.image, payload);
         } catch (e) {
           failed.push(`image: ${apiErrorMessage(e)}`);

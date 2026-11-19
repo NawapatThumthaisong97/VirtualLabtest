@@ -26,9 +26,10 @@ function App() {
       <AuthProvider>
         <RouterProvider router={router} />
       </AuthProvider>
-      <ToastContainer toasts={toasts} onClose={removeToast} />
       {/* นอก router: เปลี่ยนหน้าแล้วการอัปโหลด lab image ยังเดินต่อ (services/labImageUploads.ts) */}
-      <UploadTray />
+      <ToastContainer toasts={toasts} onClose={removeToast}>
+        <UploadTray />
+      </ToastContainer>
     </QueryClientProvider>
   );
 }
