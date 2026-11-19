@@ -1,0 +1,3 @@
+dist/
+# the exercise notebooks are part of the lab image (the root .gitignore drops *.ipynb)
+!*.ipynb
