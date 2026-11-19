@@ -30,7 +30,7 @@
 | 1 | ฟอร์มอัปโหลด + อัปโหลดไม่หลุดเมื่อเปลี่ยนหน้า | ส่วนที่ 1, คอมเมนต์ Redis | frontend, schema, migration | – | – | – | เล็ก-กลาง |
 | 2 | ห้องแลปกับ AWS รันเหมือนกัน, port จาก EXPOSE, readiness | 2.2, 2.5, ครึ่งแรกของ 2.1 | backend | – | – | – | เล็ก-กลาง |
 | 3 | scanner อ่าน Cmd / Entrypoint / WorkingDir | ครึ่งหลังของ 2.1 | runner, backend, frontend | รัน role เดิมซ้ำ | – | – | เล็ก |
-| 4 | port บนเครื่องแลปไม่ชนกัน | 2.4 | backend, migration | – | – | – | กลาง |
+| 4 | port บนเครื่องแลปไม่ชนกัน (**ข้าม** ดูข้อ 6) | 2.4 | backend, migration | – | – | – | กลาง |
 | 5 | smoke test ก่อน approve | 2.3 | backend, runner | **แก้ 2 role** | **ไฟล์ใหม่** | – | ใหญ่ |
 
 - **ไม่มี Phase ไหนต้องแก้ Terraform** (มีเงื่อนไข ดูข้อ 6.6 และ 4.4)
@@ -245,6 +245,13 @@ restart backend อย่างเดียว
 ---
 
 ## 6. Phase 4: แยก port บนเครื่องออกจาก port ของ app
+
+> **ตัดสินใจข้าม (2026-11-19)** การใช้งานจริงคือ ห้องแลป: 1 เครื่อง = 1 นักศึกษา = 1 lab และ AWS: 1 EC2 = 1 lab
+> port จึงไม่ชนกันในการใช้งานปกติ กรณีขอบที่ยังชนได้มีแค่ในห้องแลป:
+> - นักศึกษาวิชาอื่นนั่งเครื่องที่ warm pod ของวิชาที่มีคาบจองไว้ แล้วเปิด lab ที่ใช้ port เดียวกัน → ได้ error "เครื่องเต็ม" ทันที (`pod_problem` จับ Unschedulable)
+> - คาบติดกัน: warm pod ของคาบถัดไปรอ (Pending) จน lab ของคาบก่อนปิด แล้วขึ้นเอง
+>
+> ทั้งสองกรณีไม่พังเงียบ ถ้าเจอบ่อยจริงค่อยกลับมาทำตามแผนข้างล่าง
 
 ### 6.1 ปัญหา
 pod ของ lab ใช้ `hostPort` เท่ากับ port ของ app ([warm_pod_service.py:94](../web-portal/backend/app/services/warm_pod_service.py#L94)) เครื่องหนึ่งจึงเปิด lab ที่ใช้ 8080 ได้ทีละตัวเท่านั้น lab ตัวที่สองจะ Pending (`pod_problem` จับได้ว่า Unschedulable)
